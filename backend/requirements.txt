@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+gunicorn
+sqlalchemy
+python-dotenv
+authlib
+httpx
+itsdangerous
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+sqladmin
+aiofiles
+python-multipart

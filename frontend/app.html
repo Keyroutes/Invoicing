@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All in One Invoicing Solutions - Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="toast-container"></div>
+
+    <!-- Mobile Overlay -->
+    <div class="mobile-overlay" id="mobile-overlay" onclick="toggleMobileMenu()"></div>
+
+    <div class="layout">
+        <!-- Top Navigation -->
+        <header class="enterprise-topbar">
+            <div class="topbar-left">
+                <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <div class="logo">
+                    <h2><span class="text-primary">All in One Invoicing Solutions</span></h2>
+                </div>
+                <nav class="top-nav-menu" id="main-nav">
+                    <a href="#" class="nav-item active" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')">Dashboard</a>
+                    <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')">Invoices</a>
+                    <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')">Bills</a>
+                    <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')">Reports</a>
+                    <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')">Contacts</a>
+                    <a href="#" class="nav-item" id="nav-settings" onclick="event.preventDefault();showView('settings-view')">Settings</a>
+                </nav>
+            </div>
+            <div class="topbar-right">
+                <div class="search-bar">
+                    <span class="search-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    </span>
+                    <input type="text" id="global-search" placeholder="Search..." onkeyup="handleGlobalSearch(event)">
+                </div>
+                <div class="user-profile" id="user-info" style="display:none;">
+                    <div class="avatar" id="user-avatar">?</div>
+                    <span class="user-name" id="user-name-display">User</span>
+                    <button class="btn btn-outline btn-sm" onclick="handleLogout()" style="margin-left:4px;padding:4px 10px;font-size:0.8rem;">Logout</button>
+                </div>
+                <a href="/api/auth/login" class="btn btn-primary btn-sm" id="login-btn">Sign In</a>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="views-container">
+
+                <!-- ========== DASHBOARD ========== -->
+                <div id="dashboard-view" class="view-section active dashboard">
+                    <header class="dashboard-header">
+                        <h1>Welcome back!</h1>
+                        <p class="subtitle">Here's what's happening with your invoicing today.</p>
+                    </header>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
+                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-invoiced">$0.00</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Revenue Collected</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="dash-total-revenue">$0.00</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Outstanding</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="dash-invoices-owed">$0.00</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoices</div>
+                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-count">0</div>
+                        </section>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+                        <section class="widget" style="padding:20px;text-align:center;">
+                            <div style="font-size:2rem;font-weight:700;color:var(--success-color);" id="dash-paid-count">0</div>
+                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Paid</div>
+                        </section>
+                        <section class="widget" style="padding:20px;text-align:center;">
+                            <div style="font-size:2rem;font-weight:700;color:var(--warning-color);" id="dash-pending-count">0</div>
+                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Awaiting Payment</div>
+                        </section>
+                        <section class="widget" style="padding:20px;text-align:center;">
+                            <div style="font-size:2rem;font-weight:700;color:var(--text-secondary);" id="dash-draft-count">0</div>
+                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Drafts</div>
+                        </section>
+                    </div>
+                    <div class="grid-layout">
+                        <section class="widget span-2" id="cash-flow-widget">
+                            <div class="widget-header">
+                                <h3>Cash flow (last 6 months)</h3>
+                            </div>
+                            <div class="widget-content">
+                                <div class="chart-container" id="cash-flow-container">
+                                    <div class="loading">Loading cash flow...</div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- ========== INVOICES LIST ========== -->
+                <div id="invoices-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div>
+                            <h1>Invoices</h1>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-primary" onclick="showView('create-invoice-view')">New Invoice</button>
+                        </div>
+                    </div>
+                    <div class="invoices-tabs">
+                        <button class="tab active" onclick="filterInvoices('all', this)">All</button>
+                        <button class="tab" onclick="filterInvoices('draft', this)">Draft</button>
+                        <button class="tab" onclick="filterInvoices('awaiting payment', this)">Awaiting Payment</button>
+                        <button class="tab" onclick="filterInvoices('sent', this)">Sent</button>
+                        <button class="tab" onclick="filterInvoices('paid', this)">Paid</button>
+                    </div>
+                    <div class="widget">
+                        <div class="table-actions">
+                            <span id="invoice-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
+                            <div style="display:flex;gap:8px;">
+                                <input type="text" id="invoice-search" placeholder="Search invoices..." class="search-input" onkeyup="searchInvoices()">
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Number</th>
+                                        <th>Ref</th>
+                                        <th>To</th>
+                                        <th>Date</th>
+                                        <th>Due Date</th>
+                                        <th class="text-right">Paid</th>
+                                        <th class="text-right">Due</th>
+                                        <th>Status</th>
+                                        <th class="text-right">Opens</th>
+                                        <th>Sent</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoices-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== CREATE INVOICE ========== -->
+                <div id="create-invoice-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('invoices-view')">Invoices</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
+                            <h1>New invoice</h1>
+                            <span class="status-pill status-draft">Draft</span>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="previewInvoice()">Preview</button>
+                            <button class="btn btn-outline" onclick="submitComplexInvoice('Draft')">Save as draft</button>
+                            <button class="btn btn-primary" onclick="submitComplexInvoice('Awaiting Payment')">Approve & Send</button>
+                        </div>
+                    </div>
+                    <div class="glass-widget">
+                        <div class="widget-content" style="padding:32px;">
+                            <div style="margin-bottom:24px;">
+                                <div id="logo-preview-create" onclick="document.getElementById('logo-upload').click()" style="width:150px;height:80px;border:1px dashed var(--border-color);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--primary-color);font-weight:500;font-size:0.9rem;background-color:rgba(255,255,255,0.02);overflow:hidden;">
+                                    <img id="logo-img-create" src="" style="display:none;max-width:100%;max-height:100%;">
+                                    <span id="logo-upload-text">+ Add Logo</span>
+                                </div>
+                                <input type="file" id="logo-upload" accept="image/*" style="display:none;">
+                            </div>
+                            <form id="complex-invoice-form" onsubmit="return false;">
+                                <div class="invoice-top-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:32px;">
+                                    <div class="form-group">
+                                        <label>Customer Name *</label>
+                                        <div id="contact-autocomplete-wrap" class="contact-autocomplete-wrap">
+                                            <input type="text" id="inv-contact" class="form-control" required placeholder="Start typing a name..." autocomplete="off">
+                                            <div id="contact-autocomplete-dropdown" class="contact-autocomplete-dropdown"></div>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Email</label>
+                                        <input type="email" id="inv-email" class="form-control" placeholder="client@example.com">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Phone</label>
+                                        <input type="tel" id="inv-phone" class="form-control" placeholder="+15551234567">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Issue Date</label>
+                                        <input type="date" id="inv-issue-date" class="form-control" value="">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Due Date</label>
+                                        <input type="date" id="inv-due-date" class="form-control" value="">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Invoice Number</label>
+                                        <input type="text" id="inv-number" class="form-control" placeholder="INV-0001">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Reference</label>
+                                        <input type="text" id="inv-ref" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Amounts are</label>
+                                        <select class="form-control" id="tax-type" onchange="calculateTotals()">
+                                            <option value="exclusive">Tax exclusive</option>
+                                            <option value="inclusive">Tax inclusive</option>
+                                            <option value="none">No tax</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
+                                    <table class="line-items-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:900px;">
+                                        <thead style="background-color:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-color);">
+                                            <tr>
+                                                <th style="padding:12px 8px;min-width:40px;"></th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:150px;">Name</th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:200px;">Description</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:80px;">Qty</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:100px;">Price</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:80px;">Disc %</th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:140px;">Account</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:100px;">Tax</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:120px;">Amount</th>
+                                                <th style="padding:12px 8px;min-width:40px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="line-items-body"></tbody>
+                                    </table>
+                                    <div style="padding:12px 16px;background-color:rgba(255,255,255,0.02);border-top:1px solid var(--border-color);">
+                                        <button type="button" class="btn btn-outline" style="font-size:0.85rem;" onclick="addLineItemRow()">+ Add row</button>
+                                    </div>
+                                </div>
+                                <div style="display:flex;justify-content:flex-end;">
+                                    <div style="width:350px;font-size:0.95rem;">
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span id="summary-subtotal">0.00</span></div>
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--text-primary);margin-bottom:8px;"><span>Total VAT</span><span id="summary-vat">0.00</span></div>
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;"><span>Total</span><span id="summary-total">0.00</span></div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== VIEW INVOICE ========== -->
+                <div id="view-invoice-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('invoices-view')">Invoices</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
+                            <h1 id="view-inv-title">Invoice</h1>
+                            <span class="status-pill" id="view-inv-status">-</span>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" id="preview-back-btn" style="display:none;" onclick="showView('create-invoice-view')">Back to Edit</button>
+                            <button class="btn btn-outline invoice-action-btn" onclick="downloadPDF()">Print PDF</button>
+                            <button class="btn btn-outline invoice-action-btn" onclick="sendEmail()">Send Email</button>
+                            <button class="btn btn-outline invoice-action-btn" onclick="sendWhatsApp()" style="color:#25d366;border-color:#25d366;">WhatsApp</button>
+                            <button class="btn btn-outline invoice-action-btn" id="view-invoice-paid-btn" onclick="markAsPaid(this.dataset.number)" style="color:var(--success-color);border-color:var(--success-color);">Mark Paid</button>
+                            <button class="btn btn-outline invoice-action-btn" id="view-invoice-delete-btn" onclick="deleteInvoice(this.dataset.number)" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>
+                        </div>
+                    </div>
+                    <div class="glass-widget" id="printable-invoice">
+                        <div class="widget-content" style="padding:32px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;">
+                                <div>
+                                    <div style="margin-bottom:16px;"><img id="logo-preview-view" src="" style="display:none;max-width:200px;max-height:80px;"></div>
+                                    <label style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">Customer</label>
+                                    <div style="margin-top:4px;font-size:1.1rem;font-weight:600;" id="view-inv-contact">-</div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-inv-email-display">-</div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-inv-phone-display">-</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="view-inv-number-val">-</div>
+                                    <div style="margin-top:8px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Issue Date:</span> <span id="view-inv-issue-date">-</span></div>
+                                    <div style="margin-top:4px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Due Date:</span> <span id="view-inv-due-date">-</span></div>
+                                    <div style="margin-top:8px;font-size:1.1rem;font-weight:600;color:var(--warning-color);">Amount Due: $<span id="view-inv-due-val">0.00</span></div>
+                                </div>
+                            </div>
+                            <div id="view-inv-company-details" style="display:none;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-md);margin-bottom:24px;font-size:0.9rem;color:var(--text-secondary);">
+                                <div style="font-weight:600;color:var(--text-primary);" id="view-inv-company-name"></div>
+                                <div id="view-inv-company-address"></div>
+                                <div id="view-inv-company-email"></div>
+                                <div id="view-inv-company-phone"></div>
+                                <div id="view-inv-company-abn"></div>
+                            </div>
+                            <div id="view-inv-open-tracking" style="display:none;padding:12px 16px;background:rgba(0,240,255,0.05);border:1px solid rgba(0,240,255,0.15);border-radius:var(--radius-md);margin-bottom:24px;font-size:0.85rem;display:flex;align-items:center;gap:24px;">
+                                <div>
+                                    <span style="color:var(--text-secondary);">Email Opens:</span>
+                                    <span id="view-inv-open-count" style="font-weight:700;color:var(--primary-color);margin-left:4px;">0</span>
+                                </div>
+                                <div>
+                                    <span style="color:var(--text-secondary);">Last Opened:</span>
+                                    <span id="view-inv-last-opened" style="font-weight:600;color:var(--text-primary);margin-left:4px;">Never</span>
+                                </div>
+                            </div>
+                            <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
+                                <table class="line-items-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:600px;">
+                                    <thead style="background-color:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-color);">
+                                        <tr>
+                                            <th style="padding:12px 16px;text-align:left;">Name</th>
+                                            <th style="padding:12px 16px;text-align:left;">Description</th>
+                                            <th style="padding:12px 16px;text-align:right;">Qty</th>
+                                            <th style="padding:12px 16px;text-align:right;">Price</th>
+                                            <th style="padding:12px 16px;text-align:right;">Disc</th>
+                                            <th style="padding:12px 16px;">Tax</th>
+                                            <th style="padding:12px 16px;text-align:right;">Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="view-line-items-body"></tbody>
+                                </table>
+                            </div>
+                            <div style="display:flex;justify-content:flex-end;">
+                                <div style="width:350px;font-size:0.95rem;">
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span id="view-summary-subtotal">0.00</span></div>
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--text-primary);margin-bottom:8px;"><span>VAT (20%)</span><span id="view-summary-vat">0.00</span></div>
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;"><span>Total</span><span id="view-summary-total">0.00</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== BILLS ========== -->
+                <div id="bills-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Bills to Pay</h1></div>
+                        <div class="invoices-actions"><button class="btn btn-primary">New Bill</button></div>
+                    </div>
+                    <div class="glass-widget">
+                        <div class="widget-content" style="text-align:center;padding:60px;">
+                            <div style="font-size:3rem;margin-bottom:16px;opacity:0.3;">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                            </div>
+                            <h3 style="color:var(--text-secondary);margin-bottom:8px;">Coming Soon</h3>
+                            <p style="color:var(--text-secondary);font-size:0.9rem;">Bill management will be available in the next update.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== REPORTS ========== -->
+                <div id="reports-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Reports</h1></div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline">Profit & Loss</button>
+                            <button class="btn btn-outline">Balance Sheet</button>
+                            <button class="btn btn-outline">Cash Summary</button>
+                        </div>
+                    </div>
+                    <div class="grid-layout">
+                        <section class="widget">
+                            <div class="widget-header"><h3>Revenue by Month</h3></div>
+                            <div class="widget-content" id="reports-revenue-chart">
+                                <div class="chart-container" id="reports-chart-container"></div>
+                            </div>
+                        </section>
+                        <section class="widget">
+                            <div class="widget-header"><h3>Invoice Status</h3></div>
+                            <div class="widget-content" id="reports-status-chart"></div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- ========== CONTACTS ========== -->
+                <div id="contacts-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Contacts</h1></div>
+                        <div class="invoices-actions"><button class="btn btn-primary">New Contact</button></div>
+                    </div>
+                    <div class="glass-widget">
+                        <div class="widget-content" style="text-align:center;padding:60px;">
+                            <div style="font-size:3rem;margin-bottom:16px;opacity:0.3;">
+                                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </div>
+                            <h3 style="color:var(--text-secondary);margin-bottom:8px;">Coming Soon</h3>
+                            <p style="color:var(--text-secondary);font-size:0.9rem;">Contact management will be available in the next update.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== SETTINGS ========== -->
+                <div id="settings-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Settings</h1><p class="subtitle">Manage your account and preferences</p></div>
+                    </div>
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header">
+                            <h3>Gmail API Connection</h3>
+                            <span id="gmail-status" style="font-size:0.85rem;color:var(--text-secondary);">Loading...</span>
+                        </div>
+                        <div class="widget-content">
+                            <div style="display:flex;flex-direction:column;gap:16px;">
+                                <div style="display:flex;align-items:center;gap:16px;">
+                                    <div style="width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;">
+                                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                                    </div>
+                                    <div>
+                                        <p style="font-weight:600;margin-bottom:4px;">Send invoices via Gmail API</p>
+                                        <p style="color:var(--text-secondary);font-size:0.9rem;">Uses your Google account to send emails. No SMTP needed.</p>
+                                        <p id="gmail-email" style="color:var(--primary-color);font-size:0.9rem;margin-top:4px;display:none;"></p>
+                                    </div>
+                                </div>
+                                <div style="display:flex;gap:12px;align-items:center;">
+                                    <a href="/api/auth/login" class="btn btn-primary" id="gmail-login-btn">Login with Google</a>
+                                    <button class="btn btn-outline" onclick="handleLogout()" style="font-size:0.85rem;">Logout</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header"><h3>Company Logo</h3></div>
+                        <div class="widget-content">
+                            <div style="display:flex;align-items:center;gap:24px;">
+                                <div onclick="document.getElementById('settings-logo-upload').click()" style="width:160px;height:90px;border:2px dashed var(--border-color);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex-shrink:0;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='var(--border-color)'">
+                                    <img id="settings-logo-img" src="" style="display:none;max-width:100%;max-height:100%;object-fit:contain;">
+                                    <span id="settings-logo-text" style="color:var(--primary-color);font-weight:500;font-size:0.85rem;text-align:center;">+ Upload Logo</span>
+                                </div>
+                                <input type="file" id="settings-logo-upload" accept="image/*" style="display:none;" onchange="handleSettingsLogoUpload(event)">
+                                <div>
+                                    <p style="font-weight:600;margin-bottom:4px;">Your business logo</p>
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:12px;">Appears on invoices, emails, and PDFs. PNG, JPG or SVG. Max 2MB.</p>
+                                    <button class="btn btn-outline" style="font-size:0.82rem;" onclick="document.getElementById('settings-logo-upload').click()">Change Logo</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header"><h3>Company Details</h3></div>
+                        <div class="widget-content">
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                                <div class="form-group"><label>Company Name</label><input type="text" id="settings-company-name" class="form-control" placeholder="Your Company Ltd"></div>
+                                <div class="form-group"><label>Company Email</label><input type="email" id="settings-company-email" class="form-control" placeholder="hello@company.com"></div>
+                                <div class="form-group"><label>Company Phone</label><input type="tel" id="settings-company-phone" class="form-control" placeholder="+1 555 123 4567"></div>
+                                <div class="form-group"><label>Company Address</label><input type="text" id="settings-company-address" class="form-control" placeholder="123 Business St, City"></div>
+                                <div class="form-group"><label>ABN / Tax ID</label><input type="text" id="settings-company-abn" class="form-control" placeholder="12 345 678 901"></div>
+                                <div class="form-group"><label>Website</label><input type="text" id="settings-company-website" class="form-control" placeholder="www.company.com"></div>
+                            </div>
+                            <button class="btn btn-primary" onclick="saveCompanyDetails()" style="margin-top:16px;">Save Details</button>
+                        </div>
+                    </div>
+                    <div class="glass-widget" id="demo-email-section" style="display:none;">
+                        <div class="widget-header"><h3>Send Demo Emails</h3></div>
+                        <div class="widget-content">
+                            <p style="color:var(--text-secondary);margin-bottom:16px;">Send test invoice emails via Gmail API.</p>
+                            <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1;min-width:250px;">
+                                    <label>Recipient Email</label>
+                                    <input type="email" id="demo-email" class="form-control" value="udayyyv@gmail.com">
+                                </div>
+                                <button class="btn btn-outline" onclick="testGmailSend()">Send 1</button>
+                                <button class="btn btn-outline" onclick="sendDemoEmail(5)">Send 5</button>
+                                <button class="btn btn-primary" id="send-demo-btn" onclick="sendDemoEmail(10)">Send 10</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
