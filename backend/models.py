@@ -35,7 +35,7 @@ class DBInvoice(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
     number = Column(String, index=True)
     ref = Column(String, default="")
     to_contact = Column(String)
@@ -45,7 +45,7 @@ class DBInvoice(Base):
     due_date = Column(String)
     paid = Column(Float, default=0.0)
     due = Column(Float, default=0.0)
-    status = Column(String, default="Draft")
+    status = Column(String, default="Draft", index=True)
     sent = Column(String, default="")
     tax_type = Column(String, default="exclusive")
     tracking_id = Column(String, unique=True, index=True, default=lambda: str(uuid.uuid4()))
@@ -60,7 +60,7 @@ class DBLineItem(Base):
     __tablename__ = "line_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    invoice_id = Column(Integer, ForeignKey("invoices.id"))
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), index=True)
     name = Column(String, default="")
     description = Column(String)
     qty = Column(Float)
@@ -76,7 +76,7 @@ class DBSettings(Base):
     __tablename__ = "settings"
 
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
     key = Column(String, index=True)
     value = Column(String)
     description = Column(String, default="")
@@ -88,7 +88,7 @@ class DBContact(Base):
     __tablename__ = "contacts"
 
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
     name = Column(String, index=True)
     email = Column(String)
     phone_number = Column(String)

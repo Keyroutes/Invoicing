@@ -19,7 +19,14 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:
-    engine = create_engine(DATABASE_URL)
+    engine = create_engine(
+        DATABASE_URL,
+        pool_size=2,
+        max_overflow=3,
+        pool_timeout=10,
+        pool_recycle=1800,
+        pool_pre_ping=True
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -87,14 +94,12 @@ def ensure_columns():
                 conn.commit()
                 print("Added 'last_opened' column to invoices table")
 
-            # Backfill tracking_ids for existing invoices
-            result = conn.execute(text("SELECT id FROM invoices WHERE tracking_id IS NULL OR tracking_id = ''"))
-            rows = result.fetchall()
-            if rows:
-                for row in rows:
-                    conn.execute(text(f"UPDATE invoices SET tracking_id = '{uuid.uuid4()}' WHERE id = {row[0]}"))
+            # Backfill tracking_ids for existing invoices (single query, no SQL injection)
+            try:
+                conn.execute(text("UPDATE invoices SET tracking_id = gen_random_uuid()::text WHERE tracking_id IS NULL OR tracking_id = ''"))
                 conn.commit()
-                print(f"Backfilled tracking_id for {len(rows)} invoices")
+            except Exception:
+                pass
 
             # Make settings.key non-unique (now per-client)
             try:
@@ -131,6 +136,21 @@ def ensure_columns():
                 print("Added composite unique constraint (client_id, number)")
             except Exception:
                 pass
+
+            # Create performance indexes on foreign keys (safe to run multiple times)
+            idx_statements = [
+                "CREATE INDEX IF NOT EXISTS ix_invoices_client_id ON invoices (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_invoices_status ON invoices (status)",
+                "CREATE INDEX IF NOT EXISTS ix_line_items_invoice_id ON line_items (invoice_id)",
+                "CREATE INDEX IF NOT EXISTS ix_contacts_client_id ON contacts (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_settings_client_id ON settings (client_id)",
+            ]
+            for stmt in idx_statements:
+                try:
+                    conn.execute(text(stmt))
+                except Exception:
+                    pass
+            conn.commit()
 
     except Exception as e:
         print(f"Column check skipped: {e}")

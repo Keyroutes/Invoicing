@@ -168,11 +168,12 @@ app.add_middleware(
 
 @app.middleware("http")
 async def no_cache_html(request: Request, call_next):
-    response = await call_next(request)
     path = request.url.path
-    if path.endswith(".html") or path == "/":
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
+    if not (path.endswith(".html") or path == "/"):
+        return await call_next(request)
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return response
 
 # --- Client Registration & Auth ---
@@ -322,31 +323,37 @@ def superadmin_me(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Not found")
     return {"username": admin.username, "email": admin.email}
 
+from sqlalchemy import func
+
 @app.get("/api/superadmin/clients")
 def superadmin_clients(request: Request, db: Session = Depends(get_db)):
     sa_id = request.session.get("superadmin_id")
     if not sa_id:
         raise HTTPException(status_code=401, detail="Not authorized")
-    clients = db.query(models.DBClient).all()
-    result = []
-    for c in clients:
-        invoice_count = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == c.id).count()
-        total_revenue = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == c.id, models.DBInvoice.status == "Paid").count()
-        total_outstanding = sum(inv.due for inv in db.query(models.DBInvoice).filter(models.DBInvoice.client_id == c.id, models.DBInvoice.status != "Paid").all())
-        result.append({
-            "id": c.id,
-            "email": c.email,
-            "company_name": c.company_name,
-            "contact_name": c.contact_name,
-            "phone_number": c.phone_number,
-            "is_active": c.is_active,
-            "is_onboarded": c.is_onboarded,
-            "created_at": c.created_at,
-            "invoice_count": invoice_count,
-            "paid_count": total_revenue,
-            "outstanding": round(total_outstanding, 2),
-        })
-    return result
+    results = (
+        db.query(
+            models.DBClient,
+            func.count(models.DBInvoice.id).label('invoice_count'),
+            func.count(func.nullif(models.DBInvoice.status, 'Paid')).label('unpaid_count'),
+            func.coalesce(func.sum(func.nullif(models.DBInvoice.due, 0)), 0).label('outstanding')
+        )
+        .outerjoin(models.DBInvoice, models.DBInvoice.client_id == models.DBClient.id)
+        .group_by(models.DBClient.id)
+        .all()
+    )
+    return [{
+        "id": c.id,
+        "email": c.email,
+        "company_name": c.company_name,
+        "contact_name": c.contact_name,
+        "phone_number": c.phone_number,
+        "is_active": c.is_active,
+        "is_onboarded": c.is_onboarded,
+        "created_at": c.created_at,
+        "invoice_count": invoice_count,
+        "paid_count": invoice_count - unpaid_count,
+        "outstanding": round(float(outstanding), 2),
+    } for c, invoice_count, unpaid_count, outstanding in results]
 
 @app.get("/api/superadmin/insights")
 def superadmin_insights(request: Request, db: Session = Depends(get_db)):
@@ -357,15 +364,15 @@ def superadmin_insights(request: Request, db: Session = Depends(get_db)):
     active_clients = db.query(models.DBClient).filter(models.DBClient.is_active == True).count()
     onboarded = db.query(models.DBClient).filter(models.DBClient.is_onboarded == True).count()
     total_invoices = db.query(models.DBInvoice).count()
-    total_revenue = sum(inv.due for inv in db.query(models.DBInvoice).filter(models.DBInvoice.status == "Paid").all())
-    total_outstanding = sum(inv.due for inv in db.query(models.DBInvoice).filter(models.DBInvoice.status != "Paid").all())
+    total_revenue = db.query(func.coalesce(func.sum(models.DBInvoice.due), 0)).filter(models.DBInvoice.status == "Paid").scalar()
+    total_outstanding = db.query(func.coalesce(func.sum(models.DBInvoice.due), 0)).filter(models.DBInvoice.status != "Paid").scalar()
     return {
         "total_clients": total_clients,
         "active_clients": active_clients,
         "onboarded_clients": onboarded,
         "total_invoices": total_invoices,
-        "total_revenue": round(total_revenue, 2),
-        "total_outstanding": round(total_outstanding, 2),
+        "total_revenue": round(float(total_revenue), 2),
+        "total_outstanding": round(float(total_outstanding), 2),
     }
 
 @app.put("/api/superadmin/clients/{client_id}/toggle")
@@ -602,7 +609,6 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
     inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number, models.DBInvoice.client_id == client.id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    client = db.query(models.DBClient).filter(models.DBClient.id == inv.client_id).first() if inv.client_id else None
     settings_rows = db.query(models.DBSettings).filter(models.DBSettings.client_id == inv.client_id).all() if inv.client_id else []
     settings_map = {s.key: s.value for s in settings_rows}
     company = {
@@ -995,8 +1001,9 @@ def track_email_open(tracking_id: str, db: Session = Depends(get_db)):
     })
 
 @app.get("/api/invoices/{number}/open-stats")
-def get_open_stats(number: str, db: Session = Depends(get_db)):
-    inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number).first()
+def get_open_stats(number: str, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number, models.DBInvoice.client_id == client.id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {
@@ -1011,11 +1018,15 @@ def get_open_stats(number: str, db: Session = Depends(get_db)):
 @app.get("/api/contacts/search")
 def search_contacts(request: Request, q: str = "", db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    contacts = db.query(models.DBContact).filter(models.DBContact.client_id == client.id).all()
+    query = db.query(models.DBContact).filter(models.DBContact.client_id == client.id)
     if q:
-        q_lower = q.lower()
-        contacts = [c for c in contacts if q_lower in (c.name or "").lower() or q_lower in (c.email or "").lower()]
-    return [{"id": c.id, "name": c.name, "email": c.email or "", "phone_number": c.phone_number or ""} for c in contacts[:10]]
+        from sqlalchemy import or_
+        query = query.filter(or_(
+            models.DBContact.name.ilike(f"%{q}%"),
+            models.DBContact.email.ilike(f"%{q}%")
+        ))
+    contacts = query.limit(10).all()
+    return [{"id": c.id, "name": c.name, "email": c.email or "", "phone_number": c.phone_number or ""} for c in contacts]
 
 @app.post("/api/contacts")
 def create_contact(request: Request, body: dict = None, db: Session = Depends(get_db)):
