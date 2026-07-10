@@ -1,8 +1,5 @@
 [phases.setup]
 nixPkgs = ["python312", "gcc", "libffi"]
 
-[phases.install]
-cmds = ["python3 -m ensurepip", "python3 -m pip install -r backend/requirements.txt"]
-
 [app]
-run = "cd backend && python3 main.py"
+run = "cd backend && python main.py"
