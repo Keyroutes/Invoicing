@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["python312", "gcc", "libffi"]
-
-[phases.install]
-cmds = ["python3 -m venv /app/venv", "/app/venv/bin/pip install -r backend/requirements.txt"]
-
-[app]
-run = "cd backend && /app/venv/bin/python main.py"
