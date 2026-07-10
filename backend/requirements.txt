@@ -12,3 +12,4 @@ google-auth-oauthlib
 sqladmin
 aiofiles
 python-multipart
+psycopg2-binary
