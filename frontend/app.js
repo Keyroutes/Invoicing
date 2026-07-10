@@ -1,5 +1,5 @@
 // ============================================================
-// All in One Invoicing Solutions - app.js (Production)
+// aniprotech - app.js (Production)
 // ============================================================
 
 // --- Toast Notifications ---
@@ -860,7 +860,7 @@ async function testGmailSend() {
     if (!toEmail) { showToast('Enter a recipient email', 'error'); return; }
     if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
     try {
-        var res = await fetch('/api/send-test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to_email: toEmail, subject: 'Test Invoice - All in One Invoicing Solutions', body: 'Test email from All in One Invoicing Solutions via Gmail API.' }) });
+        var res = await fetch('/api/send-test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to_email: toEmail, subject: 'Test Invoice - aniprotech', body: 'Test email from aniprotech via Gmail API.' }) });
         var data = await res.json();
         if (res.ok) showToast('Email sent!', 'success');
         else showToast('Failed: ' + (data.detail || 'Error'), 'error');
@@ -877,7 +877,7 @@ async function sendDemoEmail(count) {
     var success = 0, fail = 0;
     for (var i = 0; i < count; i++) {
         try {
-            var res = await fetch('/api/send-test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to_email: toEmail, subject: 'Demo Invoice #' + (i + 1), body: 'Demo email ' + (i + 1) + ' of ' + count + ' from All in One Invoicing Solutions via Gmail API.' }) });
+            var res = await fetch('/api/send-test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to_email: toEmail, subject: 'Demo Invoice #' + (i + 1), body: 'Demo email ' + (i + 1) + ' of ' + count + ' from aniprotech via Gmail API.' }) });
             if (res.ok) success++; else fail++;
         } catch (e) { fail++; }
     }

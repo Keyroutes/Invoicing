@@ -464,7 +464,7 @@ def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_byt
         msg['To'] = to_email
         msg['Reply-To'] = from_email
         msg['Precedence'] = 'bulk'
-        msg['X-Mailer'] = 'All in One Invoicing Solutions'
+        msg['X-Mailer'] = 'aniprotech'
         msg['List-Unsubscribe'] = f'<mailto:{from_email}?subject=unsubscribe>'
         msg.set_content(body)
         if html_body:
@@ -502,7 +502,7 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
             msg['To'] = to_email
             msg['Reply-To'] = from_email
             msg['Precedence'] = 'bulk'
-            msg['X-Mailer'] = 'All in One Invoicing Solutions'
+            msg['X-Mailer'] = 'aniprotech'
             msg['List-Unsubscribe'] = f'<mailto:{from_email}?subject=unsubscribe>'
             msg.set_content(body)
             if html_body:
@@ -1161,7 +1161,7 @@ def gmail_status(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/send-test-email")
 def send_test_email(test: TestEmail, background_tasks: BackgroundTasks, request: Request, db: Session = Depends(get_db)):
     from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
-    sender_name = os.getenv("FROM_NAME", "Accounting Platform")
+    sender_name = os.getenv("FROM_NAME", "aniprotech")
     from_header = f"{sender_name} <{from_email}>"
 
     background_tasks.add_task(send_email_background, test.to_email, test.subject, test.body, from_header)
