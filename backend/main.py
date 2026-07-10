@@ -597,8 +597,9 @@ def get_invoices(request: Request, db: Session = Depends(get_db)):
     } for inv in invoices]
 
 @app.get("/api/invoices/{number}")
-def get_invoice(number: str, db: Session = Depends(get_db)):
-    inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number).first()
+def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number, models.DBInvoice.client_id == client.id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     client = db.query(models.DBClient).filter(models.DBClient.id == inv.client_id).first() if inv.client_id else None
@@ -743,7 +744,7 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
     db.commit()
     db.refresh(db_invoice)
 
-    return get_invoice(number, db)
+    return get_invoice(number, request, db)
 
 @app.post("/api/invoices/{number}/send")
 def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: Request, payload: Optional[SendInvoiceEmail] = None, db: Session = Depends(get_db)):
