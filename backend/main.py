@@ -1040,7 +1040,9 @@ def create_contact(request: Request, body: dict = None, db: Session = Depends(ge
 @app.get("/api/auth/login")
 async def login(request: Request, role: str = "client"):
     request.session['oauth_role'] = role
-    redirect_uri = request.url_for('auth_callback')
+    redirect_uri = str(request.url_for('auth_callback'))
+    if redirect_uri.startswith('http://'):
+        redirect_uri = redirect_uri.replace('http://', 'https://', 1)
     return await oauth.google.authorize_redirect(request, redirect_uri, access_type='offline', prompt='consent')
 
 @app.get("/api/auth/callback")
