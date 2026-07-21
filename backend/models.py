@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, UniqueConstraint, Text
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -26,6 +26,8 @@ class DBClient(Base):
     settings = relationship("DBSettings", back_populates="client")
     invoices = relationship("DBInvoice", back_populates="client")
     contacts = relationship("DBContact", back_populates="client")
+    departments = relationship("DBDepartment", back_populates="client")
+    employees = relationship("DBEmployee", back_populates="client")
 
 
 class DBInvoice(Base):
@@ -112,3 +114,128 @@ class DBAdminUser(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     password = Column(String)
+
+
+class DBDepartment(Base):
+    __tablename__ = "departments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    client = relationship("DBClient", back_populates="departments")
+    employees = relationship("DBEmployee", back_populates="department")
+
+
+class DBEmployee(Base):
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True, index=True)
+    reports_to = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+
+    employee_id = Column(String, default="")
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    phone = Column(String, default="")
+    address = Column(String, default="")
+
+    job_title = Column(String, default="")
+    role = Column(String, default="employee")
+    employment_type = Column(String, default="full_time")
+    pay_frequency = Column(String, default="monthly")
+
+    salary = Column(Float, default=0.0)
+    hourly_rate = Column(Float, default=0.0)
+    tax_rate = Column(Float, default=0.0)
+    deductions = Column(Float, default=0.0)
+    allowances = Column(Float, default=0.0)
+    bonus = Column(Float, default=0.0)
+
+    bank_name = Column(String, default="")
+    bank_account = Column(String, default="")
+    tax_id = Column(String, default="")
+
+    emergency_contact = Column(String, default="")
+    emergency_phone = Column(String, default="")
+
+    start_date = Column(String, default="")
+    end_date = Column(String, default="")
+    status = Column(String, default="active", index=True)
+    onboarding_complete = Column(Boolean, default=False)
+    offboarding_complete = Column(Boolean, default=False)
+
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    client = relationship("DBClient", back_populates="employees")
+    department = relationship("DBDepartment", back_populates="employees")
+    manager = relationship("DBEmployee", remote_side=[id], backref="direct_reports")
+    payslips = relationship("DBPayslip", back_populates="employee")
+    onboarding_items = relationship("DBOnboardingItem", back_populates="employee")
+
+
+class DBPayslip(Base):
+    __tablename__ = "payslips"
+    __table_args__ = (
+        UniqueConstraint('client_id', 'number', name='uq_client_payslip_number'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    number = Column(String, index=True)
+
+    period_start = Column(String, default="")
+    period_end = Column(String, default="")
+    pay_date = Column(String, default="")
+
+    hours_worked = Column(Float, default=0.0)
+    overtime_hours = Column(Float, default=0.0)
+    overtime_rate = Column(Float, default=0.0)
+
+    basic_salary = Column(Float, default=0.0)
+    overtime_pay = Column(Float, default=0.0)
+    bonus = Column(Float, default=0.0)
+    allowances = Column(Float, default=0.0)
+    gross_pay = Column(Float, default=0.0)
+
+    tax_amount = Column(Float, default=0.0)
+    insurance = Column(Float, default=0.0)
+    retirement = Column(Float, default=0.0)
+    other_deductions = Column(Float, default=0.0)
+    total_deductions = Column(Float, default=0.0)
+
+    net_pay = Column(Float, default=0.0)
+
+    status = Column(String, default="Draft", index=True)
+    sent = Column(String, default="")
+    notes = Column(String, default="")
+
+    tracking_id = Column(String, unique=True, index=True, default=lambda: str(uuid.uuid4()))
+    open_count = Column(Integer, default=0)
+    last_opened = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    employee = relationship("DBEmployee", back_populates="payslips")
+
+
+class DBOnboardingItem(Base):
+    __tablename__ = "onboarding_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    category = Column(String, default="general")
+    is_completed = Column(Boolean, default=False)
+    completed_at = Column(String, default="")
+    assigned_to = Column(String, default="")
+    due_date = Column(String, default="")
+
+    employee = relationship("DBEmployee", back_populates="onboarding_items")

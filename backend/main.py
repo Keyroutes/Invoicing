@@ -1214,6 +1214,669 @@ def save_settings(request: Request, body: dict = None, db: Session = Depends(get
     db.commit()
     return {"message": "Settings saved"}
 
+# ============================================================================
+# HR MODULE - Departments, Employees, Payroll, Onboarding
+# ============================================================================
+
+from sqlalchemy import func as sqlfunc, or_
+
+class DepartmentCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+
+class EmployeeCreate(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str] = ""
+    address: Optional[str] = ""
+    department_id: Optional[int] = None
+    reports_to: Optional[int] = None
+    job_title: Optional[str] = ""
+    role: Optional[str] = "employee"
+    employment_type: Optional[str] = "full_time"
+    pay_frequency: Optional[str] = "monthly"
+    salary: Optional[float] = 0.0
+    hourly_rate: Optional[float] = 0.0
+    tax_rate: Optional[float] = 0.0
+    deductions: Optional[float] = 0.0
+    allowances: Optional[float] = 0.0
+    bonus: Optional[float] = 0.0
+    bank_name: Optional[str] = ""
+    bank_account: Optional[str] = ""
+    tax_id: Optional[str] = ""
+    emergency_contact: Optional[str] = ""
+    emergency_phone: Optional[str] = ""
+    start_date: Optional[str] = ""
+    employee_id: Optional[str] = ""
+
+class PayslipCreate(BaseModel):
+    employee_id: int
+    period_start: str
+    period_end: str
+    pay_date: str
+    hours_worked: Optional[float] = 0.0
+    overtime_hours: Optional[float] = 0.0
+    overtime_rate: Optional[float] = 0.0
+    basic_salary: Optional[float] = 0.0
+    overtime_pay: Optional[float] = 0.0
+    bonus: Optional[float] = 0.0
+    allowances: Optional[float] = 0.0
+    tax_amount: Optional[float] = 0.0
+    insurance: Optional[float] = 0.0
+    retirement: Optional[float] = 0.0
+    other_deductions: Optional[float] = 0.0
+    notes: Optional[str] = ""
+
+# --- Departments API ---
+
+@app.get("/api/departments")
+def get_departments(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    depts = db.query(models.DBDepartment).filter(models.DBDepartment.client_id == client.id).all()
+    result = []
+    for d in depts:
+        emp_count = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == d.id).count()
+        result.append({
+            "id": d.id, "name": d.name, "description": d.description,
+            "employee_count": emp_count, "created_at": d.created_at,
+        })
+    return result
+
+@app.post("/api/departments")
+def create_department(request: Request, body: DepartmentCreate, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    existing = db.query(models.DBDepartment).filter(
+        models.DBDepartment.name == body.name, models.DBDepartment.client_id == client.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Department already exists")
+    dept = models.DBDepartment(name=body.name, description=body.description, client_id=client.id)
+    db.add(dept)
+    db.commit()
+    db.refresh(dept)
+    return {"id": dept.id, "name": dept.name, "description": dept.description, "employee_count": 0}
+
+@app.delete("/api/departments/{dept_id}")
+def delete_department(dept_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    db.query(models.DBEmployee).filter(models.DBEmployee.department_id == dept_id).update({"department_id": None})
+    db.delete(dept)
+    db.commit()
+    return {"message": "Department deleted"}
+
+# --- Employees API ---
+
+@app.get("/api/employees")
+def get_employees(request: Request, q: str = "", status: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id)
+    if status:
+        query = query.filter(models.DBEmployee.status == status)
+    if q:
+        query = query.filter(or_(
+            models.DBEmployee.first_name.ilike(f"%{q}%"),
+            models.DBEmployee.last_name.ilike(f"%{q}%"),
+            models.DBEmployee.email.ilike(f"%{q}%"),
+            models.DBEmployee.job_title.ilike(f"%{q}%"),
+        ))
+    employees = query.order_by(models.DBEmployee.created_at.desc()).all()
+    result = []
+    for e in employees:
+        dept_name = ""
+        if e.department_id:
+            dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == e.department_id).first()
+            dept_name = dept.name if dept else ""
+        manager_name = ""
+        if e.reports_to:
+            mgr = db.query(models.DBEmployee).filter(models.DBEmployee.id == e.reports_to).first()
+            manager_name = f"{mgr.first_name} {mgr.last_name}" if mgr else ""
+        result.append({
+            "id": e.id, "employee_id": e.employee_id,
+            "first_name": e.first_name, "last_name": e.last_name,
+            "full_name": f"{e.first_name} {e.last_name}",
+            "email": e.email, "phone": e.phone,
+            "department_id": e.department_id, "department_name": dept_name,
+            "reports_to": e.reports_to, "manager_name": manager_name,
+            "job_title": e.job_title, "role": e.role,
+            "employment_type": e.employment_type,
+            "pay_frequency": e.pay_frequency,
+            "salary": e.salary, "hourly_rate": e.hourly_rate,
+            "tax_rate": e.tax_rate, "deductions": e.deductions,
+            "allowances": e.allowances, "bonus": e.bonus,
+            "bank_name": e.bank_name, "bank_account": e.bank_account, "tax_id": e.tax_id,
+            "emergency_contact": e.emergency_contact, "emergency_phone": e.emergency_phone,
+            "start_date": e.start_date, "end_date": e.end_date,
+            "status": e.status, "onboarding_complete": e.onboarding_complete,
+            "offboarding_complete": e.offboarding_complete,
+            "created_at": e.created_at,
+        })
+    return result
+
+@app.post("/api/employees")
+def create_employee(request: Request, body: EmployeeCreate, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    existing = db.query(models.DBEmployee).filter(
+        models.DBEmployee.email == body.email, models.DBEmployee.client_id == client.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Employee with this email already exists")
+
+    emp_count = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).count()
+    emp_number = f"EMP-{emp_count + 1:04d}" if not body.employee_id else body.employee_id
+
+    emp = models.DBEmployee(
+        client_id=client.id, employee_id=emp_number,
+        first_name=body.first_name, last_name=body.last_name,
+        email=body.email, phone=body.phone, address=body.address,
+        department_id=body.department_id, reports_to=body.reports_to,
+        job_title=body.job_title, role=body.role,
+        employment_type=body.employment_type, pay_frequency=body.pay_frequency,
+        salary=body.salary, hourly_rate=body.hourly_rate,
+        tax_rate=body.tax_rate, deductions=body.deductions,
+        allowances=body.allowances, bonus=body.bonus,
+        bank_name=body.bank_name, bank_account=body.bank_account,
+        tax_id=body.tax_id,
+        emergency_contact=body.emergency_contact, emergency_phone=body.emergency_phone,
+        start_date=body.start_date, status="onboarding",
+    )
+    db.add(emp)
+    db.flush()
+
+    # Create default onboarding checklist
+    default_items = [
+        ("Sign employment contract", "Legal", "HR"),
+        ("Provide government-issued ID", "Legal", "HR"),
+        ("Submit bank details for payroll", "Finance", "Finance"),
+        ("Provide emergency contact information", "General", "HR"),
+        ("Company policy acknowledgment", "Compliance", "HR"),
+        ("IT equipment setup", "Technical", "IT"),
+        ("Email and system access setup", "Technical", "IT"),
+        ("Introduction to team members", "Social", "Manager"),
+        ("Complete tax withholding forms (W-4)", "Finance", "Finance"),
+        ("Review employee handbook", "Compliance", "HR"),
+    ]
+    for title, category, assignee in default_items:
+        db.add(models.DBOnboardingItem(
+            client_id=client.id, employee_id=emp.id,
+            title=title, category=category, assigned_to=assignee,
+        ))
+
+    db.commit()
+    db.refresh(emp)
+    return {
+        "id": emp.id, "employee_id": emp.employee_id,
+        "first_name": emp.first_name, "last_name": emp.last_name,
+        "message": "Employee created. Onboarding checklist generated.",
+    }
+
+@app.get("/api/employees/{emp_id}")
+def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    dept_name = ""
+    if emp.department_id:
+        dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == emp.department_id).first()
+        dept_name = dept.name if dept else ""
+    manager_name = ""
+    if emp.reports_to:
+        mgr = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp.reports_to).first()
+        manager_name = f"{mgr.first_name} {mgr.last_name}" if mgr else ""
+    payslips = db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp.id).order_by(models.DBPayslip.created_at.desc()).limit(12).all()
+    onboarding = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
+    return {
+        "id": emp.id, "employee_id": emp.employee_id,
+        "first_name": emp.first_name, "last_name": emp.last_name,
+        "full_name": f"{emp.first_name} {emp.last_name}",
+        "email": emp.email, "phone": emp.phone, "address": emp.address,
+        "department_id": emp.department_id, "department_name": dept_name,
+        "reports_to": emp.reports_to, "manager_name": manager_name,
+        "job_title": emp.job_title, "role": emp.role,
+        "employment_type": emp.employment_type, "pay_frequency": emp.pay_frequency,
+        "salary": emp.salary, "hourly_rate": emp.hourly_rate,
+        "tax_rate": emp.tax_rate, "deductions": emp.deductions,
+        "allowances": emp.allowances, "bonus": emp.bonus,
+        "bank_name": emp.bank_name, "bank_account": emp.bank_account, "tax_id": emp.tax_id,
+        "emergency_contact": emp.emergency_contact, "emergency_phone": emp.emergency_phone,
+        "start_date": emp.start_date, "end_date": emp.end_date,
+        "status": emp.status, "onboarding_complete": emp.onboarding_complete,
+        "offboarding_complete": emp.offboarding_complete,
+        "created_at": emp.created_at,
+        "payslips": [{"id": p.id, "number": p.number, "period_start": p.period_start, "period_end": p.period_end,
+                       "pay_date": p.pay_date, "gross_pay": p.gross_pay, "net_pay": p.net_pay,
+                       "status": p.status, "sent": p.sent} for p in payslips],
+        "onboarding_items": [{"id": o.id, "title": o.title, "description": o.description,
+                               "category": o.category, "is_completed": o.is_completed,
+                               "completed_at": o.completed_at, "assigned_to": o.assigned_to,
+                               "due_date": o.due_date} for o in onboarding],
+    }
+
+@app.put("/api/employees/{emp_id}")
+def update_employee(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if body:
+        for key, val in body.items():
+            if hasattr(emp, key) and key not in ("id", "client_id", "created_at"):
+                setattr(emp, key, val)
+    db.commit()
+    return {"message": "Employee updated"}
+
+@app.delete("/api/employees/{emp_id}")
+def delete_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).delete()
+    db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp_id).delete()
+    db.delete(emp)
+    db.commit()
+    return {"message": "Employee deleted"}
+
+@app.post("/api/employees/{emp_id}/offboard")
+def start_offboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    emp.status = "offboarding"
+    db.commit()
+    return {"message": "Offboarding started"}
+
+@app.post("/api/employees/{emp_id}/complete-offboard")
+def complete_offboarding(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    end_date = body.get("end_date", "") if body else ""
+    emp.status = "terminated"
+    emp.end_date = end_date
+    emp.offboarding_complete = True
+    db.commit()
+    return {"message": "Employee offboarded"}
+
+# --- Onboarding API ---
+
+@app.get("/api/employees/{emp_id}/onboarding")
+def get_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).all()
+    completed = sum(1 for i in items if i.is_completed)
+    return {
+        "total": len(items), "completed": completed,
+        "progress": round((completed / len(items)) * 100) if items else 0,
+        "items": [{"id": i.id, "title": i.title, "description": i.description,
+                    "category": i.category, "is_completed": i.is_completed,
+                    "completed_at": i.completed_at, "assigned_to": i.assigned_to,
+                    "due_date": i.due_date} for i in items],
+    }
+
+@app.put("/api/onboarding/{item_id}")
+def update_onboarding_item(item_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if body:
+        if "is_completed" in body:
+            item.is_completed = body["is_completed"]
+            if body["is_completed"]:
+                item.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if "title" in body:
+            item.title = body["title"]
+        if "assigned_to" in body:
+            item.assigned_to = body["assigned_to"]
+        if "due_date" in body:
+            item.due_date = body["due_date"]
+    db.commit()
+    # Check if all items completed
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == item.employee_id).first()
+    if emp:
+        all_items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
+        if all_items and all(i.is_completed for i in all_items):
+            emp.onboarding_complete = True
+            emp.status = "active"
+            db.commit()
+    return {"message": "Item updated"}
+
+@app.post("/api/employees/{emp_id}/onboarding")
+def add_onboarding_item(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    item = models.DBOnboardingItem(
+        client_id=client.id, employee_id=emp_id,
+        title=body.get("title", ""), description=body.get("description", ""),
+        category=body.get("category", "general"), assigned_to=body.get("assigned_to", ""),
+        due_date=body.get("due_date", ""),
+    )
+    db.add(item)
+    db.commit()
+    return {"id": item.id, "title": item.title, "message": "Item added"}
+
+# --- Payroll API ---
+
+@app.get("/api/payslips")
+def get_payslips(request: Request, status: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBPayslip).filter(models.DBPayslip.client_id == client.id)
+    if status:
+        query = query.filter(models.DBPayslip.status == status)
+    payslips = query.order_by(models.DBPayslip.created_at.desc()).all()
+    result = []
+    for p in payslips:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == p.employee_id).first()
+        result.append({
+            "id": p.id, "number": p.number,
+            "employee_id": p.employee_id,
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "employee_email": emp.email if emp else "",
+            "period_start": p.period_start, "period_end": p.period_end,
+            "pay_date": p.pay_date, "gross_pay": p.gross_pay,
+            "tax_amount": p.tax_amount, "total_deductions": p.total_deductions,
+            "net_pay": p.net_pay, "status": p.status, "sent": p.sent,
+            "created_at": p.created_at,
+        })
+    return result
+
+@app.post("/api/payslips")
+def create_payslip(request: Request, body: PayslipCreate, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == body.employee_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    ps_count = db.query(models.DBPayslip).filter(models.DBPayslip.client_id == client.id).count()
+    ps_number = f"PS-{ps_count + 1:04d}"
+
+    basic = body.basic_salary if body.basic_salary > 0 else emp.salary
+    ot_pay = body.overtime_hours * body.overtime_rate if body.overtime_hours > 0 else 0
+    gross = basic + ot_pay + body.bonus + body.allowances
+    tax = body.tax_amount if body.tax_amount > 0 else round(gross * (emp.tax_rate / 100), 2) if emp.tax_rate > 0 else 0
+    total_deductions = tax + body.insurance + body.retirement + body.other_deductions + emp.deductions
+    net = round(gross - total_deductions, 2)
+
+    ps = models.DBPayslip(
+        client_id=client.id, employee_id=body.employee_id, number=ps_number,
+        period_start=body.period_start, period_end=body.period_end, pay_date=body.pay_date,
+        hours_worked=body.hours_worked, overtime_hours=body.overtime_hours,
+        overtime_rate=body.overtime_rate,
+        basic_salary=basic, overtime_pay=ot_pay, bonus=body.bonus, allowances=body.allowances,
+        gross_pay=round(gross, 2),
+        tax_amount=round(tax, 2), insurance=body.insurance, retirement=body.retirement,
+        other_deductions=body.other_deductions,
+        total_deductions=round(total_deductions, 2), net_pay=net,
+        status="Draft", notes=body.notes,
+    )
+    db.add(ps)
+    db.commit()
+    db.refresh(ps)
+    return {"id": ps.id, "number": ps.number, "gross_pay": ps.gross_pay, "net_pay": ps.net_pay, "message": "Payslip created"}
+
+@app.get("/api/payslips/{ps_id}")
+def get_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == ps.employee_id).first()
+    settings_rows = db.query(models.DBSettings).filter(models.DBSettings.client_id == client.id).all()
+    settings_map = {s.key: s.value for s in settings_rows}
+    return {
+        "id": ps.id, "number": ps.number,
+        "employee_id": ps.employee_id,
+        "employee": {
+            "full_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "employee_id": emp.employee_id if emp else "",
+            "email": emp.email if emp else "",
+            "job_title": emp.job_title if emp else "",
+            "department_name": "", "bank_name": emp.bank_name if emp else "",
+            "bank_account": emp.bank_account if emp else "", "tax_id": emp.tax_id if emp else "",
+            "pay_frequency": emp.pay_frequency if emp else "",
+        } if emp else {},
+        "period_start": ps.period_start, "period_end": ps.period_end, "pay_date": ps.pay_date,
+        "hours_worked": ps.hours_worked, "overtime_hours": ps.overtime_hours, "overtime_rate": ps.overtime_rate,
+        "basic_salary": ps.basic_salary, "overtime_pay": ps.overtime_pay,
+        "bonus": ps.bonus, "allowances": ps.allowances, "gross_pay": ps.gross_pay,
+        "tax_amount": ps.tax_amount, "insurance": ps.insurance, "retirement": ps.retirement,
+        "other_deductions": ps.other_deductions, "total_deductions": ps.total_deductions,
+        "net_pay": ps.net_pay, "status": ps.status, "sent": ps.sent, "notes": ps.notes,
+        "company": {
+            "name": settings_map.get("company_name", "") or (client.company_name or ""),
+            "address": settings_map.get("company_address", "") or (client.address or ""),
+            "email": settings_map.get("email", "") or (client.email or ""),
+            "phone": settings_map.get("phone_number", "") or (client.phone_number or ""),
+            "abn": settings_map.get("company_abn", "") or (client.abn or ""),
+            "logo_url": client.logo_url or "",
+        },
+    }
+
+@app.put("/api/payslips/{ps_id}")
+def update_payslip(ps_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    if body:
+        for key, val in body.items():
+            if hasattr(ps, key) and key not in ("id", "client_id", "created_at", "tracking_id"):
+                setattr(ps, key, val)
+    db.commit()
+    return {"message": "Payslip updated"}
+
+@app.post("/api/payslips/{ps_id}/mark-paid")
+def mark_payslip_paid(ps_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    ps.status = "Paid"
+    ps.pay_date = ps.pay_date or datetime.now().strftime("%Y-%m-%d")
+    db.commit()
+    return {"message": "Payslip marked as paid"}
+
+@app.delete("/api/payslips/{ps_id}")
+def delete_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    db.delete(ps)
+    db.commit()
+    return {"message": "Payslip deleted"}
+
+@app.post("/api/payslips/{ps_id}/send")
+def send_payslip_email(ps_id: int, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == ps.employee_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    settings_rows = db.query(models.DBSettings).filter(models.DBSettings.client_id == client.id).all()
+    settings_map = {s.key: s.value for s in settings_rows}
+    company_name = settings_map.get("company_name", "") or client.company_name or "aniprotech"
+    company_email = settings_map.get("email", "") or client.email or ""
+    company_phone = settings_map.get("phone_number", "") or client.phone_number or ""
+    company_address = settings_map.get("company_address", "") or client.address or ""
+
+    from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+    sender_name = os.getenv("FROM_NAME", "aniprotech")
+    from_header = f"{sender_name} <{from_email}>"
+    subject = f"Payslip {ps.number} from {company_name}"
+
+    logo_data = client.logo_url or ""
+    logo_html = f'<div style="margin-bottom:24px;"><img src="{logo_data}" style="max-height:48px;max-width:200px;"></div>' if logo_data else ""
+
+    body_text = f"""Hello {emp.first_name},
+
+Please find your payslip {ps.number} for the period {ps.period_start} to {ps.period_end}.
+
+Pay Date: {ps.pay_date}
+Gross Pay: ${ps.gross_pay:.2f}
+Tax: ${ps.tax_amount:.2f}
+Total Deductions: ${ps.total_deductions:.2f}
+Net Pay: ${ps.net_pay:.2f}
+
+Best regards,
+{company_name}
+{company_address}
+{company_email}
+{company_phone}"""
+
+    html_body = f"""<html><body style="font-family:'Helvetica Neue',Arial,sans-serif;color:#1e293b;margin:0;padding:0;background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);">
+<div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+<div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,0.3);">
+<div style="background:linear-gradient(135deg,#0ea5e9 0%,#7877c6 50%,#00f0ff 100%);padding:40px;text-align:center;">
+{logo_html}
+<h1 style="font-size:32px;font-weight:800;color:#fff;margin:0 0 8px 0;">PAYSLIP</h1>
+<p style="font-size:16px;color:rgba(255,255,255,0.9);margin:0;">{ps.number}</p>
+<div style="margin-top:16px;display:inline-block;background:rgba(255,255,255,0.2);padding:6px 16px;border-radius:20px;">
+<span style="font-size:13px;color:#fff;font-weight:600;">Net Pay: ${ps.net_pay:.2f}</span>
+</div>
+</div>
+<div style="background:#f8fafc;padding:16px 40px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+<div style="font-size:13px;color:#475569;"><strong style="color:#1e293b;">{company_name}</strong>{f' &bull; {company_address}' if company_address else ''}</div>
+<div style="font-size:13px;color:#475569;">{f'{company_email}' if company_email else ''}{f' &bull; {company_phone}' if company_phone else ''}</div>
+</div>
+<div style="padding:40px;">
+<p style="font-size:16px;color:#1e293b;margin:0 0 6px 0;">Hello <strong>{emp.first_name}</strong>,</p>
+<p style="font-size:14px;color:#64748b;margin:0 0 24px 0;">Here's your payslip from <strong>{company_name}</strong> for the period {ps.period_start} to {ps.period_end}.</p>
+<div style="display:flex;gap:16px;margin-bottom:24px;">
+<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Period Start</div>
+<div style="font-size:14px;font-weight:600;">{ps.period_start}</div>
+</div>
+<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Period End</div>
+<div style="font-size:14px;font-weight:600;">{ps.period_end}</div>
+</div>
+<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Pay Date</div>
+<div style="font-size:14px;font-weight:600;">{ps.pay_date}</div>
+</div>
+</div>
+<table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+<tr style="background:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Amount</th></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.basic_salary:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.overtime_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.bonus:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.allowances:.2f}</td></tr>
+<tr style="font-weight:700;background:#f0fdf4;"><td style="padding:12px 16px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;">${ps.gross_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.tax_amount:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.insurance:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.retirement:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.other_deductions:.2f}</td></tr>
+<tr style="font-weight:700;background:#fef2f2;"><td style="padding:12px 16px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;">-${ps.total_deductions:.2f}</td></tr>
+</table>
+<div style="background:linear-gradient(135deg,#0ea5e9,#7877c6);border-radius:12px;padding:24px;text-align:right;">
+<div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:4px;">NET PAY</div>
+<div style="font-size:32px;font-weight:800;color:#fff;">${ps.net_pay:.2f}</div>
+</div>
+</div>
+<div style="padding:24px 40px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+<p style="font-size:13px;color:#94a3b8;margin:0;">Thank you for your hard work!</p>
+<p style="font-size:12px;color:#cbd5e1;margin:4px 0 0 0;">{company_name}</p>
+</div>
+</div>
+</div></body></html>"""
+
+    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body)
+    ps.status = "Sent" if ps.status == "Draft" else ps.status
+    ps.sent = datetime.now().strftime("%Y-%m-%d")
+    db.commit()
+    return {"message": "Payslip email sent", "status": ps.status}
+
+@app.get("/api/payslip/track/open/{tracking_id}")
+def track_payslip_open(tracking_id: str, db: Session = Depends(get_db)):
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.tracking_id == tracking_id).first()
+    if ps:
+        ps.open_count = (ps.open_count or 0) + 1
+        ps.last_opened = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.commit()
+    response = Response(content=TRACKING_PIXEL, media_type="image/gif")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
+
+# --- Org Chart API ---
+
+@app.get("/api/org-chart")
+def get_org_chart(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.in_(["active", "onboarding"])
+    ).all()
+    departments = db.query(models.DBDepartment).filter(models.DBDepartment.client_id == client.id).all()
+
+    emp_map = {}
+    for e in employees:
+        dept_name = ""
+        if e.department_id:
+            dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == e.department_id).first()
+            dept_name = dept.name if dept else ""
+        emp_map[e.id] = {
+            "id": e.id, "employee_id": e.employee_id,
+            "name": f"{e.first_name} {e.last_name}",
+            "job_title": e.job_title, "email": e.email,
+            "department": dept_name, "reports_to": e.reports_to,
+            "status": e.status,
+        }
+
+    roots = []
+    for e_id, e_data in emp_map.items():
+        if e_data["reports_to"] and e_data["reports_to"] in emp_map:
+            parent = emp_map[e_data["reports_to"]]
+            if "children" not in parent:
+                parent["children"] = []
+            parent["children"].append(e_data)
+        else:
+            roots.append(e_data)
+
+    dept_groups = {}
+    for d in departments:
+        dept_employees = [e for e in emp_map.values() if e["department"] == d.name]
+        if dept_employees:
+            dept_groups[d.name] = dept_employees
+
+    return {"roots": roots, "departments": dept_groups, "total_employees": len(employees)}
+
+# --- HR Dashboard Stats ---
+
+@app.get("/api/hr/stats")
+def get_hr_stats(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    total = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).count()
+    active = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id, models.DBEmployee.status == "active").count()
+    onboarding = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id, models.DBEmployee.status == "onboarding").count()
+    offboarding = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id, models.DBEmployee.status == "offboarding").count()
+    terminated = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id, models.DBEmployee.status == "terminated").count()
+    depts = db.query(models.DBDepartment).filter(models.DBDepartment.client_id == client.id).count()
+    total_payroll = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBPayslip.net_pay), 0)).filter(models.DBPayslip.client_id == client.id, models.DBPayslip.status == "Paid").scalar()
+    pending_payroll = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBPayslip.net_pay), 0)).filter(models.DBPayslip.client_id == client.id, models.DBPayslip.status != "Paid").scalar()
+    return {
+        "total_employees": total, "active": active, "onboarding": onboarding,
+        "offboarding": offboarding, "terminated": terminated,
+        "departments": depts,
+        "total_payroll": round(float(total_payroll), 2),
+        "pending_payroll": round(float(pending_payroll), 2),
+    }
+
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 if os.path.exists(frontend_path):

@@ -152,5 +152,118 @@ def ensure_columns():
                     pass
             conn.commit()
 
+            # Create HR tables if they don't exist
+            hr_tables = [
+                """CREATE TABLE IF NOT EXISTS departments (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    name VARCHAR NOT NULL,
+                    description VARCHAR DEFAULT '',
+                    created_at VARCHAR DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS employees (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    department_id INTEGER REFERENCES departments(id),
+                    reports_to INTEGER REFERENCES employees(id),
+                    employee_id VARCHAR DEFAULT '',
+                    first_name VARCHAR NOT NULL,
+                    last_name VARCHAR NOT NULL,
+                    email VARCHAR NOT NULL,
+                    phone VARCHAR DEFAULT '',
+                    address VARCHAR DEFAULT '',
+                    job_title VARCHAR DEFAULT '',
+                    role VARCHAR DEFAULT 'employee',
+                    employment_type VARCHAR DEFAULT 'full_time',
+                    pay_frequency VARCHAR DEFAULT 'monthly',
+                    salary DOUBLE PRECISION DEFAULT 0,
+                    hourly_rate DOUBLE PRECISION DEFAULT 0,
+                    tax_rate DOUBLE PRECISION DEFAULT 0,
+                    deductions DOUBLE PRECISION DEFAULT 0,
+                    allowances DOUBLE PRECISION DEFAULT 0,
+                    bonus DOUBLE PRECISION DEFAULT 0,
+                    bank_name VARCHAR DEFAULT '',
+                    bank_account VARCHAR DEFAULT '',
+                    tax_id VARCHAR DEFAULT '',
+                    emergency_contact VARCHAR DEFAULT '',
+                    emergency_phone VARCHAR DEFAULT '',
+                    start_date VARCHAR DEFAULT '',
+                    end_date VARCHAR DEFAULT '',
+                    status VARCHAR DEFAULT 'active',
+                    onboarding_complete BOOLEAN DEFAULT FALSE,
+                    offboarding_complete BOOLEAN DEFAULT FALSE,
+                    created_at VARCHAR DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS payslips (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    employee_id INTEGER REFERENCES employees(id) NOT NULL,
+                    number VARCHAR,
+                    period_start VARCHAR DEFAULT '',
+                    period_end VARCHAR DEFAULT '',
+                    pay_date VARCHAR DEFAULT '',
+                    hours_worked DOUBLE PRECISION DEFAULT 0,
+                    overtime_hours DOUBLE PRECISION DEFAULT 0,
+                    overtime_rate DOUBLE PRECISION DEFAULT 0,
+                    basic_salary DOUBLE PRECISION DEFAULT 0,
+                    overtime_pay DOUBLE PRECISION DEFAULT 0,
+                    bonus DOUBLE PRECISION DEFAULT 0,
+                    allowances DOUBLE PRECISION DEFAULT 0,
+                    gross_pay DOUBLE PRECISION DEFAULT 0,
+                    tax_amount DOUBLE PRECISION DEFAULT 0,
+                    insurance DOUBLE PRECISION DEFAULT 0,
+                    retirement DOUBLE PRECISION DEFAULT 0,
+                    other_deductions DOUBLE PRECISION DEFAULT 0,
+                    total_deductions DOUBLE PRECISION DEFAULT 0,
+                    net_pay DOUBLE PRECISION DEFAULT 0,
+                    status VARCHAR DEFAULT 'Draft',
+                    sent VARCHAR DEFAULT '',
+                    notes VARCHAR DEFAULT '',
+                    tracking_id VARCHAR,
+                    open_count INTEGER DEFAULT 0,
+                    last_opened VARCHAR DEFAULT '',
+                    created_at VARCHAR DEFAULT '',
+                    UNIQUE(client_id, number)
+                )""",
+                """CREATE TABLE IF NOT EXISTS onboarding_items (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    employee_id INTEGER REFERENCES employees(id) NOT NULL,
+                    title VARCHAR NOT NULL,
+                    description VARCHAR DEFAULT '',
+                    category VARCHAR DEFAULT 'general',
+                    is_completed BOOLEAN DEFAULT FALSE,
+                    completed_at VARCHAR DEFAULT '',
+                    assigned_to VARCHAR DEFAULT '',
+                    due_date VARCHAR DEFAULT ''
+                )""",
+            ]
+            for sql in hr_tables:
+                try:
+                    conn.execute(text(sql))
+                except Exception:
+                    pass
+            conn.commit()
+
+            # Create indexes for HR tables
+            hr_indexes = [
+                "CREATE INDEX IF NOT EXISTS ix_employees_client_id ON employees (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_employees_department_id ON employees (department_id)",
+                "CREATE INDEX IF NOT EXISTS ix_employees_reports_to ON employees (reports_to)",
+                "CREATE INDEX IF NOT EXISTS ix_employees_status ON employees (status)",
+                "CREATE INDEX IF NOT EXISTS ix_payslips_client_id ON payslips (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_payslips_employee_id ON payslips (employee_id)",
+                "CREATE INDEX IF NOT EXISTS ix_payslips_status ON payslips (status)",
+                "CREATE INDEX IF NOT EXISTS ix_departments_client_id ON departments (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_onboarding_items_client_id ON onboarding_items (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_onboarding_items_employee_id ON onboarding_items (employee_id)",
+            ]
+            for stmt in hr_indexes:
+                try:
+                    conn.execute(text(stmt))
+                except Exception:
+                    pass
+            conn.commit()
+
     except Exception as e:
         print(f"Column check skipped: {e}")
