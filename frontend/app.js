@@ -45,6 +45,12 @@ function showView(viewId) {
         'bills-view': 'nav-bills',
         'reports-view': 'nav-reports',
         'contacts-view': 'nav-contacts',
+        'employees-view': 'nav-people',
+        'employee-detail-view': 'nav-people',
+        'departments-view': 'nav-people',
+        'payroll-view': 'nav-payroll',
+        'payslip-detail-view': 'nav-payroll',
+        'orgchart-view': 'nav-org',
         'settings-view': 'nav-settings'
     };
     var navId = navMap[viewId];
@@ -1057,6 +1063,707 @@ function setupContactAutocomplete() {
         }
     });
 }
+
+// ============================================================
+// HR MODULE
+// ============================================================
+
+var allEmployees = [];
+var allPayslips = [];
+var currentEmpFilter = '';
+var currentPsFilter = '';
+var currentEmployeeId = null;
+var currentPayslipId = null;
+
+// --- HR Stats ---
+async function loadHRStats() {
+    try {
+        var res = await fetch('/api/hr/stats');
+        if (!res.ok) return;
+        var s = await res.json();
+        var el = function(id) { return document.getElementById(id); };
+        if (el('hr-total')) el('hr-total').textContent = s.total || 0;
+        if (el('hr-active')) el('hr-active').textContent = s.active || 0;
+        if (el('hr-onboarding')) el('hr-onboarding').textContent = s.onboarding || 0;
+        if (el('hr-offboarding')) el('hr-offboarding').textContent = s.offboarding || 0;
+        if (el('hr-depts')) el('hr-depts').textContent = s.departments || 0;
+    } catch (e) { console.error('HR stats error:', e); }
+}
+
+// --- Employees ---
+async function fetchEmployees(statusFilter) {
+    try {
+        var url = '/api/employees';
+        if (statusFilter) url += '?status=' + encodeURIComponent(statusFilter);
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('Failed');
+        allEmployees = await res.json();
+        renderEmployees(allEmployees);
+        var countEl = document.getElementById('employee-count');
+        if (countEl) countEl.textContent = allEmployees.length + ' item' + (allEmployees.length !== 1 ? 's' : '');
+    } catch (e) {
+        var tbody = document.getElementById('employees-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="8" class="loading">Failed to load employees.</td></tr>';
+    }
+}
+
+function renderEmployees(employees) {
+    var tbody = document.getElementById('employees-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (employees.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No employees found.</td></tr>';
+        return;
+    }
+    employees.forEach(function(e) {
+        var statusClass = (e.status || '').toLowerCase().replace(/\s+/g, '-');
+        var typeLabel = (e.employment_type || '').replace('_', ' ');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewEmployee(' + e.id + ')">' + e.first_name + ' ' + e.last_name + '</a><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (e.email || '') + '</span></td><td>' + (e.employee_id || '-') + '</td><td>' + (e.department_name || '-') + '</td><td>' + (e.job_title || '-') + '</td><td>' + typeLabel + '</td><td>' + (e.start_date || '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + e.status + '</span></td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="viewEmployee(' + e.id + ')">View</button></td></tr>');
+    });
+}
+
+function filterEmployees(status, btn) {
+    currentEmpFilter = status;
+    document.querySelectorAll('#employee-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    if (status) {
+        var filtered = allEmployees.filter(function(e) { return e.status === status; });
+        renderEmployees(filtered);
+    } else {
+        renderEmployees(allEmployees);
+    }
+}
+window.filterEmployees = filterEmployees;
+
+function searchEmployees() {
+    var q = (document.getElementById('employee-search').value || '').toLowerCase();
+    var filtered = allEmployees.filter(function(e) {
+        return ((e.first_name + ' ' + e.last_name).toLowerCase().indexOf(q) >= 0 ||
+            (e.email || '').toLowerCase().indexOf(q) >= 0 ||
+            (e.employee_id || '').toLowerCase().indexOf(q) >= 0 ||
+            (e.job_title || '').toLowerCase().indexOf(q) >= 0 ||
+            (e.department_name || '').toLowerCase().indexOf(q) >= 0);
+    });
+    renderEmployees(filtered);
+}
+window.searchEmployees = searchEmployees;
+
+// --- View Employee ---
+async function viewEmployee(empId) {
+    currentEmployeeId = empId;
+    try {
+        var res = await fetch('/api/employees/' + empId);
+        if (!res.ok) throw new Error('Failed');
+        var emp = await res.json();
+        document.getElementById('emp-detail-name').textContent = emp.full_name;
+        document.getElementById('emp-detail-status').textContent = emp.status;
+        document.getElementById('emp-detail-status').className = 'status-pill status-' + (emp.status || '').toLowerCase().replace(/\s+/g, '-');
+        document.getElementById('emp-detail-eid').textContent = emp.employee_id || '-';
+        document.getElementById('emp-detail-email').textContent = emp.email || '-';
+        document.getElementById('emp-detail-phone').textContent = emp.phone || '-';
+        document.getElementById('emp-detail-title').textContent = emp.job_title || '-';
+        document.getElementById('emp-detail-dept').textContent = emp.department_name || '-';
+        document.getElementById('emp-detail-mgr').textContent = emp.manager_name || '-';
+        document.getElementById('emp-detail-type').textContent = (emp.employment_type || '').replace('_', ' ');
+        document.getElementById('emp-detail-payfreq').textContent = emp.pay_frequency || '-';
+        document.getElementById('emp-detail-salary').textContent = emp.salary ? formatCurrency(emp.salary) : '-';
+        document.getElementById('emp-detail-start').textContent = emp.start_date || '-';
+        document.getElementById('emp-detail-taxrate').textContent = emp.tax_rate ? emp.tax_rate + '%' : '-';
+        document.getElementById('emp-detail-emergency').textContent = emp.emergency_contact ? emp.emergency_contact + (emp.emergency_phone ? ' (' + emp.emergency_phone + ')' : '') : '-';
+
+        var offboardBtn = document.getElementById('emp-offboard-btn');
+        if (offboardBtn) offboardBtn.style.display = (emp.status === 'active' || emp.status === 'onboarding') ? 'inline-flex' : 'none';
+
+        // Onboarding
+        var items = emp.onboarding_items || [];
+        var completed = items.filter(function(i) { return i.is_completed; }).length;
+        var progressEl = document.getElementById('onboarding-progress');
+        if (progressEl) progressEl.textContent = completed + '/' + items.length;
+        var barFill = document.getElementById('onboarding-bar-fill');
+        if (barFill) barFill.style.width = items.length ? Math.round((completed / items.length) * 100) + '%' : '0%';
+        var listEl = document.getElementById('onboarding-items-list');
+        if (listEl) {
+            listEl.innerHTML = '';
+            items.forEach(function(item) {
+                var checkedAttr = item.is_completed ? 'checked' : '';
+                var style = item.is_completed ? 'text-decoration:line-through;color:var(--text-secondary);' : '';
+                listEl.insertAdjacentHTML('beforeend', '<label style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);cursor:pointer;font-size:0.9rem;' + style + '"><input type="checkbox" ' + checkedAttr + ' onchange="toggleOnboardingItem(' + item.id + ', this.checked)" style="margin-top:4px;accent-color:var(--primary-color);"><div><div style="font-weight:500;">' + item.title + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (item.category || '') + ' &bull; ' + (item.assigned_to || '') + '</div></div></label>');
+            });
+        }
+
+        // Payslips
+        var payslips = emp.payslips || [];
+        var totalPaid = payslips.filter(function(p) { return p.status === 'Paid'; }).reduce(function(s, p) { return s + (p.net_pay || 0); }, 0);
+        var totalPaidEl = document.getElementById('emp-total-paid');
+        if (totalPaidEl) totalPaidEl.textContent = formatCurrency(totalPaid);
+        var psCountEl = document.getElementById('emp-payslip-count');
+        if (psCountEl) psCountEl.textContent = payslips.length;
+        var psListEl = document.getElementById('emp-payslips-list');
+        if (psListEl) {
+            psListEl.innerHTML = '';
+            if (payslips.length === 0) {
+                psListEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-secondary);font-size:0.85rem;">No payslips yet</div>';
+            } else {
+                payslips.forEach(function(p) {
+                    var statusClass = (p.status || '').toLowerCase();
+                    psListEl.insertAdjacentHTML('beforeend', '<div style="padding:12px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="viewPayslip(' + p.id + ')"><div><div style="font-weight:500;font-size:0.9rem;">' + p.number + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + p.period_start + ' to ' + p.period_end + '</div></div><div style="text-align:right;"><div style="font-weight:600;font-size:0.9rem;">' + formatCurrency(p.net_pay) + '</div><span class="status-pill status-' + statusClass + '" style="font-size:0.7rem;">' + p.status + '</span></div></div>');
+                });
+            }
+        }
+
+        showView('employee-detail-view');
+    } catch (e) {
+        showToast('Failed to load employee', 'error');
+    }
+}
+window.viewEmployee = viewEmployee;
+
+async function toggleOnboardingItem(itemId, isCompleted) {
+    try {
+        await fetch('/api/onboarding/' + itemId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_completed: isCompleted })
+        });
+        if (currentEmployeeId) viewEmployee(currentEmployeeId);
+    } catch (e) { showToast('Failed to update item', 'error'); }
+}
+window.toggleOnboardingItem = toggleOnboardingItem;
+
+// --- Add Employee Modal ---
+async function showAddEmployeeModal() {
+    document.getElementById('add-employee-modal').style.display = 'flex';
+    document.getElementById('add-employee-form').reset();
+    var today = new Date().toISOString().split('T')[0];
+    var startEl = document.getElementById('emp-start-date');
+    if (startEl) startEl.value = today;
+    // Load departments and employees for dropdowns
+    try {
+        var deptRes = await fetch('/api/departments');
+        var depts = await deptRes.json();
+        var deptSel = document.getElementById('emp-department');
+        deptSel.innerHTML = '<option value="">None</option>';
+        depts.forEach(function(d) { deptSel.insertAdjacentHTML('beforeend', '<option value="' + d.id + '">' + d.name + '</option>'); });
+        var empRes = await fetch('/api/employees');
+        var emps = await empRes.json();
+        var mgrSel = document.getElementById('emp-reports-to');
+        mgrSel.innerHTML = '<option value="">None</option>';
+        emps.forEach(function(e) { mgrSel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
+    } catch (e) { console.error(e); }
+}
+window.showAddEmployeeModal = showAddEmployeeModal;
+
+function closeAddEmployeeModal() {
+    document.getElementById('add-employee-modal').style.display = 'none';
+}
+window.closeAddEmployeeModal = closeAddEmployeeModal;
+
+async function submitNewEmployee() {
+    var firstName = document.getElementById('emp-first-name').value.trim();
+    var lastName = document.getElementById('emp-last-name').value.trim();
+    var email = document.getElementById('emp-email').value.trim();
+    if (!firstName || !lastName || !email) { showToast('First name, last name, and email are required', 'error'); return; }
+    var deptVal = document.getElementById('emp-department').value;
+    var mgrVal = document.getElementById('emp-reports-to').value;
+    var payload = {
+        first_name: firstName, last_name: lastName, email: email,
+        phone: document.getElementById('emp-phone').value,
+        job_title: document.getElementById('emp-job-title').value,
+        department_id: deptVal ? parseInt(deptVal) : null,
+        reports_to: mgrVal ? parseInt(mgrVal) : null,
+        employment_type: document.getElementById('emp-type').value,
+        pay_frequency: document.getElementById('emp-pay-freq').value,
+        salary: parseFloat(document.getElementById('emp-salary').value) || 0,
+        tax_rate: parseFloat(document.getElementById('emp-tax-rate').value) || 0,
+        start_date: document.getElementById('emp-start-date').value,
+    };
+    try {
+        var res = await fetch('/api/employees', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (res.ok) {
+            showToast(data.message || 'Employee created', 'success');
+            closeAddEmployeeModal();
+            fetchEmployees(currentEmpFilter);
+            loadHRStats();
+        } else {
+            showToast('Failed: ' + (data.detail || 'Error'), 'error');
+        }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.submitNewEmployee = submitNewEmployee;
+
+async function startOffboarding() {
+    if (!currentEmployeeId) return;
+    if (!confirm('Start offboarding for this employee?')) return;
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/offboard', { method: 'POST' });
+        if (res.ok) { showToast('Offboarding started', 'success'); viewEmployee(currentEmployeeId); loadHRStats(); }
+        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.startOffboarding = startOffboarding;
+
+async function deleteCurrentEmployee() {
+    if (!currentEmployeeId) return;
+    if (!confirm('Delete this employee and all related data?')) return;
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId, { method: 'DELETE' });
+        if (res.ok) { showToast('Employee deleted', 'success'); showView('employees-view'); fetchEmployees(currentEmpFilter); loadHRStats(); }
+        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.deleteCurrentEmployee = deleteCurrentEmployee;
+
+// --- Departments ---
+async function fetchDepartments() {
+    try {
+        var res = await fetch('/api/departments');
+        if (!res.ok) throw new Error('Failed');
+        var depts = await res.json();
+        var tbody = document.getElementById('departments-table-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        if (depts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-secondary);">No departments yet.</td></tr>';
+            return;
+        }
+        depts.forEach(function(d) {
+            tbody.insertAdjacentHTML('beforeend', '<tr><td style="font-weight:500;">' + d.name + '</td><td style="color:var(--text-secondary);">' + (d.description || '-') + '</td><td>' + (d.employee_count || 0) + '</td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="deleteDepartment(' + d.id + ', \'' + d.name.replace(/'/g, "\\'") + '\')" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button></td></tr>');
+        });
+    } catch (e) { console.error('Depts error:', e); }
+}
+
+function showAddDeptModal() {
+    var name = prompt('Department name:');
+    if (!name) return;
+    var desc = prompt('Description (optional):') || '';
+    createDepartment(name, desc);
+}
+window.showAddDeptModal = showAddDeptModal;
+
+async function createDepartment(name, description) {
+    try {
+        var res = await fetch('/api/departments', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, description: description })
+        });
+        var data = await res.json();
+        if (res.ok) { showToast('Department created', 'success'); fetchDepartments(); loadHRStats(); }
+        else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+
+async function deleteDepartment(id, name) {
+    if (!confirm('Delete department "' + name + '"? Employees will be unassigned.')) return;
+    try {
+        var res = await fetch('/api/departments/' + id, { method: 'DELETE' });
+        if (res.ok) { showToast('Department deleted', 'success'); fetchDepartments(); loadHRStats(); }
+        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.deleteDepartment = deleteDepartment;
+
+// --- Payslips ---
+async function fetchPayslips(statusFilter) {
+    try {
+        var url = '/api/payslips';
+        if (statusFilter) url += '?status=' + encodeURIComponent(statusFilter);
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('Failed');
+        allPayslips = await res.json();
+        renderPayslips(allPayslips);
+        var countEl = document.getElementById('payslip-count');
+        if (countEl) countEl.textContent = allPayslips.length + ' item' + (allPayslips.length !== 1 ? 's' : '');
+    } catch (e) {
+        var tbody = document.getElementById('payslips-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="10" class="loading">Failed to load payslips.</td></tr>';
+    }
+}
+
+function renderPayslips(payslips) {
+    var tbody = document.getElementById('payslips-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (payslips.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-secondary);">No payslips found.</td></tr>';
+        return;
+    }
+    payslips.forEach(function(p) {
+        var statusClass = (p.status || '').toLowerCase();
+        var opens = p.open_count || 0;
+        var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewPayslip(' + p.id + ')">' + p.number + '</a></td><td>' + (p.employee_name || '-') + '</td><td>' + (p.period_start || '') + ' to ' + (p.period_end || '') + '</td><td>' + (p.pay_date || '-') + '</td><td class="text-right">' + formatCurrency(p.gross_pay) + '</td><td class="text-right">' + formatCurrency(p.total_deductions) + '</td><td class="text-right">' + formatCurrency(p.net_pay) + '</td><td><span class="status-pill status-' + statusClass + '">' + p.status + '</span></td><td>' + (p.sent || '-') + '</td><td class="text-right">' + openBadge + '</td></tr>');
+    });
+}
+
+function filterPayslips(status, btn) {
+    currentPsFilter = status;
+    document.querySelectorAll('#payroll-view .invoices-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    if (status) {
+        var filtered = allPayslips.filter(function(p) { return p.status === status; });
+        renderPayslips(filtered);
+    } else {
+        renderPayslips(allPayslips);
+    }
+}
+window.filterPayslips = filterPayslips;
+
+// --- View Payslip ---
+async function viewPayslip(psId) {
+    currentPayslipId = psId;
+    try {
+        var res = await fetch('/api/payslips/' + psId);
+        if (!res.ok) throw new Error('Failed');
+        var ps = await res.json();
+        document.getElementById('ps-detail-title').textContent = 'Payslip ' + ps.number;
+        document.getElementById('ps-detail-status').textContent = ps.status;
+        document.getElementById('ps-detail-status').className = 'status-pill status-' + (ps.status || '').toLowerCase();
+        document.getElementById('ps-detail-number').textContent = ps.number;
+        document.getElementById('ps-detail-emp-name').textContent = ps.employee ? ps.employee.full_name : '-';
+        document.getElementById('ps-detail-period').textContent = ps.period_start + ' to ' + ps.period_end;
+        document.getElementById('ps-detail-pay-date').textContent = ps.pay_date || '-';
+        document.getElementById('ps-detail-net').textContent = (ps.net_pay || 0).toFixed(2);
+        document.getElementById('ps-detail-company').textContent = ps.company ? ps.company.name || '-' : '-';
+        document.getElementById('ps-detail-company-addr').textContent = ps.company ? (ps.company.address || '') : '';
+
+        document.getElementById('ps-detail-basic').textContent = (ps.basic_salary || 0).toFixed(2);
+        document.getElementById('ps-detail-otpay').textContent = (ps.overtime_pay || 0).toFixed(2);
+        document.getElementById('ps-detail-bonus').textContent = (ps.bonus || 0).toFixed(2);
+        document.getElementById('ps-detail-allow').textContent = (ps.allowances || 0).toFixed(2);
+        document.getElementById('ps-detail-gross').textContent = (ps.gross_pay || 0).toFixed(2);
+        document.getElementById('ps-detail-tax').textContent = (ps.tax_amount || 0).toFixed(2);
+        document.getElementById('ps-detail-ins').textContent = (ps.insurance || 0).toFixed(2);
+        document.getElementById('ps-detail-ret').textContent = (ps.retirement || 0).toFixed(2);
+        document.getElementById('ps-detail-other').textContent = (ps.other_deductions || 0).toFixed(2);
+        document.getElementById('ps-detail-dedtotal').textContent = (ps.total_deductions || 0).toFixed(2);
+        document.getElementById('ps-detail-net-big').textContent = '$' + (ps.net_pay || 0).toFixed(2);
+
+        var notesEl = document.getElementById('ps-detail-notes');
+        if (ps.notes) { notesEl.style.display = 'block'; document.getElementById('ps-detail-notes-text').textContent = ps.notes; }
+        else { notesEl.style.display = 'none'; }
+
+        var logoEl = document.getElementById('ps-logo');
+        if (ps.company && ps.company.logo_url) { logoEl.src = ps.company.logo_url; logoEl.style.display = 'block'; }
+        else { logoEl.style.display = 'none'; }
+
+        showView('payslip-detail-view');
+    } catch (e) {
+        showToast('Failed to load payslip', 'error');
+    }
+}
+window.viewPayslip = viewPayslip;
+
+// --- Generate Payslip ---
+async function showGeneratePayslipModal() {
+    document.getElementById('generate-payslip-modal').style.display = 'flex';
+    document.getElementById('generate-payslip-form').reset();
+    document.getElementById('ps-employee-id').value = currentEmployeeId || '';
+    var today = new Date();
+    var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    document.getElementById('ps-period-start').value = firstDay;
+    document.getElementById('ps-period-end').value = lastDay;
+    document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
+}
+window.showGeneratePayslipModal = showGeneratePayslipModal;
+
+async function showGeneratePayslipModalForNew() {
+    document.getElementById('generate-payslip-modal').style.display = 'flex';
+    document.getElementById('generate-payslip-form').reset();
+    document.getElementById('ps-employee-id').value = '';
+    var today = new Date();
+    var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    document.getElementById('ps-period-start').value = firstDay;
+    document.getElementById('ps-period-end').value = lastDay;
+    document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
+    // Load employees for selection
+    try {
+        var empRes = await fetch('/api/employees?status=active');
+        var emps = await empRes.json();
+        var empSel = document.getElementById('ps-employee-id');
+        empSel.outerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Select employee...</option></select>';
+        var sel = document.getElementById('ps-employee-id');
+        emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
+    } catch (e) { console.error(e); }
+}
+window.showGeneratePayslipModalForNew = showGeneratePayslipModalForNew;
+
+function closeGeneratePayslipModal() {
+    document.getElementById('generate-payslip-modal').style.display = 'none';
+}
+window.closeGeneratePayslipModal = closeGeneratePayslipModal;
+
+async function submitGeneratePayslip() {
+    var empIdVal = document.getElementById('ps-employee-id').value;
+    if (!empIdVal) { showToast('Select an employee', 'error'); return; }
+    var payload = {
+        employee_id: parseInt(empIdVal),
+        period_start: document.getElementById('ps-period-start').value,
+        period_end: document.getElementById('ps-period-end').value,
+        pay_date: document.getElementById('ps-pay-date').value,
+        hours_worked: parseFloat(document.getElementById('ps-hours').value) || 0,
+        basic_salary: parseFloat(document.getElementById('ps-basic').value) || 0,
+        overtime_hours: parseFloat(document.getElementById('ps-ot-hours').value) || 0,
+        overtime_rate: parseFloat(document.getElementById('ps-ot-rate').value) || 0,
+        bonus: parseFloat(document.getElementById('ps-bonus').value) || 0,
+        allowances: parseFloat(document.getElementById('ps-allowances').value) || 0,
+        insurance: parseFloat(document.getElementById('ps-insurance').value) || 0,
+        retirement: parseFloat(document.getElementById('ps-retirement').value) || 0,
+        other_deductions: parseFloat(document.getElementById('ps-other-ded').value) || 0,
+        notes: document.getElementById('ps-notes').value,
+    };
+    try {
+        var res = await fetch('/api/payslips', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (res.ok) {
+            showToast(data.message || 'Payslip created', 'success');
+            closeGeneratePayslipModal();
+            if (currentEmployeeId) viewEmployee(currentEmployeeId);
+            fetchPayslips(currentPsFilter);
+        } else {
+            showToast('Failed: ' + (data.detail || 'Error'), 'error');
+        }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.submitGeneratePayslip = submitGeneratePayslip;
+
+// --- Payslip Actions ---
+async function sendPayslipEmail() {
+    if (!currentPayslipId) return;
+    try {
+        var res = await fetch('/api/payslips/' + currentPayslipId + '/send', { method: 'POST' });
+        var data = await res.json();
+        if (res.ok) { showToast('Payslip email sent!', 'success'); viewPayslip(currentPayslipId); }
+        else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.sendPayslipEmail = sendPayslipEmail;
+
+async function markPayslipPaid() {
+    if (!currentPayslipId) return;
+    if (!confirm('Mark payslip as paid?')) return;
+    try {
+        var res = await fetch('/api/payslips/' + currentPayslipId + '/mark-paid', { method: 'POST' });
+        if (res.ok) { showToast('Marked as paid', 'success'); viewPayslip(currentPayslipId); }
+        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.markPayslipPaid = markPayslipPaid;
+
+async function deletePayslip() {
+    if (!currentPayslipId) return;
+    if (!confirm('Delete this payslip?')) return;
+    try {
+        var res = await fetch('/api/payslips/' + currentPayslipId, { method: 'DELETE' });
+        if (res.ok) { showToast('Payslip deleted', 'success'); showView('payroll-view'); fetchPayslips(currentPsFilter); }
+        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.deletePayslip = deletePayslip;
+
+// --- Payslip PDF ---
+function generatePayslipPDF() {
+    var jsPDF = window.jspdf.jsPDF;
+    var doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    var w = 612, margin = 50, y = margin;
+
+    var company = document.getElementById('ps-detail-company').textContent || '';
+    var companyAddr = document.getElementById('ps-detail-company-addr').textContent || '';
+    var number = document.getElementById('ps-detail-number').textContent || '';
+    var empName = document.getElementById('ps-detail-emp-name').textContent || '';
+    var period = document.getElementById('ps-detail-period').textContent || '';
+    var payDate = document.getElementById('ps-detail-pay-date').textContent || '';
+    var basic = document.getElementById('ps-detail-basic').textContent || '0.00';
+    var otpay = document.getElementById('ps-detail-otpay').textContent || '0.00';
+    var bonus = document.getElementById('ps-detail-bonus').textContent || '0.00';
+    var allow = document.getElementById('ps-detail-allow').textContent || '0.00';
+    var gross = document.getElementById('ps-detail-gross').textContent || '0.00';
+    var tax = document.getElementById('ps-detail-tax').textContent || '0.00';
+    var ins = document.getElementById('ps-detail-ins').textContent || '0.00';
+    var ret = document.getElementById('ps-detail-ret').textContent || '0.00';
+    var other = document.getElementById('ps-detail-other').textContent || '0.00';
+    var dedTotal = document.getElementById('ps-detail-dedtotal').textContent || '0.00';
+    var netPay = document.getElementById('ps-detail-net').textContent || '0.00';
+
+    // Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(28);
+    doc.setTextColor(26, 26, 46);
+    doc.text('PAYSLIP', margin, y + 10);
+    doc.setFontSize(12);
+    doc.setTextColor(100, 116, 139);
+    doc.text(number, margin, y + 28);
+    y += 50;
+
+    // Company + employee
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 26, 46);
+    doc.text(company, w - margin, y, { align: 'right' });
+    if (companyAddr) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(companyAddr, w - margin, y + 14, { align: 'right' }); }
+    y += 30;
+
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, w - margin, y);
+    y += 20;
+
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Employee:', margin, y);
+    doc.text('Period:', margin, y + 16);
+    doc.text('Pay Date:', margin, y + 32);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 26, 46);
+    doc.text(empName, margin + 70, y);
+    doc.text(period, margin + 70, y + 16);
+    doc.text(payDate, margin + 70, y + 32);
+    y += 60;
+
+    // Earnings table
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text('EARNINGS', margin, y);
+    doc.text('AMOUNT', w - margin - 6, y, { align: 'right' });
+    y += 14;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(51, 51, 51);
+    var earnings = [['Basic Salary', basic], ['Overtime Pay', otpay], ['Bonus', bonus], ['Allowances', allow]];
+    earnings.forEach(function(r) {
+        doc.text(r[0], margin, y);
+        doc.text(r[1], w - margin - 6, y, { align: 'right' });
+        y += 16;
+    });
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(22, 163, 74);
+    doc.text('Gross Pay', margin, y);
+    doc.text(gross, w - margin - 6, y, { align: 'right' });
+    y += 24;
+
+    // Deductions table
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text('DEDUCTIONS', margin, y);
+    doc.text('AMOUNT', w - margin - 6, y, { align: 'right' });
+    y += 14;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(51, 51, 51);
+    var deductions = [['Tax', tax], ['Insurance', ins], ['Retirement', ret], ['Other', other]];
+    deductions.forEach(function(r) {
+        doc.text(r[0], margin, y);
+        doc.text(r[1], w - margin - 6, y, { align: 'right' });
+        y += 16;
+    });
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(220, 38, 38);
+    doc.text('Total Deductions', margin, y);
+    doc.text(dedTotal, w - margin - 6, y, { align: 'right' });
+    y += 24;
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, w - margin, y);
+    y += 18;
+
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 26, 46);
+    doc.text('Net Pay', margin, y);
+    doc.setTextColor(14, 165, 233);
+    doc.text('$' + netPay, w - margin - 6, y, { align: 'right' });
+
+    return doc;
+}
+
+function downloadPayslipPDF() {
+    var number = document.getElementById('ps-detail-number').textContent || 'payslip';
+    var doc = generatePayslipPDF();
+    doc.save(number + '.pdf');
+}
+window.downloadPayslipPDF = downloadPayslipPDF;
+
+// --- Org Chart ---
+async function loadOrgChart() {
+    try {
+        var res = await fetch('/api/org-chart');
+        if (!res.ok) throw new Error('Failed');
+        var data = await res.json();
+        var container = document.getElementById('orgchart-container');
+        if (!container) return;
+        container.innerHTML = '';
+        if (data.total_employees === 0) {
+            container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:60px;">No employees to display. Add employees first.</div>';
+            return;
+        }
+        // Render by department groups
+        var departments = data.departments || {};
+        var roots = data.roots || [];
+        // Root nodes first
+        if (roots.length > 0) {
+            var rootSection = document.createElement('div');
+            rootSection.style.textAlign = 'center';
+            rootSection.style.marginBottom = '40px';
+            rootSection.innerHTML = '<h3 style="font-size:0.85rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">Leadership</h3>';
+            var rootNodes = document.createElement('div');
+            rootNodes.className = 'org-children';
+            rootNodes.style.position = 'relative';
+            roots.forEach(function(r) {
+                rootNodes.innerHTML += renderOrgNode(r);
+            });
+            rootSection.appendChild(rootNodes);
+            container.appendChild(rootSection);
+        }
+        // Department groups
+        for (var deptName in departments) {
+            var deptSection = document.createElement('div');
+            deptSection.style.textAlign = 'center';
+            deptSection.style.marginBottom = '40px';
+            deptSection.innerHTML = '<h3 style="font-size:0.85rem;color:var(--primary-color);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">' + deptName + '</h3>';
+            var deptNodes = document.createElement('div');
+            deptNodes.className = 'org-children';
+            deptNodes.style.position = 'relative';
+            departments[deptName].forEach(function(e) {
+                deptNodes.innerHTML += renderOrgNode(e);
+            });
+            deptSection.appendChild(deptNodes);
+            container.appendChild(deptSection);
+        }
+    } catch (e) {
+        var c = document.getElementById('orgchart-container');
+        if (c) c.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:60px;">Failed to load org chart.</div>';
+    }
+}
+
+function renderOrgNode(emp) {
+    return '<div class="org-node" onclick="viewEmployee(' + emp.id + ')">' +
+        '<div class="org-name">' + emp.name + '</div>' +
+        '<div class="org-title">' + (emp.job_title || '-') + '</div>' +
+        (emp.department ? '<div class="org-dept">' + emp.department + '</div>' : '') +
+        '</div>';
+}
+
+// --- View Switcher HR hooks ---
+var origShowView = showView;
+showView = function(viewId) {
+    origShowView(viewId);
+    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
+    if (viewId === 'departments-view') fetchDepartments();
+    if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
+    if (viewId === 'orgchart-view') loadOrgChart();
+};
+window.showView = showView;
 
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', function() {
