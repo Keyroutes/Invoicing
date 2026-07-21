@@ -312,6 +312,14 @@ def ensure_columns():
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_location VARCHAR DEFAULT ''",
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS latitude FLOAT DEFAULT 0.0",
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS longitude FLOAT DEFAULT 0.0",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS check_type VARCHAR DEFAULT 'manual'",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS ip_address VARCHAR DEFAULT ''",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_info VARCHAR DEFAULT ''",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS location_lat FLOAT DEFAULT 0.0",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS location_lng FLOAT DEFAULT 0.0",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS location_label VARCHAR DEFAULT ''",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_minutes FLOAT DEFAULT 0.0",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_hours FLOAT DEFAULT 0.0",
             ]
             for stmt in alter_statements:
                 try:
