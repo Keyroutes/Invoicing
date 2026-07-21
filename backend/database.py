@@ -320,6 +320,8 @@ def ensure_columns():
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS location_label VARCHAR DEFAULT ''",
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_minutes FLOAT DEFAULT 0.0",
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_hours FLOAT DEFAULT 0.0",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS last_login VARCHAR DEFAULT ''",
+                "ALTER TABLE clients ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0",
             ]
             for stmt in alter_statements:
                 try:
@@ -327,6 +329,29 @@ def ensure_columns():
                 except Exception:
                     pass
             conn.commit()
+
+            # Create client_login_logs table
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS client_login_logs (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        email VARCHAR NOT NULL,
+                        user_type VARCHAR DEFAULT 'client',
+                        login_type VARCHAR DEFAULT 'password',
+                        ip_address VARCHAR DEFAULT '',
+                        device_info VARCHAR DEFAULT '',
+                        location_label VARCHAR DEFAULT '',
+                        status VARCHAR DEFAULT 'success',
+                        created_at VARCHAR DEFAULT ''
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_client_id ON client_login_logs (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_email ON client_login_logs (email)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_created_at ON client_login_logs (created_at)"))
+                conn.commit()
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"Column check skipped: {e}")

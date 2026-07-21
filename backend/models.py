@@ -26,6 +26,8 @@ class DBClient(Base):
     industry = Column(String, default="")
     is_active = Column(Boolean, default=True)
     is_onboarded = Column(Boolean, default=False)
+    last_login = Column(String, default="")
+    login_count = Column(Integer, default=0)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     settings = relationship("DBSettings", back_populates="client")
@@ -292,4 +294,19 @@ class DBAttendanceSettings(Base):
     max_overtime_hours = Column(Float, default=4.0)
     allow_remote = Column(Boolean, default=True)
     require_location = Column(Boolean, default=True)
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBClientLoginLog(Base):
+    __tablename__ = "client_login_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    email = Column(String, nullable=False)
+    user_type = Column(String, default="client")
+    login_type = Column(String, default="password")
+    ip_address = Column(String, default="")
+    device_info = Column(String, default="")
+    location_label = Column(String, default="")
+    status = Column(String, default="success")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

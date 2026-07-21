@@ -47,6 +47,26 @@ def verify_password(password: str, stored: str) -> bool:
     pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
     return pwd_hash.hex() == pwd_hash_hex
 
+def log_login(db, client_id, email, user_type="client", login_type="password", request=None, status="success"):
+    ip = ""
+    device = ""
+    if request and request.client:
+        ip = request.client.host or ""
+    if request:
+        device = request.headers.get("user-agent", "")[:200]
+    log = models.DBClientLoginLog(
+        client_id=client_id, email=email, user_type=user_type,
+        login_type=login_type, ip_address=ip, device_info=device,
+        status=status,
+    )
+    db.add(log)
+    if client_id:
+        client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
+        if client:
+            client.last_login = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            client.login_count = (client.login_count or 0) + 1
+    db.commit()
+
 def generate_secret_key() -> str:
     return secrets.token_hex(32)
 
@@ -227,10 +247,13 @@ def client_register(body: ClientRegister, db: Session = Depends(get_db)):
 def client_login(body: ClientLogin, request: Request, db: Session = Depends(get_db)):
     client = db.query(models.DBClient).filter(models.DBClient.email == body.email).first()
     if not client or not verify_password(body.password, client.password_hash):
+        log_login(db, None, body.email, "client", "password", request, "failed")
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not client.is_active:
+        log_login(db, client.id, body.email, "client", "password", request, "disabled")
         raise HTTPException(status_code=403, detail="Account disabled")
     request.session["client_id"] = client.id
+    log_login(db, client.id, body.email, "client", "password", request, "success")
     return {"message": "Logged in", "is_onboarded": client.is_onboarded, "company_name": client.company_name}
 
 @app.post("/api/client/logout")
@@ -349,6 +372,8 @@ def superadmin_clients(request: Request, db: Session = Depends(get_db)):
         "phone_number": c.phone_number,
         "is_active": c.is_active,
         "is_onboarded": c.is_onboarded,
+        "last_login": c.last_login or "",
+        "login_count": c.login_count or 0,
         "created_at": c.created_at,
         "invoice_count": invoice_count,
         "paid_count": invoice_count - unpaid_count,
@@ -373,6 +398,50 @@ def superadmin_insights(request: Request, db: Session = Depends(get_db)):
         "total_invoices": total_invoices,
         "total_revenue": round(float(total_revenue), 2),
         "total_outstanding": round(float(total_outstanding), 2),
+    }
+
+@app.get("/api/superadmin/login-logs")
+def superadmin_login_logs(request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+    logs = db.query(models.DBClientLoginLog).order_by(models.DBClientLoginLog.created_at.desc()).limit(limit).all()
+    return [{
+        "id": l.id, "client_id": l.client_id, "email": l.email,
+        "user_type": l.user_type, "login_type": l.login_type,
+        "ip_address": l.ip_address, "device_info": l.device_info,
+        "status": l.status, "created_at": l.created_at,
+    } for l in logs]
+
+@app.get("/api/superadmin/login-stats")
+def superadmin_login_stats(request: Request, db: Session = Depends(get_db)):
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+    from datetime import timedelta
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+    month_ago = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    total_logs = db.query(models.DBClientLoginLog).count()
+    today_logs = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.created_at.like(today + "%")).count()
+    week_logs = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.created_at >= week_ago).count()
+    month_logs = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.created_at >= month_ago).count()
+    failed_logs = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.status == "failed").count()
+    google_logins = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.login_type == "google").count()
+    password_logins = db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.login_type == "password").count()
+    clients_with_logins = db.query(models.DBClient).filter(models.DBClient.login_count > 0).count()
+    never_logged_in = db.query(models.DBClient).filter(models.DBClient.login_count == 0).count()
+    return {
+        "total_logins": total_logs,
+        "today_logins": today_logs,
+        "week_logins": week_logs,
+        "month_logins": month_logs,
+        "failed_logins": failed_logs,
+        "google_logins": google_logins,
+        "password_logins": password_logins,
+        "clients_with_logins": clients_with_logins,
+        "clients_never_logged_in": never_logged_in,
     }
 
 @app.put("/api/superadmin/clients/{client_id}/toggle")
@@ -1094,8 +1163,10 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
                 sa_user = db.query(models.DBSuperAdmin).filter(models.DBSuperAdmin.email == google_email).first()
                 if sa_user:
                     request.session['superadmin_id'] = sa_user.id
+                    log_login(db, None, google_email, "superadmin", "google", request, "success")
                     return RedirectResponse(url="/superadmin.html")
                 else:
+                    log_login(db, None, google_email, "superadmin", "google", request, "failed")
                     return RedirectResponse(url="/superadmin-login.html?error=not_admin")
 
             if google_email:
@@ -1105,6 +1176,7 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
                 existing_client = db.query(models.DBClient).filter(models.DBClient.email == google_email).first()
                 if existing_client:
                     request.session['client_id'] = existing_client.id
+                    log_login(db, existing_client.id, google_email, "client", "google", request, "success")
                     if existing_client.is_onboarded:
                         return RedirectResponse(url="/app.html")
                     else:
@@ -1121,6 +1193,7 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
                     db.commit()
                     db.refresh(new_client)
                     request.session['client_id'] = new_client.id
+                    log_login(db, new_client.id, google_email, "client", "google", request, "success")
                     return RedirectResponse(url="/onboard.html")
     except Exception as e:
         logger.error(f"Callback processing failed: {e}")
@@ -1213,6 +1286,18 @@ def save_settings(request: Request, body: dict = None, db: Session = Depends(get
                 db.add(setting)
     db.commit()
     return {"message": "Settings saved"}
+
+@app.get("/api/my/login-history")
+def my_login_history(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    logs = db.query(models.DBClientLoginLog).filter(
+        models.DBClientLoginLog.client_id == client.id
+    ).order_by(models.DBClientLoginLog.created_at.desc()).limit(limit).all()
+    return [{
+        "id": l.id, "email": l.email, "login_type": l.login_type,
+        "ip_address": l.ip_address, "device_info": l.device_info,
+        "status": l.status, "created_at": l.created_at,
+    } for l in logs]
 
 # ============================================================================
 # HR MODULE - Departments, Employees, Payroll, Onboarding

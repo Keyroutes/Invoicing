@@ -329,8 +329,46 @@
                 <div class="stat-value" id="stat-outstanding">$0</div>
             </div>
         </div>
+        <div class="stats-grid" style="margin-top:16px;">
+            <div class="stat-card accent">
+                <div class="stat-label">Today Logins</div>
+                <div class="stat-value" id="stat-logins-today">0</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-label">This Week</div>
+                <div class="stat-value" id="stat-logins-week">0</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-label">Failed Logins</div>
+                <div class="stat-value" id="stat-logins-failed">0</div>
+            </div>
+            <div class="stat-card danger">
+                <div class="stat-label">Never Logged In</div>
+                <div class="stat-value" id="stat-never-login">0</div>
+            </div>
+        </div>
 
-        <div class="section-header">
+        <div class="section-header" style="margin-top:32px;">
+            <h2>Login Activity</h2>
+            <input type="text" class="search-box" placeholder="Search logs..." oninput="filterLogs(this.value)">
+        </div>
+        <table class="clients-table">
+            <thead>
+                <tr>
+                    <th>Email</th>
+                    <th>Type</th>
+                    <th>Method</th>
+                    <th>IP Address</th>
+                    <th>Status</th>
+                    <th>When</th>
+                </tr>
+            </thead>
+            <tbody id="login-logs-tbody">
+                <tr><td colspan="6" class="empty-state"><h3>Loading...</h3></td></tr>
+            </tbody>
+        </table>
+
+        <div class="section-header" style="margin-top:32px;">
             <h2>All Clients</h2>
             <input type="text" class="search-box" placeholder="Search clients..." oninput="filterClients(this.value)">
         </div>
@@ -415,7 +453,7 @@
                     '<td><span class="status-badge ' + (c.is_onboarded ? 'status-onboarded' : 'status-pending') + '">' + (c.is_onboarded ? 'Complete' : 'Pending') + '</span></td>' +
                     '<td>' + c.invoice_count + '</td>' +
                     '<td>$' + (c.outstanding || 0).toLocaleString() + '</td>' +
-                    '<td style="color:#64748b;font-size:0.8rem;">' + (c.created_at || '').substring(0, 10) + '</td>' +
+                    '<td style="color:#64748b;font-size:0.8rem;">' + (c.created_at || '').substring(0, 10) + '<br><span style="font-size:0.7rem;">Login #' + (c.login_count || 0) + '</span></td>' +
                     '<td>' +
                         '<button class="action-btn" onclick="viewClient(' + c.id + ')">View</button>' +
                         '<button class="action-btn toggle" onclick="toggleClient(' + c.id + ')">' + (c.is_active ? 'Disable' : 'Enable') + '</button>' +
@@ -489,9 +527,63 @@
             window.location.href = '/superadmin-login.html';
         }
 
+        var allLogs = [];
+        async function loadLoginStats() {
+            try {
+                var res = await fetch('/api/superadmin/login-stats');
+                var data = await res.json();
+                document.getElementById('stat-logins-today').textContent = data.today_logins || 0;
+                document.getElementById('stat-logins-week').textContent = data.week_logins || 0;
+                document.getElementById('stat-logins-failed').textContent = data.failed_logins || 0;
+                document.getElementById('stat-never-login').textContent = data.clients_never_logged_in || 0;
+            } catch (e) {}
+        }
+
+        async function loadLoginLogs() {
+            try {
+                var res = await fetch('/api/superadmin/login-logs?limit=100');
+                allLogs = await res.json();
+                renderLogs(allLogs);
+            } catch (e) {
+                document.getElementById('login-logs-tbody').innerHTML = '<tr><td colspan="6" class="empty-state"><h3>Error loading logs</h3></td></tr>';
+            }
+        }
+
+        function renderLogs(logs) {
+            var tbody = document.getElementById('login-logs-tbody');
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#475569;padding:30px;">No login activity yet</td></tr>';
+                return;
+            }
+            tbody.innerHTML = logs.map(function(l) {
+                var statusColor = l.status === 'success' ? '#39ff14' : l.status === 'failed' ? '#ef4444' : '#fcd34d';
+                var methodBadge = l.login_type === 'google' ?
+                    '<span style="background:rgba(66,133,244,0.2);color:#4285f4;padding:2px 8px;border-radius:4px;font-size:0.75rem;">Google</span>' :
+                    '<span style="background:rgba(148,163,184,0.2);color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:0.75rem;">Password</span>';
+                return '<tr>' +
+                    '<td style="font-weight:500;">' + l.email + '</td>' +
+                    '<td style="color:#64748b;">' + l.user_type + '</td>' +
+                    '<td>' + methodBadge + '</td>' +
+                    '<td style="color:#64748b;font-family:monospace;font-size:0.8rem;">' + (l.ip_address || '-') + '</td>' +
+                    '<td><span style="color:' + statusColor + ';font-weight:600;">' + l.status + '</span></td>' +
+                    '<td style="color:#64748b;font-size:0.8rem;">' + (l.created_at || '') + '</td>' +
+                '</tr>';
+            }).join('');
+        }
+
+        function filterLogs(q) {
+            if (!q) { renderLogs(allLogs); return; }
+            q = q.toLowerCase();
+            renderLogs(allLogs.filter(function(l) {
+                return (l.email || '').toLowerCase().includes(q) || (l.ip_address || '').toLowerCase().includes(q);
+            }));
+        }
+
         checkAuth();
         loadInsights();
         loadClients();
+        loadLoginStats();
+        loadLoginLogs();
     </script>
 </body>
 </html>
