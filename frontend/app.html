@@ -477,6 +477,7 @@
                         </div>
                         <div class="invoices-actions">
                             <button class="btn btn-outline" onclick="showView('departments-view')">Departments</button>
+                            <button class="btn btn-outline" onclick="showView('attendance-view')">Attendance</button>
                             <button class="btn btn-primary" onclick="showAddEmployeeModal()">+ Add Employee</button>
                         </div>
                     </div>
@@ -749,6 +750,65 @@
                                     </tr>
                                 </thead>
                                 <tbody id="departments-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== ATTENDANCE ========== -->
+                <div id="attendance-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">People</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
+                            <h1>Attendance</h1>
+                        </div>
+                        <div class="invoices-actions">
+                            <input type="date" id="att-date-filter" class="form-control" style="display:inline-block;width:auto;" onchange="loadAttendance()">
+                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;" id="att-stats-grid">
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Employees</div>
+                            <div style="font-size:1.5rem;font-weight:700;" id="att-total">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Present Today</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="att-present">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Absent Today</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);" id="att-absent">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Avg Hours Today</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="att-avg-hours">0h</div>
+                        </section>
+                    </div>
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header"><h3>Quick Clock In/Out</h3></div>
+                        <div class="widget-content">
+                            <div id="att-employee-buttons" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
+                        </div>
+                    </div>
+                    <div class="widget">
+                        <div class="table-actions">
+                            <span id="att-count" style="font-size:0.85rem;color:var(--text-secondary);">0 records</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Date</th>
+                                        <th>Clock In</th>
+                                        <th>Clock Out</th>
+                                        <th class="text-right">Hours</th>
+                                        <th>Status</th>
+                                        <th class="text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="attendance-table-body"></tbody>
                             </table>
                         </div>
                     </div>

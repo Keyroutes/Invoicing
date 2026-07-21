@@ -28,6 +28,7 @@ class DBClient(Base):
     contacts = relationship("DBContact", back_populates="client")
     departments = relationship("DBDepartment", back_populates="client")
     employees = relationship("DBEmployee", back_populates="client")
+    attendance = relationship("DBAttendance")
 
 
 class DBInvoice(Base):
@@ -176,6 +177,7 @@ class DBEmployee(Base):
     manager = relationship("DBEmployee", remote_side=[id], backref="direct_reports")
     payslips = relationship("DBPayslip", back_populates="employee")
     onboarding_items = relationship("DBOnboardingItem", back_populates="employee")
+    attendance = relationship("DBAttendance")
 
 
 class DBPayslip(Base):
@@ -239,3 +241,18 @@ class DBOnboardingItem(Base):
     due_date = Column(String, default="")
 
     employee = relationship("DBEmployee", back_populates="onboarding_items")
+
+
+class DBAttendance(Base):
+    __tablename__ = "attendance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    date = Column(String, nullable=False, index=True)
+    clock_in = Column(String, default="")
+    clock_out = Column(String, default="")
+    total_hours = Column(Float, default=0.0)
+    status = Column(String, default="present", index=True)
+    notes = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

@@ -48,6 +48,7 @@ function showView(viewId) {
         'employees-view': 'nav-people',
         'employee-detail-view': 'nav-people',
         'departments-view': 'nav-people',
+        'attendance-view': 'nav-people',
         'payroll-view': 'nav-payroll',
         'payslip-detail-view': 'nav-payroll',
         'orgchart-view': 'nav-org',
@@ -1706,7 +1707,111 @@ function downloadPayslipPDF() {
 }
 window.downloadPayslipPDF = downloadPayslipPDF;
 
-// --- Org Chart ---
+// ============================================================
+// ATTENDANCE MODULE
+// ============================================================
+
+var allAttendance = [];
+
+async function loadAttendanceStats() {
+    try {
+        var res = await fetch('/api/attendance/stats');
+        if (!res.ok) return;
+        var s = await res.json();
+        var el = function(id) { return document.getElementById(id); };
+        if (el('att-total')) el('att-total').textContent = s.total_employees || 0;
+        if (el('att-present')) el('att-present').textContent = s.present || 0;
+        if (el('att-absent')) el('att-absent').textContent = s.absent || 0;
+        if (el('att-avg-hours')) el('att-avg-hours').textContent = (s.avg_hours || 0) + 'h';
+    } catch (e) { console.error('Attendance stats error:', e); }
+}
+
+async function loadAttendanceButtons() {
+    try {
+        var res = await fetch('/api/employees');
+        if (!res.ok) return;
+        var emps = await res.json();
+        var container = document.getElementById('att-employee-buttons');
+        if (!container) return;
+        container.innerHTML = '';
+        var activeEmps = emps.filter(function(e) { return e.status === 'active' || e.status === 'onboarding'; });
+        if (activeEmps.length === 0) {
+            container.innerHTML = '<div style="color:var(--text-secondary);font-size:0.9rem;">No active employees. Add employees first.</div>';
+            return;
+        }
+        activeEmps.forEach(function(e) {
+            var initials = (e.first_name[0] || '') + (e.last_name[0] || '');
+            container.insertAdjacentHTML('beforeend', '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:var(--radius-md);min-width:280px;"><div style="width:40px;height:40px;border-radius:50%;background:var(--primary-color);color:#0b0f19;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.85rem;flex-shrink:0;">' + initials + '</div><div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:0.9rem;">' + e.first_name + ' ' + e.last_name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (e.job_title || e.email || '') + '</div></div><button class="btn btn-outline btn-sm" onclick="clockInOut(' + e.id + ')" id="att-btn-' + e.id + '" style="flex-shrink:0;">Clock In</button></div>');
+        });
+    } catch (e) { console.error('Attendance buttons error:', e); }
+}
+
+async function clockInOut(empId) {
+    var btn = document.getElementById('att-btn-' + empId);
+    var now = new Date();
+    var timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    var todayRecords = allAttendance.filter(function(r) { return r.employee_id === empId; });
+    var todayRecord = todayRecords.find(function(r) { return r.date === new Date().toISOString().split('T')[0]; });
+    try {
+        if (!todayRecord || !todayRecord.clock_in) {
+            var res = await fetch('/api/attendance/clock-in', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: empId })
+            });
+            var data = await res.json();
+            if (res.ok) { showToast(data.message, 'success'); }
+            else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); return; }
+        } else if (!todayRecord.clock_out) {
+            var res = await fetch('/api/attendance/clock-out', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: empId })
+            });
+            var data = await res.json();
+            if (res.ok) { showToast(data.message + ' (' + data.total_hours + 'h)', 'success'); }
+            else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); return; }
+        } else {
+            showToast('Already clocked out today', 'warning');
+            return;
+        }
+        loadAttendanceStats();
+        loadAttendance();
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.clockInOut = clockInOut;
+
+async function loadAttendance() {
+    var dateFilter = document.getElementById('att-date-filter');
+    var date = dateFilter ? dateFilter.value : '';
+    try {
+        var url = '/api/attendance';
+        if (date) url += '?date=' + encodeURIComponent(date);
+        var res = await fetch(url);
+        if (!res.ok) throw new Error('Failed');
+        allAttendance = await res.json();
+        renderAttendance(allAttendance);
+        var countEl = document.getElementById('att-count');
+        if (countEl) countEl.textContent = allAttendance.length + ' record' + (allAttendance.length !== 1 ? 's' : '');
+    } catch (e) {
+        var tbody = document.getElementById('attendance-table-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="loading">Failed to load attendance.</td></tr>';
+    }
+}
+
+function renderAttendance(records) {
+    var tbody = document.getElementById('attendance-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-secondary);">No attendance records found.</td></tr>';
+        return;
+    }
+    records.forEach(function(r) {
+        var statusClass = r.status === 'completed' ? 'paid' : r.status === 'present' ? 'sent' : 'draft';
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + r.employee_name + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (r.employee_email || '') + '</span></td><td>' + r.date + '</td><td>' + (r.clock_in || '-') + '</td><td>' + (r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + r.status + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
+    });
+}
+
+// --- View Switcher HR hooks ---
 async function loadOrgChart() {
     try {
         var res = await fetch('/api/org-chart');
@@ -1773,6 +1878,7 @@ showView = function(viewId) {
     if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
+    if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); }
     if (viewId === 'orgchart-view') loadOrgChart();
 };
 window.showView = showView;

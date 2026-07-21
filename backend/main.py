@@ -1884,6 +1884,131 @@ def get_hr_stats(request: Request, db: Session = Depends(get_db)):
         "pending_payroll": round(float(pending_payroll), 2),
     }
 
+# --- Attendance API ---
+
+@app.post("/api/attendance/clock-in")
+def clock_in(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("employee_id"):
+        raise HTTPException(status_code=400, detail="employee_id required")
+    emp_id = body["employee_id"]
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    today = datetime.now().strftime("%Y-%m-%d")
+    existing = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client.id,
+    ).first()
+    if existing:
+        if existing.clock_in:
+            raise HTTPException(status_code=400, detail="Already clocked in today")
+        existing.clock_in = datetime.now().strftime("%H:%M:%S")
+        existing.status = "present"
+        db.commit()
+        return {"message": "Clocked in", "clock_in": existing.clock_in}
+    att = models.DBAttendance(
+        client_id=client.id, employee_id=emp_id, date=today,
+        clock_in=datetime.now().strftime("%H:%M:%S"), status="present",
+    )
+    db.add(att)
+    db.commit()
+    return {"message": "Clocked in", "clock_in": att.clock_in}
+
+@app.post("/api/attendance/clock-out")
+def clock_out(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("employee_id"):
+        raise HTTPException(status_code=400, detail="employee_id required")
+    emp_id = body["employee_id"]
+    today = datetime.now().strftime("%Y-%m-%d")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client.id,
+    ).first()
+    if not att or not att.clock_in:
+        raise HTTPException(status_code=400, detail="Not clocked in today")
+    if att.clock_out:
+        raise HTTPException(status_code=400, detail="Already clocked out today")
+    att.clock_out = datetime.now().strftime("%H:%M:%S")
+    try:
+        cin = datetime.strptime(att.clock_in, "%H:%M:%S")
+        cout = datetime.strptime(att.clock_out, "%H:%M:%S")
+        att.total_hours = round((cout - cin).total_seconds() / 3600, 2)
+    except Exception:
+        att.total_hours = 0.0
+    att.status = "completed"
+    db.commit()
+    return {"message": "Clocked out", "clock_out": att.clock_out, "total_hours": att.total_hours}
+
+@app.get("/api/attendance")
+def get_attendance(request: Request, employee_id: int = 0, date: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBAttendance).filter(models.DBAttendance.client_id == client.id)
+    if employee_id:
+        query = query.filter(models.DBAttendance.employee_id == employee_id)
+    if date:
+        query = query.filter(models.DBAttendance.date == date)
+    records = query.order_by(models.DBAttendance.date.desc(), models.DBAttendance.clock_in.desc()).limit(200).all()
+    result = []
+    for a in records:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == a.employee_id).first()
+        result.append({
+            "id": a.id, "employee_id": a.employee_id,
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "employee_email": emp.email if emp else "",
+            "date": a.date, "clock_in": a.clock_in, "clock_out": a.clock_out,
+            "total_hours": a.total_hours, "status": a.status, "notes": a.notes,
+            "created_at": a.created_at,
+        })
+    return result
+
+@app.get("/api/attendance/today")
+def get_today_attendance(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    today = datetime.now().strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date == today,
+    ).all()
+    result = []
+    for a in records:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == a.employee_id).first()
+        result.append({
+            "id": a.id, "employee_id": a.employee_id,
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "date": a.date, "clock_in": a.clock_in, "clock_out": a.clock_out,
+            "total_hours": a.total_hours, "status": a.status,
+        })
+    return result
+
+@app.get("/api/attendance/stats")
+def get_attendance_stats(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    today = datetime.now().strftime("%Y-%m-%d")
+    total_employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.in_(["active", "onboarding"]),
+    ).count()
+    today_records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date == today,
+    ).all()
+    present = sum(1 for r in today_records if r.status in ("present", "completed"))
+    absent = total_employees - present
+    avg_hours = 0.0
+    if today_records:
+        avg_hours = round(sum(r.total_hours for r in today_records) / len(today_records), 2)
+    return {
+        "total_employees": total_employees,
+        "present": present,
+        "absent": max(0, absent),
+        "avg_hours": avg_hours,
+        "date": today,
+    }
+
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 if os.path.exists(frontend_path):

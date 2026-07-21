@@ -237,6 +237,18 @@ def ensure_columns():
                     assigned_to VARCHAR DEFAULT '',
                     due_date VARCHAR DEFAULT ''
                 )""",
+                """CREATE TABLE IF NOT EXISTS attendance (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id),
+                    employee_id INTEGER REFERENCES employees(id) NOT NULL,
+                    date VARCHAR NOT NULL,
+                    clock_in VARCHAR DEFAULT '',
+                    clock_out VARCHAR DEFAULT '',
+                    total_hours FLOAT DEFAULT 0.0,
+                    status VARCHAR DEFAULT 'present',
+                    notes VARCHAR DEFAULT '',
+                    created_at VARCHAR DEFAULT ''
+                )""",
             ]
             for sql in hr_tables:
                 try:
@@ -257,6 +269,10 @@ def ensure_columns():
                 "CREATE INDEX IF NOT EXISTS ix_departments_client_id ON departments (client_id)",
                 "CREATE INDEX IF NOT EXISTS ix_onboarding_items_client_id ON onboarding_items (client_id)",
                 "CREATE INDEX IF NOT EXISTS ix_onboarding_items_employee_id ON onboarding_items (employee_id)",
+                "CREATE INDEX IF NOT EXISTS ix_attendance_client_id ON attendance (client_id)",
+                "CREATE INDEX IF NOT EXISTS ix_attendance_employee_id ON attendance (employee_id)",
+                "CREATE INDEX IF NOT EXISTS ix_attendance_date ON attendance (date)",
+                "CREATE INDEX IF NOT EXISTS ix_attendance_status ON attendance (status)",
             ]
             for stmt in hr_indexes:
                 try:
