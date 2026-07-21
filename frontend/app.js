@@ -1486,7 +1486,7 @@ async function showGeneratePayslipModalForNew() {
     var empContainer = document.getElementById('ps-employee-id-container');
     if (!empContainer) return;
     try {
-        var empRes = await fetch('/api/employees?status=active');
+        var empRes = await fetch('/api/employees');
         var emps = await empRes.json();
         empContainer.innerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Select employee...</option></select>';
         var sel = document.getElementById('ps-employee-id');
