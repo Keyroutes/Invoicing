@@ -1699,7 +1699,9 @@ def delete_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
     return {"message": "Payslip deleted"}
 
 @app.post("/api/payslips/{ps_id}/send")
-def send_payslip_email(ps_id: int, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def send_payslip_email(ps_id: int, request: Request, background_tasks: BackgroundTasks, payload: Optional[SendInvoiceEmail] = None, db: Session = Depends(get_db)):
+    if payload is None:
+        payload = SendInvoiceEmail()
     client = get_client_user(request, db)
     ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
     if not ps:
@@ -1794,9 +1796,14 @@ Best regards,
 <p style="font-size:12px;color:#cbd5e1;margin:4px 0 0 0;">{company_name}</p>
 </div>
 </div>
-</div></body></html>"""
+</div></body></html>
+<img src="{request.base_url}api/payslip/track/open/{ps.tracking_id}" width="1" height="1" style="display:none;" alt="">
+"""
 
-    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body)
+    pdf_b64 = payload.pdf_data if payload.pdf_data else None
+    pdf_filename = f"{ps.number}.pdf" if pdf_b64 else "payslip.pdf"
+
+    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename)
     ps.status = "Sent" if ps.status == "Draft" else ps.status
     ps.sent = datetime.now().strftime("%Y-%m-%d")
     db.commit()

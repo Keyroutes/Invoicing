@@ -1540,10 +1540,20 @@ window.submitGeneratePayslip = submitGeneratePayslip;
 // --- Payslip Actions ---
 async function sendPayslipEmail() {
     if (!currentPayslipId) return;
+    var logoData = localStorage.getItem('company_logo') || '';
+    var pdfB64 = '';
     try {
-        var res = await fetch('/api/payslips/' + currentPayslipId + '/send', { method: 'POST' });
+        var doc = generatePayslipPDF();
+        pdfB64 = doc.output('datauristring').split(',')[1];
+    } catch (e) { console.error('PDF generation failed:', e); }
+    try {
+        var res = await fetch('/api/payslips/' + currentPayslipId + '/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logo_data: logoData, pdf_data: pdfB64 })
+        });
         var data = await res.json();
-        if (res.ok) { showToast('Payslip email sent!', 'success'); viewPayslip(currentPayslipId); }
+        if (res.ok) { showToast('Payslip email sent with PDF!', 'success'); viewPayslip(currentPayslipId); }
         else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
