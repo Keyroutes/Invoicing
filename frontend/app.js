@@ -1461,7 +1461,10 @@ window.viewPayslip = viewPayslip;
 async function showGeneratePayslipModal() {
     document.getElementById('generate-payslip-modal').style.display = 'flex';
     document.getElementById('generate-payslip-form').reset();
-    document.getElementById('ps-employee-id').value = currentEmployeeId || '';
+    var empContainer = document.getElementById('ps-employee-id-container');
+    if (empContainer) {
+        empContainer.innerHTML = '<input type="hidden" id="ps-employee-id" value="' + (currentEmployeeId || '') + '">';
+    }
     var today = new Date();
     var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -1474,22 +1477,21 @@ window.showGeneratePayslipModal = showGeneratePayslipModal;
 async function showGeneratePayslipModalForNew() {
     document.getElementById('generate-payslip-modal').style.display = 'flex';
     document.getElementById('generate-payslip-form').reset();
-    document.getElementById('ps-employee-id').value = '';
     var today = new Date();
     var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
     document.getElementById('ps-period-start').value = firstDay;
     document.getElementById('ps-period-end').value = lastDay;
     document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
-    // Load employees for selection
+    var empContainer = document.getElementById('ps-employee-id-container');
+    if (!empContainer) return;
     try {
         var empRes = await fetch('/api/employees?status=active');
         var emps = await empRes.json();
-        var empSel = document.getElementById('ps-employee-id');
-        empSel.outerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Select employee...</option></select>';
+        empContainer.innerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Select employee...</option></select>';
         var sel = document.getElementById('ps-employee-id');
         emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); empContainer.innerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Failed to load employees</option></select>'; }
 }
 window.showGeneratePayslipModalForNew = showGeneratePayslipModalForNew;
 
