@@ -1802,12 +1802,13 @@ function renderAttendance(records) {
     if (!tbody) return;
     tbody.innerHTML = '';
     if (records.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-secondary);">No attendance records found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-secondary);">No attendance records found.</td></tr>';
         return;
     }
     records.forEach(function(r) {
         var statusClass = r.status === 'completed' ? 'paid' : r.status === 'present' ? 'sent' : 'draft';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + r.employee_name + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (r.employee_email || '') + '</span></td><td>' + r.date + '</td><td>' + (r.clock_in || '-') + '</td><td>' + (r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + r.status + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
+        var typeBadge = r.check_type ? '<span class="status-pill status-' + (r.check_type === 'office' ? 'sent' : r.check_type === 'remote' ? 'paid' : 'draft') + '">' + r.check_type + '</span>' : '-';
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + r.employee_name + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (r.employee_email || '') + '</span></td><td>' + r.date + '</td><td>' + (r.clock_in || '-') + '</td><td>' + (r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td>' + typeBadge + '</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + (r.location_label || '') + '">' + (r.location_label ? r.location_label.substring(0, 30) : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + r.status + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
     });
 }
 
@@ -1878,10 +1879,156 @@ showView = function(viewId) {
     if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
-    if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); }
+    if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
 };
 window.showView = showView;
+
+// --- Attendance Sub-Tabs ---
+function switchAttTab(tab) {
+    ['live','history','analytics','settings'].forEach(t => {
+        var el = document.getElementById('att-sub-' + t);
+        if (el) el.classList.add('d-none');
+        var btn = document.getElementById('att-tab-' + t);
+        if (btn) { btn.classList.remove('btn-primary'); btn.classList.add('btn-outline'); btn.style.fontWeight = '400'; }
+    });
+    var active = document.getElementById('att-sub-' + tab);
+    if (active) active.classList.remove('d-none');
+    var activeBtn = document.getElementById('att-tab-' + tab);
+    if (activeBtn) { activeBtn.classList.remove('btn-outline'); activeBtn.classList.add('btn-primary'); activeBtn.style.fontWeight = '600'; }
+    if (tab === 'analytics') loadAttendanceAnalytics();
+    if (tab === 'settings') loadAttendanceSettings();
+}
+
+// --- Live Attendance Board ---
+async function loadLiveAttendance() {
+    try {
+        var res = await fetch('/api/attendance/live');
+        if (!res.ok) return;
+        var data = await res.json();
+        var grid = document.getElementById('live-attendance-grid');
+        if (!grid) return;
+        var colors = { present: '#10b981', absent: '#ef4444', completed: '#3b82f6' };
+        var icons = { office: 'bi-building', remote: 'bi-house', field: 'bi-geo', manual: 'bi-clock' };
+        var working = 0;
+        grid.innerHTML = data.map(function(emp) {
+            var isWorking = emp.clock_in && !emp.clock_out;
+            if (isWorking) working++;
+            var borderColor = isWorking ? '#10b981' : (emp.clock_out ? '#3b82f6' : '#e2e8f0');
+            var statusColor = isWorking ? '#10b981' : (emp.clock_out ? '#3b82f6' : '#94a3b8');
+            return '<div style="background:#fff;border:2px solid ' + borderColor + ';border-radius:12px;padding:16px;position:relative;">' +
+                '<div style="position:absolute;top:12px;right:12px;width:10px;height:10px;border-radius:50%;background:' + statusColor + ';"></div>' +
+                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:' + (isWorking ? '#d1fae5' : '#f1f5f9') + ';display:flex;align-items:center;justify-content:center;font-weight:700;color:' + statusColor + ';">' + emp.full_name.charAt(0) + '</div>' +
+                    '<div><div style="font-weight:600;font-size:0.95rem;">' + emp.full_name + '</div>' +
+                    '<div style="font-size:0.78rem;color:#64748b;">' + (emp.job_title || emp.department || 'Employee') + '</div></div>' +
+                '</div>' +
+                '<div style="display:flex;justify-content:space-between;font-size:0.82rem;color:#64748b;">' +
+                    '<span><i class="bi bi-clock"></i> ' + (emp.clock_in || '--:--') + '</span>' +
+                    '<span><i class="bi bi-clock-history"></i> ' + (emp.clock_out || '--:--') + '</span>' +
+                    '<span><i class="bi bi-hourglass-split"></i> ' + (emp.total_hours || 0) + 'h</span>' +
+                '</div>' +
+                '<div style="margin-top:8px;display:flex;gap:8px;font-size:0.75rem;color:#64748b;">' +
+                    (emp.check_type ? '<span><i class="bi ' + (icons[emp.check_type] || 'bi-geo') + '"></i> ' + emp.check_type + '</span>' : '') +
+                    (emp.location_label ? '<span title="' + emp.location_label + '"><i class="bi bi-geo-alt"></i></span>' : '') +
+                    (emp.ip_address ? '<span title="IP: ' + emp.ip_address + '"><i class="bi bi-wifi"></i></span>' : '') +
+                '</div>' +
+            '</div>';
+        }).join('');
+        var el = document.getElementById('att-working');
+        if (el) el.textContent = working;
+    } catch (e) {}
+}
+
+// --- Attendance Analytics ---
+async function loadAttendanceAnalytics() {
+    try {
+        var res = await fetch('/api/attendance/analytics?days=30');
+        if (!res.ok) return;
+        var data = await res.json();
+        document.getElementById('ana-avg-hours').textContent = data.avg_daily_hours + 'h';
+        document.getElementById('ana-late').textContent = data.late_arrivals;
+        document.getElementById('ana-overtime').textContent = data.overtime_sessions;
+        document.getElementById('ana-rate').textContent = data.avg_attendance_rate + '%';
+        var chart = document.getElementById('analytics-chart');
+        if (chart && data.daily) {
+            var days = Object.entries(data.daily).slice(-14);
+            var maxPresent = Math.max(...days.map(function(d) { return d[1].present; }), 1);
+            chart.innerHTML = '<div style="display:flex;align-items:end;gap:4px;height:180px;padding:10px 0;">' +
+                days.map(function(d) {
+                    var pct = (d[1].present / maxPresent) * 100;
+                    return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">' +
+                        '<div style="font-size:0.7rem;font-weight:600;color:#334155;">' + d[1].present + '</div>' +
+                        '<div style="width:100%;height:' + pct + '%;background:linear-gradient(180deg,#4361ee,#3a56d4);border-radius:4px 4px 0 0;min-height:4px;"></div>' +
+                        '<div style="font-size:0.65rem;color:#64748b;text-align:center;">' + d[0].slice(5) + '</div>' +
+                    '</div>';
+                }).join('') +
+            '</div>';
+        }
+    } catch (e) {}
+}
+
+// --- Attendance Settings ---
+async function loadAttendanceSettings() {
+    try {
+        var res = await fetch('/api/attendance/settings');
+        if (!res.ok) return;
+        var data = await res.json();
+        document.getElementById('set-office-name').value = data.office_name || 'Head Office';
+        document.getElementById('set-radius').value = data.geofence_radius || 200;
+        document.getElementById('set-lat').value = data.office_lat || '';
+        document.getElementById('set-lng').value = data.office_lng || '';
+        document.getElementById('set-start').value = data.work_start || '09:00';
+        document.getElementById('set-end').value = data.work_end || '17:30';
+        document.getElementById('set-grace').value = data.grace_minutes || 15;
+        document.getElementById('set-auto-co').value = data.auto_clockout_hours || 10;
+        document.getElementById('set-max-ot').value = data.max_overtime_hours || 4;
+        document.getElementById('set-allow-remote').checked = data.allow_remote !== false;
+        document.getElementById('set-require-loc').checked = data.require_location !== false;
+    } catch (e) {}
+}
+
+async function saveAttendanceSettings() {
+    try {
+        var body = {
+            office_name: document.getElementById('set-office-name').value,
+            geofence_radius: parseFloat(document.getElementById('set-radius').value) || 200,
+            office_lat: parseFloat(document.getElementById('set-lat').value) || 0,
+            office_lng: parseFloat(document.getElementById('set-lng').value) || 0,
+            work_start: document.getElementById('set-start').value,
+            work_end: document.getElementById('set-end').value,
+            grace_minutes: parseFloat(document.getElementById('set-grace').value) || 15,
+            auto_clockout_hours: parseFloat(document.getElementById('set-auto-co').value) || 10,
+            max_overtime_hours: parseFloat(document.getElementById('set-max-ot').value) || 4,
+            allow_remote: document.getElementById('set-allow-remote').checked,
+            require_location: document.getElementById('set-require-loc').checked,
+        };
+        var res = await fetch('/api/attendance/settings', { method: 'PUT', body: JSON.stringify(body) });
+        if (res.ok) showToast('Settings saved successfully', 'success');
+        else showToast('Failed to save settings', 'error');
+    } catch (e) { showToast('Error saving settings', 'error'); }
+}
+
+// --- Export Attendance ---
+async function exportAttendance() {
+    try {
+        var dateFilter = document.getElementById('att-date-filter').value;
+        var url = '/api/attendance/export' + (dateFilter ? '?start_date=' + dateFilter + '&end_date=' + dateFilter : '');
+        var res = await fetch(url);
+        if (!res.ok) return;
+        var data = await res.json();
+        if (!data.length) { showToast('No records to export', 'warning'); return; }
+        var csv = Object.keys(data[0]).join(',') + '\n' + data.map(function(r) {
+            return Object.values(r).map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(',');
+        }).join('\n');
+        var blob = new Blob([csv], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'attendance-' + (dateFilter || 'all') + '.csv';
+        a.click();
+        showToast('Exported ' + data.length + ' records', 'success');
+    } catch (e) { showToast('Export failed', 'error'); }
+}
 
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -1917,4 +2064,16 @@ document.addEventListener('DOMContentLoaded', function() {
     var dueEl = document.getElementById('inv-due-date');
     if (issueEl) issueEl.value = today;
     if (dueEl) dueEl.value = dueDate;
+
+    // Auto-refresh live attendance every 30 seconds when on attendance view
+    setInterval(function() {
+        var attView = document.getElementById('attendance-view');
+        if (attView && attView.style.display !== 'none') {
+            var liveSub = document.getElementById('att-sub-live');
+            if (liveSub && !liveSub.classList.contains('d-none')) {
+                loadLiveAttendance();
+                loadAttendanceStats();
+            }
+        }
+    }, 30000);
 });

@@ -3,6 +3,11 @@ from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
 import uuid
+import hashlib
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
 class DBClient(Base):
@@ -164,6 +169,11 @@ class DBEmployee(Base):
     emergency_contact = Column(String, default="")
     emergency_phone = Column(String, default="")
 
+    password_hash = Column(String, default="")
+    work_location = Column(String, default="")
+    latitude = Column(Float, default=0.0)
+    longitude = Column(Float, default=0.0)
+
     start_date = Column(String, default="")
     end_date = Column(String, default="")
     status = Column(String, default="active", index=True)
@@ -254,5 +264,32 @@ class DBAttendance(Base):
     clock_out = Column(String, default="")
     total_hours = Column(Float, default=0.0)
     status = Column(String, default="present", index=True)
+    check_type = Column(String, default="manual")
+    ip_address = Column(String, default="")
+    device_info = Column(String, default="")
+    location_lat = Column(Float, default=0.0)
+    location_lng = Column(Float, default=0.0)
+    location_label = Column(String, default="")
+    break_minutes = Column(Float, default=0.0)
+    overtime_hours = Column(Float, default=0.0)
     notes = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBAttendanceSettings(Base):
+    __tablename__ = "attendance_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, unique=True)
+    office_name = Column(String, default="Head Office")
+    office_lat = Column(Float, default=0.0)
+    office_lng = Column(Float, default=0.0)
+    geofence_radius = Column(Float, default=200.0)
+    work_start = Column(String, default="09:00")
+    work_end = Column(String, default="17:30")
+    grace_minutes = Column(Float, default=15.0)
+    auto_clockout_hours = Column(Float, default=10.0)
+    max_overtime_hours = Column(Float, default=4.0)
+    allow_remote = Column(Boolean, default=True)
+    require_location = Column(Boolean, default=True)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

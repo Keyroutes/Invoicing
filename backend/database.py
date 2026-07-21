@@ -246,7 +246,31 @@ def ensure_columns():
                     clock_out VARCHAR DEFAULT '',
                     total_hours FLOAT DEFAULT 0.0,
                     status VARCHAR DEFAULT 'present',
+                    check_type VARCHAR DEFAULT 'manual',
+                    ip_address VARCHAR DEFAULT '',
+                    device_info VARCHAR DEFAULT '',
+                    location_lat FLOAT DEFAULT 0.0,
+                    location_lng FLOAT DEFAULT 0.0,
+                    location_label VARCHAR DEFAULT '',
+                    break_minutes FLOAT DEFAULT 0.0,
+                    overtime_hours FLOAT DEFAULT 0.0,
                     notes VARCHAR DEFAULT '',
+                    created_at VARCHAR DEFAULT ''
+                )""",
+                """CREATE TABLE IF NOT EXISTS attendance_settings (
+                    id SERIAL PRIMARY KEY,
+                    client_id INTEGER REFERENCES clients(id) UNIQUE,
+                    office_name VARCHAR DEFAULT 'Head Office',
+                    office_lat FLOAT DEFAULT 0.0,
+                    office_lng FLOAT DEFAULT 0.0,
+                    geofence_radius FLOAT DEFAULT 200.0,
+                    work_start VARCHAR DEFAULT '09:00',
+                    work_end VARCHAR DEFAULT '17:30',
+                    grace_minutes FLOAT DEFAULT 15.0,
+                    auto_clockout_hours FLOAT DEFAULT 10.0,
+                    max_overtime_hours FLOAT DEFAULT 4.0,
+                    allow_remote BOOLEAN DEFAULT TRUE,
+                    require_location BOOLEAN DEFAULT TRUE,
                     created_at VARCHAR DEFAULT ''
                 )""",
             ]
@@ -273,8 +297,23 @@ def ensure_columns():
                 "CREATE INDEX IF NOT EXISTS ix_attendance_employee_id ON attendance (employee_id)",
                 "CREATE INDEX IF NOT EXISTS ix_attendance_date ON attendance (date)",
                 "CREATE INDEX IF NOT EXISTS ix_attendance_status ON attendance (status)",
+                "CREATE INDEX IF NOT EXISTS ix_attendance_settings_client_id ON attendance_settings (client_id)",
             ]
             for stmt in hr_indexes:
+                try:
+                    conn.execute(text(stmt))
+                except Exception:
+                    pass
+            conn.commit()
+
+            # Add new columns to existing tables
+            alter_statements = [
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash VARCHAR DEFAULT ''",
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS work_location VARCHAR DEFAULT ''",
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS latitude FLOAT DEFAULT 0.0",
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS longitude FLOAT DEFAULT 0.0",
+            ]
+            for stmt in alter_statements:
                 try:
                     conn.execute(text(stmt))
                 except Exception:

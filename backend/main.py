@@ -2009,6 +2009,436 @@ def get_attendance_stats(request: Request, db: Session = Depends(get_db)):
         "date": today,
     }
 
+@app.get("/api/attendance/live")
+def get_live_attendance(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    today = datetime.now().strftime("%Y-%m-%d")
+    all_active = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.in_(["active", "onboarding"]),
+    ).all()
+    today_records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date == today,
+    ).all()
+    record_map = {r.employee_id: r for r in today_records}
+    result = []
+    for emp in all_active:
+        rec = record_map.get(emp.id)
+        dept_name = ""
+        if emp.department_id:
+            dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == emp.department_id).first()
+            dept_name = dept.name if dept else ""
+        result.append({
+            "id": emp.id, "employee_id": emp.employee_id,
+            "full_name": f"{emp.first_name} {emp.last_name}",
+            "email": emp.email, "job_title": emp.job_title,
+            "department": dept_name, "status": emp.status,
+            "clock_in": rec.clock_in if rec else "",
+            "clock_out": rec.clock_out if rec else "",
+            "total_hours": rec.total_hours if rec else 0,
+            "attendance_status": rec.status if rec else "absent",
+            "location_label": rec.location_label if rec else "",
+            "ip_address": rec.ip_address if rec else "",
+            "check_type": rec.check_type if rec else "",
+        })
+    return result
+
+@app.get("/api/attendance/analytics")
+def get_attendance_analytics(request: Request, days: int = 30, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    from datetime import timedelta
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date >= start_date,
+    ).all()
+    total_employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.in_(["active", "onboarding"]),
+    ).count()
+    daily_stats = {}
+    late_count = 0
+    overtime_count = 0
+    total_hours_all = 0
+    remote_count = 0
+    for r in records:
+        d = r.date
+        if d not in daily_stats:
+            daily_stats[d] = {"present": 0, "absent": 0, "hours": 0}
+        daily_stats[d]["present"] += 1
+        daily_stats[d]["hours"] += r.total_hours or 0
+        total_hours_all += r.total_hours or 0
+        if r.clock_in and r.clock_in > "09:15":
+            late_count += 1
+        if r.overtime_hours and r.overtime_hours > 0:
+            overtime_count += 1
+        if r.location_label and "remote" in r.location_label.lower():
+            remote_count += 1
+    days_with_data = max(len(daily_stats), 1)
+    for d in daily_stats:
+        daily_stats[d]["absent"] = total_employees - daily_stats[d]["present"]
+    return {
+        "period_days": days,
+        "total_records": len(records),
+        "avg_daily_hours": round(total_hours_all / max(len(records), 1), 2),
+        "late_arrivals": late_count,
+        "overtime_sessions": overtime_count,
+        "remote_sessions": remote_count,
+        "avg_attendance_rate": round(sum(d["present"] for d in daily_stats.values()) / (days_with_data * max(total_employees, 1)) * 100, 1),
+        "daily": dict(sorted(daily_stats.items())),
+    }
+
+@app.get("/api/attendance/export")
+def export_attendance(request: Request, start_date: str = "", end_date: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBAttendance).filter(models.DBAttendance.client_id == client.id)
+    if start_date:
+        query = query.filter(models.DBAttendance.date >= start_date)
+    if end_date:
+        query = query.filter(models.DBAttendance.date <= end_date)
+    records = query.order_by(models.DBAttendance.date.desc()).limit(1000).all()
+    rows = []
+    for r in records:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == r.employee_id).first()
+        rows.append({
+            "Employee": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "Email": emp.email if emp else "",
+            "Date": r.date, "Clock In": r.clock_in, "Clock Out": r.clock_out,
+            "Hours": r.total_hours, "Status": r.status, "Type": r.check_type,
+            "Location": r.location_label, "IP": r.ip_address,
+            "Overtime": r.overtime_hours, "Notes": r.notes,
+        })
+    return rows
+
+@app.put("/api/attendance/settings")
+def update_attendance_settings(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client.id).first()
+    if not settings:
+        settings = models.DBAttendanceSettings(client_id=client.id)
+        db.add(settings)
+    if body:
+        for key, val in body.items():
+            if hasattr(settings, key) and key not in ("id", "client_id", "created_at"):
+                setattr(settings, key, val)
+    db.commit()
+    return {"message": "Settings saved"}
+
+@app.get("/api/attendance/settings")
+def get_attendance_settings(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client.id).first()
+    if not settings:
+        return {
+            "office_name": "Head Office", "office_lat": 0.0, "office_lng": 0.0,
+            "geofence_radius": 200.0, "work_start": "09:00", "work_end": "17:30",
+            "grace_minutes": 15.0, "auto_clockout_hours": 10.0, "max_overtime_hours": 4.0,
+            "allow_remote": True, "require_location": True,
+        }
+    return {
+        "office_name": settings.office_name, "office_lat": settings.office_lat,
+        "office_lng": settings.office_lng, "geofence_radius": settings.geofence_radius,
+        "work_start": settings.work_start, "work_end": settings.work_end,
+        "grace_minutes": settings.grace_minutes,
+        "auto_clockout_hours": settings.auto_clockout_hours,
+        "max_overtime_hours": settings.max_overtime_hours,
+        "allow_remote": settings.allow_remote, "require_location": settings.require_location,
+    }
+
+@app.put("/api/employees/{emp_id}/set-password")
+def set_employee_password(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if not body or not body.get("password"):
+        raise HTTPException(status_code=400, detail="Password required")
+    emp.password_hash = models.hash_password(body["password"])
+    db.commit()
+    return {"message": "Password set successfully"}
+
+@app.post("/api/employee/auth/login")
+def employee_login(body: dict = None, request: Request = None, db: Session = Depends(get_db)):
+    if not body or not body.get("email") or not body.get("password"):
+        raise HTTPException(status_code=400, detail="Email and password required")
+    email = body["email"].strip().lower()
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.email.ilike(email)).first()
+    if not emp:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not emp.password_hash:
+        raise HTTPException(status_code=401, detail="Password not set. Contact your administrator.")
+    if models.hash_password(body["password"]) != emp.password_hash:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if emp.status in ("terminated",):
+        raise HTTPException(status_code=403, detail="Account deactivated")
+    request.session['employee_id'] = emp.id
+    request.session['employee_client_id'] = emp.client_id
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M:%S")
+    ip = request.client.host if request and request.client else ""
+    device = body.get("device_info", "")
+    lat = body.get("latitude", 0.0)
+    lng = body.get("longitude", 0.0)
+    loc_label = body.get("location_label", "")
+    existing = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp.id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == emp.client_id,
+    ).first()
+    if existing and existing.clock_in:
+        return {"message": "Already clocked in today", "employee": {"id": emp.id, "name": f"{emp.first_name} {emp.last_name}", "email": emp.email}, "clock_in": existing.clock_in}
+    check_type = "remote"
+    if lat and lng:
+        settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == emp.client_id).first()
+        if settings and settings.office_lat and settings.office_lng:
+            from math import radians, cos, sin, asin, sqrt
+            dlat = radians(lat - settings.office_lat)
+            dlng = radians(lng - settings.office_lng)
+            a = sin(dlat/2)**2 + cos(radians(settings.office_lat)) * cos(radians(lat)) * sin(dlng/2)**2
+            dist = 2 * 6371000 * asin(sqrt(a))
+            if dist <= settings.geofence_radius:
+                check_type = "office"
+            else:
+                check_type = "field"
+    att = models.DBAttendance(
+        client_id=emp.client_id, employee_id=emp.id, date=today,
+        clock_in=now_str, status="present", check_type=check_type,
+        ip_address=ip, device_info=device,
+        location_lat=lat, location_lng=lng, location_label=loc_label,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "message": "Clocked in automatically",
+        "employee": {"id": emp.id, "name": f"{emp.first_name} {emp.last_name}", "email": emp.email},
+        "clock_in": now_str, "check_type": check_type,
+    }
+
+@app.post("/api/employee/auth/logout")
+def employee_logout(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        return {"message": "Not logged in"}
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M:%S")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    hours = 0.0
+    overtime = 0.0
+    if att and att.clock_in and not att.clock_out:
+        att.clock_out = now_str
+        try:
+            cin = datetime.strptime(att.clock_in, "%H:%M:%S")
+            cout = datetime.strptime(now_str, "%H:%M:%S")
+            att.total_hours = round((cout - cin).total_seconds() / 3600, 2)
+            hours = att.total_hours
+            settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
+            if settings:
+                try:
+                    wh_start = datetime.strptime(settings.work_start, "%H:%M")
+                    wh_end = datetime.strptime(settings.work_end, "%H:%M")
+                    work_hours = (wh_end - wh_start).total_seconds() / 3600
+                except Exception:
+                    work_hours = 8.0
+                if hours > work_hours:
+                    overtime = round(hours - work_hours, 2)
+                    att.overtime_hours = overtime
+            att.status = "completed"
+        except Exception:
+            pass
+        db.commit()
+    request.session.pop('employee_id', None)
+    request.session.pop('employee_client_id', None)
+    return {"message": "Logged out", "total_hours": hours, "overtime_hours": overtime}
+
+@app.get("/api/employee/auth/me")
+def employee_me(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    dept_name = ""
+    if emp.department_id:
+        dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == emp.department_id).first()
+        dept_name = dept.name if dept else ""
+    today = datetime.now().strftime("%Y-%m-%d")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp.id,
+        models.DBAttendance.date == today,
+    ).first()
+    return {
+        "id": emp.id, "employee_id": emp.employee_id,
+        "full_name": f"{emp.first_name} {emp.last_name}",
+        "email": emp.email, "job_title": emp.job_title,
+        "department": dept_name, "phone": emp.phone,
+        "status": emp.status, "work_location": emp.work_location,
+        "today_clock_in": att.clock_in if att else "",
+        "today_clock_out": att.clock_out if att else "",
+        "today_hours": att.total_hours if att else 0,
+        "today_status": att.status if att else "absent",
+    }
+
+@app.post("/api/employee/attendance/clock-in")
+def employee_clock_in(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M:%S")
+    existing = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    if existing and existing.clock_in:
+        raise HTTPException(status_code=400, detail="Already clocked in today")
+    ip = request.client.host if request and request.client else ""
+    device = ""
+    lat = lng = 0.0
+    loc_label = ""
+    if body:
+        ip = body.get("ip_address", ip)
+        device = body.get("device_info", "")
+        lat = body.get("latitude", 0.0)
+        lng = body.get("longitude", 0.0)
+        loc_label = body.get("location_label", "")
+    check_type = "manual"
+    if lat and lng:
+        settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
+        if settings and settings.office_lat and settings.office_lng:
+            from math import radians, cos, sin, asin, sqrt
+            dlat = radians(lat - settings.office_lat)
+            dlng = radians(lng - settings.office_lng)
+            a = sin(dlat/2)**2 + cos(radians(settings.office_lat)) * cos(radians(lat)) * sin(dlng/2)**2
+            dist = 2 * 6371000 * asin(sqrt(a))
+            if dist <= settings.geofence_radius:
+                check_type = "office"
+            else:
+                check_type = "field"
+    att = models.DBAttendance(
+        client_id=client_id, employee_id=emp_id, date=today,
+        clock_in=now_str, status="present", check_type=check_type,
+        ip_address=ip, device_info=device,
+        location_lat=lat, location_lng=lng, location_label=loc_label,
+    )
+    db.add(att)
+    db.commit()
+    return {"message": "Clocked in", "clock_in": now_str, "check_type": check_type}
+
+@app.post("/api/employee/attendance/clock-out")
+def employee_clock_out(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M:%S")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    if not att or not att.clock_in:
+        raise HTTPException(status_code=400, detail="No clock-in found for today")
+    if att.clock_out:
+        raise HTTPException(status_code=400, detail="Already clocked out")
+    att.clock_out = now_str
+    try:
+        cin = datetime.strptime(att.clock_in, "%H:%M:%S")
+        cout = datetime.strptime(now_str, "%H:%M:%S")
+        att.total_hours = round((cout - cin).total_seconds() / 3600, 2)
+        settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
+        if settings:
+            try:
+                wh_start = datetime.strptime(settings.work_start, "%H:%M")
+                wh_end = datetime.strptime(settings.work_end, "%H:%M")
+                work_hours = (wh_end - wh_start).total_seconds() / 3600
+            except Exception:
+                work_hours = 8.0
+            if att.total_hours > work_hours:
+                att.overtime_hours = round(att.total_hours - work_hours, 2)
+        att.status = "completed"
+    except Exception:
+        pass
+    db.commit()
+    return {"message": "Clocked out", "total_hours": att.total_hours, "overtime_hours": att.overtime_hours}
+
+@app.get("/api/employee/dashboard")
+def employee_dashboard(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    from datetime import timedelta
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date >= thirty_days_ago,
+    ).order_by(models.DBAttendance.date.desc()).limit(30).all()
+    attendance = [{
+        "date": r.date, "clock_in": r.clock_in, "clock_out": r.clock_out,
+        "total_hours": r.total_hours, "status": r.status, "check_type": r.check_type,
+    } for r in records]
+    payslips = db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp_id).order_by(models.DBPayslip.created_at.desc()).limit(6).all()
+    payslip_list = [{
+        "number": p.number, "period_start": p.period_start, "period_end": p.period_end,
+        "pay_date": p.pay_date, "net_pay": p.net_pay, "status": p.status,
+    } for p in payslips]
+    onboarding = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).all()
+    onboarding_list = [{
+        "id": o.id, "title": o.title, "is_completed": o.is_completed,
+        "category": o.category, "assigned_to": o.assigned_to,
+    } for o in onboarding]
+    days_present = sum(1 for r in records if r.status in ("present", "completed"))
+    total_hours = sum(r.total_hours for r in records if r.total_hours)
+    avg_hours = round(total_hours / max(len(records), 1), 2)
+    return {
+        "employee": {"full_name": f"{emp.first_name} {emp.last_name}", "email": emp.email, "job_title": emp.job_title},
+        "attendance_summary": {"days_present": days_present, "total_hours": round(total_hours, 2), "avg_hours": avg_hours},
+        "attendance": attendance,
+        "payslips": payslip_list,
+        "onboarding": onboarding_list,
+    }
+
+@app.post("/api/employee/heartbeat")
+def employee_heartbeat(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        return {"status": "no_session"}
+    today = datetime.now().strftime("%Y-%m-%d")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+    ).first()
+    if att and att.clock_in and not att.clock_out:
+        try:
+            cin = datetime.strptime(att.clock_in, "%H:%M:%S")
+            now_time = datetime.strptime(datetime.now().strftime("%H:%M:%S"), "%H:%M:%S")
+            elapsed = (now_time - cin).total_seconds() / 3600
+            settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == att.client_id).first()
+            max_hours = settings.auto_clockout_hours if settings else 10.0
+            if elapsed >= max_hours:
+                att.clock_out = datetime.now().strftime("%H:%M:%S")
+                att.total_hours = round(elapsed, 2)
+                att.status = "completed"
+                att.notes = "Auto clocked out"
+                db.commit()
+                return {"status": "auto_clocked_out", "total_hours": att.total_hours}
+        except Exception:
+            pass
+    return {"status": "ok"}
+
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 if os.path.exists(frontend_path):
