@@ -1462,6 +1462,7 @@ window.viewPayslip = viewPayslip;
 async function showGeneratePayslipModal() {
     document.getElementById('generate-payslip-modal').style.display = 'flex';
     document.getElementById('generate-payslip-form').reset();
+    document.getElementById('ps-preview').style.display = 'none';
     var empContainer = document.getElementById('ps-employee-id-container');
     if (empContainer) {
         empContainer.innerHTML = '<input type="hidden" id="ps-employee-id" value="' + (currentEmployeeId || '') + '">';
@@ -1472,12 +1473,14 @@ async function showGeneratePayslipModal() {
     document.getElementById('ps-period-start').value = firstDay;
     document.getElementById('ps-period-end').value = lastDay;
     document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
+    if (currentEmployeeId) setTimeout(function() { autoFetchPayDetails(); }, 200);
 }
 window.showGeneratePayslipModal = showGeneratePayslipModal;
 
 async function showGeneratePayslipModalForNew() {
     document.getElementById('generate-payslip-modal').style.display = 'flex';
     document.getElementById('generate-payslip-form').reset();
+    document.getElementById('ps-preview').style.display = 'none';
     var today = new Date();
     var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -1489,7 +1492,7 @@ async function showGeneratePayslipModalForNew() {
     try {
         var empRes = await fetch('/api/employees');
         var emps = await empRes.json();
-        empContainer.innerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Select employee...</option></select>';
+        empContainer.innerHTML = '<select id="ps-employee-id" class="form-control" onchange="autoFetchPayDetails()"><option value="">Select employee...</option></select>';
         var sel = document.getElementById('ps-employee-id');
         emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
     } catch (e) { console.error(e); empContainer.innerHTML = '<select id="ps-employee-id" class="form-control"><option value="">Failed to load employees</option></select>'; }
@@ -1500,6 +1503,64 @@ function closeGeneratePayslipModal() {
     document.getElementById('generate-payslip-modal').style.display = 'none';
 }
 window.closeGeneratePayslipModal = closeGeneratePayslipModal;
+
+var currentPayDetails = null;
+async function autoFetchPayDetails() {
+    var empId = document.getElementById('ps-employee-id').value;
+    var periodStart = document.getElementById('ps-period-start').value;
+    var periodEnd = document.getElementById('ps-period-end').value;
+    if (!empId || !periodStart || !periodEnd) return;
+    try {
+        var url = '/api/employees/' + empId + '/pay-details?period_start=' + periodStart + '&period_end=' + periodEnd;
+        var res = await fetch(url);
+        if (!res.ok) return;
+        currentPayDetails = await res.json();
+        document.getElementById('ps-basic').value = currentPayDetails.salary || 0;
+        document.getElementById('ps-hours').value = currentPayDetails.hours_worked || 0;
+        document.getElementById('ps-ot-hours').value = currentPayDetails.overtime_hours || 0;
+        document.getElementById('ps-ot-rate').value = currentPayDetails.overtime_rate || 0;
+        document.getElementById('ps-bonus').value = currentPayDetails.bonus || 0;
+        document.getElementById('ps-allowances').value = currentPayDetails.allowances || 0;
+        recalcPayslip();
+    } catch (e) { console.error('Failed to fetch pay details:', e); }
+}
+window.autoFetchPayDetails = autoFetchPayDetails;
+
+function recalcPayslip() {
+    var basic = parseFloat(document.getElementById('ps-basic').value) || 0;
+    var otHours = parseFloat(document.getElementById('ps-ot-hours').value) || 0;
+    var otRate = parseFloat(document.getElementById('ps-ot-rate').value) || 0;
+    var bonus = parseFloat(document.getElementById('ps-bonus').value) || 0;
+    var allowances = parseFloat(document.getElementById('ps-allowances').value) || 0;
+    var insurance = parseFloat(document.getElementById('ps-insurance').value) || 0;
+    var retirement = parseFloat(document.getElementById('ps-retirement').value) || 0;
+    var otherDed = parseFloat(document.getElementById('ps-other-ded').value) || 0;
+    var hoursWorked = parseFloat(document.getElementById('ps-hours').value) || 0;
+    var otPay = otHours * otRate;
+    var gross = basic + otPay + bonus + allowances;
+    var taxRate = currentPayDetails ? (currentPayDetails.tax_rate || 0) : 0;
+    var empDeductions = currentPayDetails ? (currentPayDetails.deductions || 0) : 0;
+    var tax = Math.round(gross * (taxRate / 100) * 100) / 100;
+    var totalDed = tax + empDeductions + insurance + retirement + otherDed;
+    var net = Math.round((gross - totalDed) * 100) / 100;
+    document.getElementById('prev-basic').textContent = '$' + basic.toLocaleString();
+    document.getElementById('prev-ot').textContent = '$' + otPay.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-bonus').textContent = '$' + bonus.toLocaleString();
+    document.getElementById('prev-allow').textContent = '$' + allowances.toLocaleString();
+    document.getElementById('prev-gross').textContent = '$' + gross.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-tax').textContent = '$' + tax.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-ded').textContent = '$' + (empDeductions + insurance + retirement + otherDed).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-net').textContent = '$' + net.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('ps-preview').style.display = 'block';
+    var attInfo = document.getElementById('prev-attendance');
+    if (currentPayDetails && attInfo) {
+        var parts = [];
+        if (hoursWorked > 0) parts.push(hoursWorked + 'h worked');
+        if (currentPayDetails.overtime_hours > 0) parts.push(currentPayDetails.overtime_hours + 'h overtime');
+        attInfo.textContent = parts.length ? 'Attendance: ' + parts.join(', ') : 'No attendance records for this period';
+    }
+}
+window.recalcPayslip = recalcPayslip;
 
 async function submitGeneratePayslip() {
     var empIdVal = document.getElementById('ps-employee-id').value;

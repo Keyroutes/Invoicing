@@ -977,20 +977,36 @@
                 <form id="generate-payslip-form" onsubmit="return false;">
                     <div id="ps-employee-id-container"><input type="hidden" id="ps-employee-id"></div>
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                        <div class="form-group"><label>Period Start *</label><input type="date" id="ps-period-start" class="form-control" required></div>
-                        <div class="form-group"><label>Period End *</label><input type="date" id="ps-period-end" class="form-control" required></div>
+                        <div class="form-group"><label>Period Start *</label><input type="date" id="ps-period-start" class="form-control" required onchange="autoFetchPayDetails()"></div>
+                        <div class="form-group"><label>Period End *</label><input type="date" id="ps-period-end" class="form-control" required onchange="autoFetchPayDetails()"></div>
                         <div class="form-group"><label>Pay Date *</label><input type="date" id="ps-pay-date" class="form-control" required></div>
-                        <div class="form-group"><label>Hours Worked</label><input type="number" id="ps-hours" class="form-control" step="0.5" value="0"></div>
-                        <div class="form-group"><label>Basic Salary</label><input type="number" id="ps-basic" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Overtime Hours</label><input type="number" id="ps-ot-hours" class="form-control" step="0.5" value="0"></div>
-                        <div class="form-group"><label>Overtime Rate</label><input type="number" id="ps-ot-rate" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Bonus</label><input type="number" id="ps-bonus" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Allowances</label><input type="number" id="ps-allowances" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Insurance</label><input type="number" id="ps-insurance" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Retirement</label><input type="number" id="ps-retirement" class="form-control" step="0.01" value="0"></div>
-                        <div class="form-group"><label>Other Deductions</label><input type="number" id="ps-other-ded" class="form-control" step="0.01" value="0"></div>
+                        <div class="form-group"><label>Hours Worked</label><input type="number" id="ps-hours" class="form-control" step="0.5" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Basic Salary</label><input type="number" id="ps-basic" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Overtime Hours</label><input type="number" id="ps-ot-hours" class="form-control" step="0.5" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Overtime Rate</label><input type="number" id="ps-ot-rate" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Bonus</label><input type="number" id="ps-bonus" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Allowances</label><input type="number" id="ps-allowances" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Insurance</label><input type="number" id="ps-insurance" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Retirement</label><input type="number" id="ps-retirement" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
+                        <div class="form-group"><label>Other Deductions</label><input type="number" id="ps-other-ded" class="form-control" step="0.01" value="0" oninput="recalcPayslip()"></div>
                     </div>
                     <div class="form-group"><label>Notes</label><textarea id="ps-notes" class="form-control" rows="2"></textarea></div>
+
+                    <!-- Live Preview -->
+                    <div id="ps-preview" style="background:rgba(67,97,238,0.06);border:1px solid rgba(67,97,238,0.15);border-radius:12px;padding:16px;margin-top:16px;display:none;">
+                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:12px;color:var(--primary-color);">Live Preview</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem;">
+                            <div>Basic Salary: <strong id="prev-basic">$0</strong></div>
+                            <div>Overtime Pay: <strong id="prev-ot">$0</strong></div>
+                            <div>Bonus: <strong id="prev-bonus">$0</strong></div>
+                            <div>Allowances: <strong id="prev-allow">$0</strong></div>
+                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;">Gross Pay: <strong id="prev-gross" style="color:var(--primary-color);">$0</strong></div>
+                            <div>Tax: <strong id="prev-tax" style="color:var(--danger-color);">$0</strong></div>
+                            <div>Deductions: <strong id="prev-ded" style="color:var(--danger-color);">$0</strong></div>
+                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;font-size:1.1rem;">Net Pay: <strong id="prev-net" style="color:var(--success-color);">$0</strong></div>
+                        </div>
+                        <div id="prev-attendance" style="margin-top:12px;font-size:0.8rem;color:var(--text-secondary);"></div>
+                    </div>
                     <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
                         <button type="button" class="btn btn-outline" onclick="closeGeneratePayslipModal()">Cancel</button>
                         <button type="submit" class="btn btn-primary" onclick="submitGeneratePayslip()">Generate Payslip</button>

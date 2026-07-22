@@ -1677,6 +1677,68 @@ def get_payslips(request: Request, status: str = "", db: Session = Depends(get_d
         })
     return result
 
+@app.get("/api/employees/{emp_id}/pay-details")
+def get_employee_pay_details(emp_id: int, request: Request, period_start: str = "", period_end: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    hours_worked = 0.0
+    overtime_hours = 0.0
+    if period_start and period_end:
+        records = db.query(models.DBAttendance).filter(
+            models.DBAttendance.employee_id == emp_id,
+            models.DBAttendance.client_id == client.id,
+            models.DBAttendance.date >= period_start,
+            models.DBAttendance.date <= period_end,
+        ).all()
+        for r in records:
+            hours_worked += r.total_hours or 0
+            overtime_hours += r.overtime_hours or 0
+        hours_worked = round(hours_worked, 2)
+        overtime_hours = round(overtime_hours, 2)
+
+    ot_rate = emp.hourly_rate or 0.0
+    if ot_rate == 0 and emp.salary > 0:
+        ot_rate = round(emp.salary / 160 * 1.5, 2)
+
+    basic = emp.salary or 0.0
+    ot_pay = round(overtime_hours * ot_rate, 2) if overtime_hours > 0 else 0
+    bonus = emp.bonus or 0.0
+    allowances = emp.allowances or 0.0
+    gross = basic + ot_pay + bonus + allowances
+    tax_rate = emp.tax_rate or 0.0
+    tax_amount = round(gross * (tax_rate / 100), 2) if tax_rate > 0 else 0
+    deductions = emp.deductions or 0.0
+    total_deductions = tax_amount + deductions
+    net_pay = round(gross - total_deductions, 2)
+
+    return {
+        "employee_id": emp.id,
+        "full_name": f"{emp.first_name} {emp.last_name}",
+        "employee_id_code": emp.employee_id,
+        "job_title": emp.job_title,
+        "pay_frequency": emp.pay_frequency,
+        "bank_name": emp.bank_name,
+        "bank_account": emp.bank_account,
+        "tax_id": emp.tax_id,
+        "salary": basic,
+        "hourly_rate": emp.hourly_rate or 0.0,
+        "tax_rate": tax_rate,
+        "deductions": deductions,
+        "allowances": allowances,
+        "bonus": bonus,
+        "hours_worked": hours_worked,
+        "overtime_hours": overtime_hours,
+        "overtime_rate": ot_rate,
+        "overtime_pay": ot_pay,
+        "gross_pay": round(gross, 2),
+        "tax_amount": tax_amount,
+        "total_deductions": round(total_deductions, 2),
+        "net_pay": net_pay,
+    }
+
 @app.post("/api/payslips")
 def create_payslip(request: Request, body: PayslipCreate, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
