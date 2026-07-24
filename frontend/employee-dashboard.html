@@ -205,6 +205,7 @@
     let elapsedInterval = null;
     let breakInterval = null;
     let breakStartTime = null;
+    const API = { get: (url) => fetch(url, { credentials: 'same-origin' }), post: (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: body ? JSON.stringify(body) : undefined }) };
 
     function updateClock() {
       const now = new Date();
@@ -219,7 +220,7 @@
         (pos) => {
           currentLocation.lat = pos.coords.latitude;
           currentLocation.lng = pos.coords.longitude;
-          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLocation.lat}&lon=${currentLocation.lng}`)
+          fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + currentLocation.lat + '&lon=' + currentLocation.lng, { credentials: 'omit' })
             .then(r => r.json()).then(d => { currentLocation.label = d.display_name || ''; });
           document.getElementById('locStatus').innerHTML = '<i class="bi bi-check-circle"></i> Location ready';
         },
@@ -228,25 +229,36 @@
       );
     }
 
+    const tabIds = ['clock', 'history', 'overtime', 'payslips', 'onboarding'];
+    function switchTab(tab) {
+      tabIds.forEach(id => {
+        const navEl = document.querySelector('.nav-tab-item[data-tab="' + id + '"]');
+        const panel = document.getElementById('tab-' + id);
+        if (navEl) { navEl.classList.toggle('active', id === tab); }
+        if (panel) { panel.style.display = id === tab ? '' : 'none'; }
+      });
+    }
+
     async function loadProfile() {
       try {
-        const res = await fetch('/api/employee/auth/me');
+        const res = await API.get('/api/employee/auth/me');
         if (res.status === 401) { window.location.href = '/employee-login.html'; return; }
+        if (!res.ok) { console.error('Profile fetch failed:', res.status); return; }
         empData = await res.json();
         document.getElementById('userName').textContent = empData.full_name;
         document.getElementById('userRole').textContent = empData.job_title || '';
         document.getElementById('userAvatar').textContent = empData.full_name.charAt(0).toUpperCase();
-        isClockedIn = empData.today_clock_in && !empData.today_clock_out;
+        isClockedIn = !!(empData.today_clock_in && !empData.today_clock_out);
         isOnBreak = empData.today_is_on_break || false;
         updateClockUI();
         loadTodayAttendance();
         loadDashboard();
-      } catch (e) { window.location.href = '/employee-login.html'; }
+      } catch (e) { console.error('loadProfile error:', e); }
     }
 
     async function loadTodayAttendance() {
       try {
-        const res = await fetch('/api/employee/attendance/today');
+        const res = await API.get('/api/employee/attendance/today');
         if (!res.ok) return;
         const data = await res.json();
         isClockedIn = data.clocked_in;
@@ -260,7 +272,8 @@
         updateClockUI();
         updateElapsed(data.elapsed_hours || 0);
         document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
-      } catch (e) {}
+        if (isClockedIn && !isOnBreak) startElapsedTimer();
+      } catch (e) { console.error('loadTodayAttendance error:', e); }
     }
 
     function updateClockUI() {
@@ -292,7 +305,7 @@
       if (elapsedInterval) clearInterval(elapsedInterval);
       let base = parseFloat(document.getElementById('elapsedTime').textContent) || 0;
       elapsedInterval = setInterval(() => {
-        if (isOnBreak) return;
+        if (isOnBreak || !isClockedIn) return;
         base += 1/3600;
         updateElapsed(base);
       }, 1000);
@@ -302,13 +315,9 @@
       const btn = document.getElementById('clockInBtn');
       btn.disabled = true;
       try {
-        const res = await fetch('/api/employee/attendance/clock-in', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            latitude: currentLocation.lat, longitude: currentLocation.lng,
-            location_label: currentLocation.label, device_info: navigator.userAgent,
-          }),
+        const res = await API.post('/api/employee/attendance/clock-in', {
+          latitude: currentLocation.lat, longitude: currentLocation.lng,
+          location_label: currentLocation.label, device_info: navigator.userAgent,
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Clock in failed');
@@ -322,7 +331,7 @@
 
     async function startBreak() {
       try {
-        const res = await fetch('/api/employee/attendance/break-start', { method: 'POST' });
+        const res = await API.post('/api/employee/attendance/break-start');
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
         isOnBreak = true;
@@ -334,7 +343,7 @@
 
     async function stopBreak() {
       try {
-        const res = await fetch('/api/employee/attendance/break-stop', { method: 'POST' });
+        const res = await API.post('/api/employee/attendance/break-stop');
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed');
         isOnBreak = false;
@@ -348,7 +357,7 @@
       const btn = document.getElementById('clockOutBtn');
       btn.disabled = true;
       try {
-        const res = await fetch('/api/employee/attendance/clock-out', { method: 'POST' });
+        const res = await API.post('/api/employee/attendance/clock-out');
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Clock out failed');
         isClockedIn = false;
@@ -365,7 +374,7 @@
 
     async function loadDashboard() {
       try {
-        const res = await fetch('/api/employee/dashboard');
+        const res = await API.get('/api/employee/dashboard');
         if (!res.ok) return;
         const data = await res.json();
         document.getElementById('monthHours').textContent = data.attendance_summary.total_hours + 'h';
@@ -423,23 +432,15 @@
             '<div style="font-size:0.8rem; color:#64748b;">' + (o.category || '') + '</div></div>' +
           '</div>';
         }).join('') || '<div class="empty-state"><i class="bi bi-clipboard"></i><p>No onboarding items</p></div>';
-      } catch (e) {}
-    }
-
-    function switchTab(tab) {
-      document.querySelectorAll('.nav-tab-item').forEach(t => t.classList.remove('active'));
-      document.querySelector('[data-tab="' + tab + '"]').classList.add('active');
-      document.querySelectorAll('[id^="tab-"]').forEach(p => p.classList.add('d-none'));
-      document.getElementById('tab-' + tab).classList.remove('d-none');
+      } catch (e) { console.error('loadDashboard error:', e); }
     }
 
     async function handleLogout() {
-      await fetch('/api/employee/auth/logout', { method: 'POST' });
+      await API.post('/api/employee/auth/logout');
       window.location.href = '/employee-login.html';
     }
 
     loadProfile();
-    startElapsedTimer();
   </script>
 </body>
 </html>

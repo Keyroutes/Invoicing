@@ -110,6 +110,7 @@
         const res = await fetch('/api/employee/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
           body: JSON.stringify({
             email: document.getElementById('email').value,
             password: document.getElementById('password').value,
