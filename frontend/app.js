@@ -1947,7 +1947,7 @@ window.showView = showView;
 
 // --- Attendance Sub-Tabs ---
 function switchAttTab(tab) {
-    ['live','history','analytics','settings'].forEach(t => {
+    ['live','history','analytics','overtime','settings'].forEach(t => {
         var el = document.getElementById('att-sub-' + t);
         if (el) el.classList.add('d-none');
         var btn = document.getElementById('att-tab-' + t);
@@ -1959,6 +1959,7 @@ function switchAttTab(tab) {
     if (activeBtn) { activeBtn.classList.remove('btn-outline'); activeBtn.classList.add('btn-primary'); activeBtn.style.fontWeight = '600'; }
     if (tab === 'analytics') loadAttendanceAnalytics();
     if (tab === 'settings') loadAttendanceSettings();
+    if (tab === 'overtime') loadOvertimeTab();
 }
 
 // --- Live Attendance Board ---
@@ -2068,6 +2069,53 @@ async function saveAttendanceSettings() {
         if (res.ok) showToast('Settings saved successfully', 'success');
         else showToast('Failed to save settings', 'error');
     } catch (e) { showToast('Error saving settings', 'error'); }
+}
+
+// --- Overtime Management ---
+async function loadOvertimeTab() {
+    try {
+        var empRes = await fetch('/api/employees');
+        var emps = await empRes.json();
+        var sel = document.getElementById('ot-employee');
+        if (sel) {
+            sel.innerHTML = '<option value="">Select employee...</option>';
+            emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
+        }
+        var otDate = document.getElementById('ot-date');
+        if (otDate && !otDate.value) otDate.value = new Date().toISOString().split('T')[0];
+        loadOvertimeLogs();
+    } catch (e) { console.error(e); }
+}
+
+async function announceOvertime() {
+    var empId = document.getElementById('ot-employee').value;
+    var date = document.getElementById('ot-date').value;
+    var hours = parseFloat(document.getElementById('ot-hours').value);
+    var reason = document.getElementById('ot-reason').value;
+    if (!empId) { showToast('Select an employee', 'error'); return; }
+    if (!hours || hours <= 0) { showToast('Enter valid hours', 'error'); return; }
+    try {
+        var res = await fetch('/api/attendance/overtime/announce', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_id: parseInt(empId), date: date, hours: hours, reason: reason }),
+        });
+        var data = await res.json();
+        if (res.ok) { showToast(data.message, 'success'); loadOvertimeLogs(); }
+        else showToast(data.detail || 'Failed', 'error');
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+
+async function loadOvertimeLogs() {
+    try {
+        var res = await fetch('/api/attendance/overtime/logs');
+        var logs = await res.json();
+        var tbody = document.getElementById('overtime-log-body');
+        if (!tbody) return;
+        if (logs.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:30px;color:var(--text-secondary);">No overtime logs</td></tr>'; return; }
+        tbody.innerHTML = logs.map(function(l) {
+            return '<tr><td><strong>' + l.employee_name + '</strong></td><td>' + l.date + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + (l.reason || '-') + '</td><td>' + (l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + l.status + '</span></td></tr>';
+        }).join('');
+    } catch (e) {}
 }
 
 // --- Export Attendance ---

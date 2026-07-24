@@ -7,9 +7,9 @@
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="styles.css" rel="stylesheet">
   <style>
-    :root { --primary: #4361ee; --bg-dark: #0f172a; }
+    :root { --primary: #4361ee; --bg-dark: #0f172a; --success: #10b981; --danger: #ef4444; --warning: #f59e0b; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #f1f5f9; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
     .topbar { background: var(--bg-dark); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
     .topbar .brand { font-size: 1.25rem; font-weight: 700; }
@@ -25,17 +25,25 @@
     .stat-card .value { font-size: 1.75rem; font-weight: 700; color: #1e293b; margin-top: 4px; }
     .clock-section { background: linear-gradient(135deg, #4361ee 0%, #3a56d4 100%); border-radius: 16px; padding: 32px; color: #fff; text-align: center; margin-bottom: 24px; }
     .clock-time { font-size: 3rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .clock-date { font-size: 0.95rem; opacity: 0.85; margin-bottom: 20px; }
+    .clock-date { font-size: 0.95rem; opacity: 0.85; margin-bottom: 8px; }
+    .elapsed-time { font-size: 1.5rem; font-weight: 600; margin: 12px 0; opacity: 0.95; }
+    .elapsed-label { font-size: 0.8rem; opacity: 0.7; }
+    .break-badge { display: inline-block; background: rgba(245,158,11,0.2); color: #fbbf24; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; margin-top: 8px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
     .clock-btn { padding: 14px 40px; border-radius: 12px; border: none; font-weight: 700; font-size: 1.1rem; cursor: pointer; transition: all 0.2s; }
     .clock-btn-in { background: #10b981; color: #fff; }
     .clock-btn-in:hover { background: #059669; transform: scale(1.02); }
     .clock-btn-out { background: #ef4444; color: #fff; }
     .clock-btn-out:hover { background: #dc2626; transform: scale(1.02); }
+    .clock-btn-break { background: #f59e0b; color: #fff; }
+    .clock-btn-break:hover { background: #d97706; transform: scale(1.02); }
+    .clock-btn-break-end { background: #8b5cf6; color: #fff; }
+    .clock-btn-break-end:hover { background: #7c3aed; transform: scale(1.02); }
     .clock-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-    .clock-status { margin-top: 16px; font-size: 0.95rem; opacity: 0.9; }
+    .clock-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
     .section-title { font-weight: 700; color: #1e293b; margin-bottom: 16px; font-size: 1.1rem; }
-    .attendance-table th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; background: #f8fafc; }
-    .attendance-table td { font-size: 0.9rem; }
+    .table-custom th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; background: #f8fafc; }
+    .table-custom td { font-size: 0.9rem; }
     .badge-type { font-size: 0.75rem; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
     .badge-office { background: #dbeafe; color: #1d4ed8; }
     .badge-remote { background: #d1fae5; color: #047857; }
@@ -47,8 +55,12 @@
     .onboarding-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #cbd5e1; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .onboarding-check.done { background: #10b981; border-color: #10b981; color: #fff; font-size: 0.7rem; }
     .progress-ring { width: 48px; height: 48px; }
+    .ot-card { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #f59e0b; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+    .ot-card .ot-hours { font-size: 1.5rem; font-weight: 700; color: #92400e; }
+    .ot-card .ot-reason { font-size: 0.85rem; color: #78350f; margin-top: 4px; }
+    .ot-card .ot-meta { font-size: 0.75rem; color: #a16207; margin-top: 4px; }
     .empty-state { text-align: center; padding: 48px; color: #64748b; }
-    .empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.4; }
+    .empty-state i { font-size: 3rem; margin-bottom: 16px; opacity: 0.4; display: block; }
   </style>
 </head>
 <body>
@@ -73,6 +85,9 @@
     <div class="nav-tab-item" data-tab="history" onclick="switchTab('history')">
       <i class="bi bi-calendar3"></i> History
     </div>
+    <div class="nav-tab-item" data-tab="overtime" onclick="switchTab('overtime')">
+      <i class="bi bi-clock-history"></i> Overtime
+    </div>
     <div class="nav-tab-item" data-tab="payslips" onclick="switchTab('payslips')">
       <i class="bi bi-receipt"></i> Payslips
     </div>
@@ -87,16 +102,28 @@
       <div class="clock-section" id="clockSection">
         <div class="clock-time" id="liveTime">--:--:--</div>
         <div class="clock-date" id="liveDate"></div>
-        <div class="location-status mb-3" id="locStatus" style="color:rgba(255,255,255,0.8); font-size:0.85rem;">
+        <div class="elapsed-label">Time Worked Today</div>
+        <div class="elapsed-time" id="elapsedTime">0h 00m</div>
+        <div id="breakInfo" style="display:none;">
+          <div class="break-badge"><i class="bi bi-pause-circle"></i> On Break — <span id="breakTimer">00:00</span></div>
+        </div>
+        <div class="location-status" id="locStatus" style="color:rgba(255,255,255,0.7); font-size:0.8rem; margin-top:8px;">
           <i class="bi bi-geo-alt"></i> Detecting location...
         </div>
-        <button class="clock-btn clock-btn-in" id="clockInBtn" onclick="clockIn()">
-          <i class="bi bi-box-arrow-in-right"></i> Clock In
-        </button>
-        <button class="clock-btn clock-btn-out d-none" id="clockOutBtn" onclick="clockOut()">
-          <i class="bi bi-box-arrow-right"></i> Clock Out
-        </button>
-        <div class="clock-status" id="clockStatus"></div>
+        <div class="clock-btns">
+          <button class="clock-btn clock-btn-in" id="clockInBtn" onclick="clockIn()">
+            <i class="bi bi-box-arrow-in-right"></i> Clock In
+          </button>
+          <button class="clock-btn clock-btn-break" id="breakStartBtn" style="display:none;" onclick="startBreak()">
+            <i class="bi bi-pause-circle"></i> Start Break
+          </button>
+          <button class="clock-btn clock-btn-break-end" id="breakStopBtn" style="display:none;" onclick="stopBreak()">
+            <i class="bi bi-play-circle"></i> End Break
+          </button>
+          <button class="clock-btn clock-btn-out" id="clockOutBtn" style="display:none;" onclick="clockOut()">
+            <i class="bi bi-box-arrow-right"></i> Clock Out
+          </button>
+        </div>
       </div>
 
       <div class="row g-3 mb-4">
@@ -104,6 +131,12 @@
           <div class="stat-card">
             <div class="label">Today's Hours</div>
             <div class="value" id="todayHours">0h 0m</div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="stat-card">
+            <div class="label">Break Time</div>
+            <div class="value" id="todayBreak" style="color:var(--warning);">0m</div>
           </div>
         </div>
         <div class="col-md-3">
@@ -118,12 +151,6 @@
             <div class="value" id="daysPresent">0</div>
           </div>
         </div>
-        <div class="col-md-3">
-          <div class="stat-card">
-            <div class="label">Avg Hours/Day</div>
-            <div class="value" id="avgHours">0h</div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -131,11 +158,18 @@
     <div id="tab-history" class="d-none">
       <h5 class="section-title"><i class="bi bi-calendar3"></i> Attendance History</h5>
       <div class="table-responsive">
-        <table class="table attendance-table">
-          <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Type</th><th>Status</th></tr></thead>
+        <table class="table table-custom">
+          <thead><tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Break</th><th>Type</th><th>Status</th></tr></thead>
           <tbody id="historyBody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- OVERTIME TAB -->
+    <div id="tab-overtime" class="d-none">
+      <h5 class="section-title"><i class="bi bi-clock-history"></i> HR-Announced Overtime</h5>
+      <p style="color:#64748b; font-size:0.85rem; margin-bottom:16px;">Overtime is announced by HR and counted toward your payslip.</p>
+      <div id="overtimeList"></div>
     </div>
 
     <!-- PAYSLIPS TAB -->
@@ -166,9 +200,12 @@
   <script>
     let empData = null;
     let isClockedIn = false;
+    let isOnBreak = false;
     let currentLocation = { lat: 0, lng: 0, label: '' };
+    let elapsedInterval = null;
+    let breakInterval = null;
+    let breakStartTime = null;
 
-    // Start live clock
     function updateClock() {
       const now = new Date();
       document.getElementById('liveTime').textContent = now.toLocaleTimeString('en-US', { hour12: false });
@@ -177,7 +214,6 @@
     setInterval(updateClock, 1000);
     updateClock();
 
-    // Get location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -201,29 +237,65 @@
         document.getElementById('userRole').textContent = empData.job_title || '';
         document.getElementById('userAvatar').textContent = empData.full_name.charAt(0).toUpperCase();
         isClockedIn = empData.today_clock_in && !empData.today_clock_out;
+        isOnBreak = empData.today_is_on_break || false;
         updateClockUI();
+        loadTodayAttendance();
         loadDashboard();
       } catch (e) { window.location.href = '/employee-login.html'; }
     }
 
-    function updateClockUI() {
-      const inBtn = document.getElementById('clockInBtn');
-      const outBtn = document.getElementById('clockOutBtn');
-      const status = document.getElementById('clockStatus');
-      if (isClockedIn) {
-        inBtn.classList.add('d-none');
-        outBtn.classList.remove('d-none');
-        status.innerHTML = `Clocked in at <strong>${empData.today_clock_in}</strong>`;
-      } else {
-        inBtn.classList.remove('d-none');
-        outBtn.classList.add('d-none');
-        if (empData.today_clock_in) {
-          status.innerHTML = `Last clock in: <strong>${empData.today_clock_in}</strong> | Clocked out at <strong>${empData.today_clock_out || '--'}</strong>`;
-        } else {
-          status.textContent = 'Click "Clock In" to start your day';
+    async function loadTodayAttendance() {
+      try {
+        const res = await fetch('/api/employee/attendance/today');
+        if (!res.ok) return;
+        const data = await res.json();
+        isClockedIn = data.clocked_in;
+        isOnBreak = data.is_on_break;
+        if (data.break_start && data.is_on_break) {
+          breakStartTime = new Date();
+          const parts = data.break_start.split(':');
+          breakStartTime.setHours(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2] || 0));
+          startBreakTimer();
         }
-      }
-      document.getElementById('todayHours').textContent = empData.today_hours ? `${Math.floor(empData.today_hours)}h ${Math.round((empData.today_hours % 1) * 60)}m` : '0h 0m';
+        updateClockUI();
+        updateElapsed(data.elapsed_hours || 0);
+        document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
+      } catch (e) {}
+    }
+
+    function updateClockUI() {
+      document.getElementById('clockInBtn').style.display = isClockedIn ? 'none' : '';
+      document.getElementById('clockOutBtn').style.display = isClockedIn ? '' : 'none';
+      document.getElementById('breakStartBtn').style.display = (isClockedIn && !isOnBreak) ? '' : 'none';
+      document.getElementById('breakStopBtn').style.display = isOnBreak ? '' : 'none';
+      document.getElementById('breakInfo').style.display = isOnBreak ? '' : 'none';
+    }
+
+    function updateElapsed(hours) {
+      const h = Math.floor(hours);
+      const m = Math.round((hours - h) * 60);
+      document.getElementById('elapsedTime').textContent = h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+    }
+
+    function startBreakTimer() {
+      if (breakInterval) clearInterval(breakInterval);
+      breakInterval = setInterval(() => {
+        if (!breakStartTime) return;
+        const diff = Math.floor((Date.now() - breakStartTime.getTime()) / 1000);
+        const m = Math.floor(diff / 60);
+        const s = diff % 60;
+        document.getElementById('breakTimer').textContent = (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      }, 1000);
+    }
+
+    function startElapsedTimer() {
+      if (elapsedInterval) clearInterval(elapsedInterval);
+      let base = parseFloat(document.getElementById('elapsedTime').textContent) || 0;
+      elapsedInterval = setInterval(() => {
+        if (isOnBreak) return;
+        base += 1/3600;
+        updateElapsed(base);
+      }, 1000);
     }
 
     async function clockIn() {
@@ -234,18 +306,42 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            latitude: currentLocation.lat,
-            longitude: currentLocation.lng,
-            location_label: currentLocation.label,
-            device_info: navigator.userAgent,
+            latitude: currentLocation.lat, longitude: currentLocation.lng,
+            location_label: currentLocation.label, device_info: navigator.userAgent,
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Clock in failed');
         isClockedIn = true;
-        await loadProfile();
+        updateClockUI();
+        updateElapsed(0);
+        startElapsedTimer();
       } catch (e) { alert(e.message); }
       btn.disabled = false;
+    }
+
+    async function startBreak() {
+      try {
+        const res = await fetch('/api/employee/attendance/break-start', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        isOnBreak = true;
+        breakStartTime = new Date();
+        startBreakTimer();
+        updateClockUI();
+      } catch (e) { alert(e.message); }
+    }
+
+    async function stopBreak() {
+      try {
+        const res = await fetch('/api/employee/attendance/break-stop', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        isOnBreak = false;
+        if (breakInterval) clearInterval(breakInterval);
+        document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
+        updateClockUI();
+      } catch (e) { alert(e.message); }
     }
 
     async function clockOut() {
@@ -256,7 +352,13 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Clock out failed');
         isClockedIn = false;
-        await loadProfile();
+        isOnBreak = false;
+        if (elapsedInterval) clearInterval(elapsedInterval);
+        if (breakInterval) clearInterval(breakInterval);
+        updateClockUI();
+        updateElapsed(data.total_hours || 0);
+        document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
+        loadDashboard();
       } catch (e) { alert(e.message); }
       btn.disabled = false;
     }
@@ -266,63 +368,69 @@
         const res = await fetch('/api/employee/dashboard');
         if (!res.ok) return;
         const data = await res.json();
-        // Attendance summary
-        document.getElementById('monthHours').textContent = `${data.attendance_summary.total_hours}h`;
+        document.getElementById('monthHours').textContent = data.attendance_summary.total_hours + 'h';
         document.getElementById('daysPresent').textContent = data.attendance_summary.days_present;
-        document.getElementById('avgHours').textContent = `${data.attendance_summary.avg_hours}h`;
-        // History
         const histBody = document.getElementById('historyBody');
-        histBody.innerHTML = data.attendance.map(r => `
-          <tr>
-            <td>${new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</td>
-            <td>${r.clock_in || '-'}</td>
-            <td>${r.clock_out || '-'}</td>
-            <td><strong>${r.total_hours || 0}h</strong></td>
-            <td><span class="badge-type badge-${r.check_type || 'manual'}">${r.check_type || 'manual'}</span></td>
-            <td><span class="badge bg-${r.status === 'completed' ? 'success' : 'primary'}">${r.status}</span></td>
-          </tr>
-        `).join('') || '<tr><td colspan="6" class="text-center text-muted py-4">No attendance records</td></tr>';
-        // Payslips
+        histBody.innerHTML = data.attendance.map(r => {
+          const brk = r.break_minutes > 0 ? Math.round(r.break_minutes) + 'm' : '-';
+          return '<tr>' +
+            '<td>' + new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</td>' +
+            '<td>' + (r.clock_in || '-') + '</td>' +
+            '<td>' + (r.clock_out || '-') + '</td>' +
+            '<td><strong>' + (r.total_hours || 0) + 'h</strong></td>' +
+            '<td style="color:var(--warning);">' + brk + '</td>' +
+            '<td><span class="badge-type badge-' + (r.check_type || 'manual') + '">' + (r.check_type || 'manual') + '</span></td>' +
+            '<td><span class="badge bg-' + (r.status === 'completed' ? 'success' : 'primary') + '">' + r.status + '</span></td>' +
+          '</tr>';
+        }).join('') || '<tr><td colspan="7" class="text-center text-muted py-4">No records</td></tr>';
+        const otList = document.getElementById('overtimeList');
+        if (data.overtime && data.overtime.length > 0) {
+          otList.innerHTML = data.overtime.map(o => {
+            return '<div class="ot-card">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<div class="ot-hours">' + o.hours + 'h Overtime</div>' +
+                '<span class="badge bg-warning text-dark">' + o.status + '</span>' +
+              '</div>' +
+              '<div class="ot-reason">' + (o.reason || 'No reason specified') + '</div>' +
+              '<div class="ot-meta">Announced by: ' + (o.announced_by || 'HR') + ' — ' + o.date + '</div>' +
+            '</div>';
+          }).join('');
+        } else {
+          otList.innerHTML = '<div class="empty-state"><i class="bi bi-clock-history"></i><p>No overtime announced yet</p></div>';
+        }
         const payslipList = document.getElementById('payslipList');
-        payslipList.innerHTML = data.payslips.map(p => `
-          <div class="payslip-card">
-            <div>
-              <div style="font-weight:600;">${p.number}</div>
-              <div style="color:#64748b; font-size:0.85rem;">${p.period_start} to ${p.period_end}</div>
-            </div>
-            <div class="text-end">
-              <div style="font-weight:700; color:#1e293b;">$${parseFloat(p.net_pay || 0).toLocaleString()}</div>
-              <span class="badge bg-${p.status === 'paid' ? 'success' : p.status === 'sent' ? 'primary' : 'secondary'}">${p.status}</span>
-            </div>
-          </div>
-        `).join('') || '<div class="empty-state"><i class="bi bi-receipt"></i><p>No payslips yet</p></div>';
-        // Onboarding
+        payslipList.innerHTML = data.payslips.map(p => {
+          return '<div class="payslip-card">' +
+            '<div><div style="font-weight:600;">' + p.number + '</div>' +
+            '<div style="color:#64748b; font-size:0.85rem;">' + p.period_start + ' to ' + p.period_end + '</div></div>' +
+            '<div class="text-end"><div style="font-weight:700; color:#1e293b;">$' + parseFloat(p.net_pay || 0).toLocaleString() + '</div>' +
+            '<span class="badge bg-' + (p.status === 'paid' ? 'success' : p.status === 'sent' ? 'primary' : 'secondary') + '">' + p.status + '</span></div>' +
+          '</div>';
+        }).join('') || '<div class="empty-state"><i class="bi bi-receipt"></i><p>No payslips yet</p></div>';
         const onbList = document.getElementById('onboardingList');
         const completed = data.onboarding.filter(o => o.is_completed).length;
         const total = data.onboarding.length;
         const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-        document.getElementById('onboardingPercent').textContent = `${pct}%`;
+        document.getElementById('onboardingPercent').textContent = pct + '%';
         const circumference = 2 * Math.PI * 20;
         document.getElementById('progressCircle').style.strokeDashoffset = circumference - (pct / 100) * circumference;
-        onbList.innerHTML = data.onboarding.map(o => `
-          <div class="onboarding-item ${o.is_completed ? 'completed' : ''}">
-            <div class="onboarding-check ${o.is_completed ? 'done' : ''}">
-              ${o.is_completed ? '<i class="bi bi-check"></i>' : ''}
-            </div>
-            <div>
-              <div style="font-weight:${o.is_completed ? '400' : '600'};">${o.title}</div>
-              <div style="font-size:0.8rem; color:#64748b;">${o.category || ''}</div>
-            </div>
-          </div>
-        `).join('') || '<div class="empty-state"><i class="bi bi-clipboard"></i><p>No onboarding items</p></div>';
+        onbList.innerHTML = data.onboarding.map(o => {
+          return '<div class="onboarding-item ' + (o.is_completed ? 'completed' : '') + '">' +
+            '<div class="onboarding-check ' + (o.is_completed ? 'done' : '') + '">' +
+              (o.is_completed ? '<i class="bi bi-check"></i>' : '') +
+            '</div>' +
+            '<div><div style="font-weight:' + (o.is_completed ? '400' : '600') + ';">' + o.title + '</div>' +
+            '<div style="font-size:0.8rem; color:#64748b;">' + (o.category || '') + '</div></div>' +
+          '</div>';
+        }).join('') || '<div class="empty-state"><i class="bi bi-clipboard"></i><p>No onboarding items</p></div>';
       } catch (e) {}
     }
 
     function switchTab(tab) {
       document.querySelectorAll('.nav-tab-item').forEach(t => t.classList.remove('active'));
-      document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+      document.querySelector('[data-tab="' + tab + '"]').classList.add('active');
       document.querySelectorAll('[id^="tab-"]').forEach(p => p.classList.add('d-none'));
-      document.getElementById(`tab-${tab}`).classList.remove('d-none');
+      document.getElementById('tab-' + tab).classList.remove('d-none');
     }
 
     async function handleLogout() {
@@ -331,6 +439,7 @@
     }
 
     loadProfile();
+    startElapsedTimer();
   </script>
 </body>
 </html>

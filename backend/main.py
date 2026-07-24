@@ -1685,7 +1685,6 @@ def get_employee_pay_details(emp_id: int, request: Request, period_start: str = 
         raise HTTPException(status_code=404, detail="Employee not found")
 
     hours_worked = 0.0
-    overtime_hours = 0.0
     if period_start and period_end:
         records = db.query(models.DBAttendance).filter(
             models.DBAttendance.employee_id == emp_id,
@@ -1695,8 +1694,19 @@ def get_employee_pay_details(emp_id: int, request: Request, period_start: str = 
         ).all()
         for r in records:
             hours_worked += r.total_hours or 0
-            overtime_hours += r.overtime_hours or 0
         hours_worked = round(hours_worked, 2)
+
+    overtime_hours = 0.0
+    if period_start and period_end:
+        ot_logs = db.query(models.DBOvertimeLog).filter(
+            models.DBOvertimeLog.employee_id == emp_id,
+            models.DBOvertimeLog.client_id == client.id,
+            models.DBOvertimeLog.date >= period_start,
+            models.DBOvertimeLog.date <= period_end,
+            models.DBOvertimeLog.status == "announced",
+        ).all()
+        for log in ot_logs:
+            overtime_hours += log.hours or 0
         overtime_hours = round(overtime_hours, 2)
 
     ot_rate = emp.hourly_rate or 0.0
@@ -2258,6 +2268,57 @@ def export_attendance(request: Request, start_date: str = "", end_date: str = ""
         })
     return rows
 
+@app.post("/api/attendance/overtime/announce")
+def announce_overtime(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("employee_id") or not body.get("hours"):
+        raise HTTPException(status_code=400, detail="employee_id and hours required")
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == body["employee_id"],
+        models.DBEmployee.client_id == client.id,
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    date = body.get("date", datetime.now().strftime("%Y-%m-%d"))
+    hours = float(body["hours"])
+    reason = body.get("reason", "")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp.id,
+        models.DBAttendance.date == date,
+        models.DBAttendance.client_id == client.id,
+    ).first()
+    if att:
+        att.overtime_hours = hours
+        att.overtime_announced = True
+        att.overtime_announced_by = client.company_name or client.contact_name or "HR"
+    log = models.DBOvertimeLog(
+        client_id=client.id, employee_id=emp.id, date=date,
+        hours=hours, reason=reason,
+        announced_by=client.company_name or client.contact_name or "HR",
+        status="announced",
+    )
+    db.add(log)
+    db.commit()
+    return {"message": f"Overtime of {hours}h announced for {emp.first_name} {emp.last_name}"}
+
+@app.get("/api/attendance/overtime/logs")
+def get_overtime_logs(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    logs = db.query(models.DBOvertimeLog).filter(
+        models.DBOvertimeLog.client_id == client.id
+    ).order_by(models.DBOvertimeLog.created_at.desc()).limit(100).all()
+    result = []
+    for l in logs:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == l.employee_id).first()
+        result.append({
+            "id": l.id, "employee_id": l.employee_id,
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "date": l.date, "hours": l.hours, "reason": l.reason,
+            "announced_by": l.announced_by, "status": l.status,
+            "created_at": l.created_at,
+        })
+    return result
+
 @app.put("/api/attendance/settings")
 def update_attendance_settings(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
@@ -2376,32 +2437,32 @@ def employee_logout(request: Request, db: Session = Depends(get_db)):
         models.DBAttendance.client_id == client_id,
     ).first()
     hours = 0.0
-    overtime = 0.0
     if att and att.clock_in and not att.clock_out:
+        if att.is_on_break and att.break_start:
+            try:
+                now = datetime.now()
+                today_str = now.strftime("%Y-%m-%d")
+                bs = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
+                att.break_minutes = (att.break_minutes or 0) + round((now - bs).total_seconds() / 60, 1)
+            except Exception:
+                pass
+            att.is_on_break = False
+            att.break_start = ""
         att.clock_out = now_str
         try:
-            cin = datetime.strptime(att.clock_in, "%H:%M:%S")
-            cout = datetime.strptime(now_str, "%H:%M:%S")
-            att.total_hours = round((cout - cin).total_seconds() / 3600, 2)
+            cin = datetime.strptime(today + " " + att.clock_in, "%Y-%m-%d %H:%M:%S")
+            cout = datetime.strptime(today + " " + now_str, "%Y-%m-%d %H:%M:%S")
+            raw_hours = (cout - cin).total_seconds() / 3600
+            break_hours = (att.break_minutes or 0) / 60
+            att.total_hours = round(raw_hours - break_hours, 2)
             hours = att.total_hours
-            settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
-            if settings:
-                try:
-                    wh_start = datetime.strptime(settings.work_start, "%H:%M")
-                    wh_end = datetime.strptime(settings.work_end, "%H:%M")
-                    work_hours = (wh_end - wh_start).total_seconds() / 3600
-                except Exception:
-                    work_hours = 8.0
-                if hours > work_hours:
-                    overtime = round(hours - work_hours, 2)
-                    att.overtime_hours = overtime
             att.status = "completed"
         except Exception:
             pass
         db.commit()
     request.session.pop('employee_id', None)
     request.session.pop('employee_client_id', None)
-    return {"message": "Logged out", "total_hours": hours, "overtime_hours": overtime}
+    return {"message": "Logged out", "total_hours": hours, "break_minutes": att.break_minutes if att else 0}
 
 @app.get("/api/employee/auth/me")
 def employee_me(request: Request, db: Session = Depends(get_db)):
@@ -2430,6 +2491,8 @@ def employee_me(request: Request, db: Session = Depends(get_db)):
         "today_clock_out": att.clock_out if att else "",
         "today_hours": att.total_hours if att else 0,
         "today_status": att.status if att else "absent",
+        "today_is_on_break": att.is_on_break if att else False,
+        "today_break_minutes": (att.break_minutes or 0) if att else 0,
     }
 
 @app.post("/api/employee/attendance/clock-in")
@@ -2497,11 +2560,23 @@ def employee_clock_out(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="No clock-in found for today")
     if att.clock_out:
         raise HTTPException(status_code=400, detail="Already clocked out")
+    if att.is_on_break:
+        try:
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+            break_start = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
+            att.break_minutes += round((now - break_start).total_seconds() / 60, 1)
+        except Exception:
+            pass
+        att.is_on_break = False
+        att.break_start = ""
     att.clock_out = now_str
     try:
-        cin = datetime.strptime(att.clock_in, "%H:%M:%S")
-        cout = datetime.strptime(now_str, "%H:%M:%S")
-        att.total_hours = round((cout - cin).total_seconds() / 3600, 2)
+        cin = datetime.strptime(today + " " + att.clock_in, "%Y-%m-%d %H:%M:%S")
+        cout = datetime.strptime(today + " " + now_str, "%Y-%m-%d %H:%M:%S")
+        raw_hours = (cout - cin).total_seconds() / 3600
+        break_hours = (att.break_minutes or 0) / 60
+        att.total_hours = round(raw_hours - break_hours, 2)
         settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
         if settings:
             try:
@@ -2516,7 +2591,100 @@ def employee_clock_out(request: Request, db: Session = Depends(get_db)):
     except Exception:
         pass
     db.commit()
-    return {"message": "Clocked out", "total_hours": att.total_hours, "overtime_hours": att.overtime_hours}
+    return {"message": "Clocked out", "total_hours": att.total_hours, "overtime_hours": att.overtime_hours, "break_minutes": att.break_minutes}
+
+@app.post("/api/employee/attendance/break-start")
+def employee_break_start(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%H:%M:%S")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    if not att or not att.clock_in:
+        raise HTTPException(status_code=400, detail="Not clocked in")
+    if att.clock_out:
+        raise HTTPException(status_code=400, detail="Already clocked out")
+    if att.is_on_break:
+        raise HTTPException(status_code=400, detail="Already on break")
+    att.is_on_break = True
+    att.break_start = now_str
+    db.commit()
+    return {"message": "Break started", "break_start": now_str}
+
+@app.post("/api/employee/attendance/break-stop")
+def employee_break_stop(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today = datetime.now().strftime("%Y-%m-%d")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    if not att or not att.is_on_break:
+        raise HTTPException(status_code=400, detail="Not on break")
+    try:
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        break_stop = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
+        break_start = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
+        elapsed = round((now - break_start).total_seconds() / 60, 1)
+        att.break_minutes = (att.break_minutes or 0) + elapsed
+    except Exception:
+        pass
+    att.is_on_break = False
+    att.break_start = ""
+    db.commit()
+    return {"message": "Break ended", "break_minutes": att.break_minutes}
+
+@app.get("/api/employee/attendance/today")
+def employee_today_attendance(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    client_id = request.session.get('employee_client_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    today = datetime.now().strftime("%Y-%m-%d")
+    att = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date == today,
+        models.DBAttendance.client_id == client_id,
+    ).first()
+    if not att:
+        return {"clocked_in": False}
+    now_str = datetime.now().strftime("%H:%M:%S")
+    elapsed = 0
+    if att.clock_in and not att.clock_out:
+        try:
+            cin = datetime.strptime(today + " " + att.clock_in, "%Y-%m-%d %H:%M:%S")
+            now_t = datetime.strptime(today + " " + now_str, "%Y-%m-%d %H:%M:%S")
+            elapsed = round((now_t - cin).total_seconds() / 3600, 2)
+            if att.is_on_break and att.break_start:
+                bs = datetime.strptime(today + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
+                elapsed -= round((now_t - bs).total_seconds() / 3600, 2)
+            elapsed -= (att.break_minutes or 0) / 60
+            elapsed = round(max(0, elapsed), 2)
+        except Exception:
+            pass
+    return {
+        "clocked_in": bool(att.clock_in),
+        "clock_in": att.clock_in,
+        "clock_out": att.clock_out,
+        "total_hours": att.total_hours,
+        "is_on_break": att.is_on_break,
+        "break_start": att.break_start,
+        "break_minutes": att.break_minutes or 0,
+        "overtime_hours": att.overtime_hours,
+        "elapsed_hours": elapsed,
+        "status": att.status,
+    }
 
 @app.get("/api/employee/dashboard")
 def employee_dashboard(request: Request, db: Session = Depends(get_db)):
@@ -2536,6 +2704,8 @@ def employee_dashboard(request: Request, db: Session = Depends(get_db)):
     attendance = [{
         "date": r.date, "clock_in": r.clock_in, "clock_out": r.clock_out,
         "total_hours": r.total_hours, "status": r.status, "check_type": r.check_type,
+        "break_minutes": r.break_minutes or 0, "overtime_hours": r.overtime_hours or 0,
+        "is_on_break": r.is_on_break,
     } for r in records]
     payslips = db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp_id).order_by(models.DBPayslip.created_at.desc()).limit(6).all()
     payslip_list = [{
@@ -2547,15 +2717,32 @@ def employee_dashboard(request: Request, db: Session = Depends(get_db)):
         "id": o.id, "title": o.title, "is_completed": o.is_completed,
         "category": o.category, "assigned_to": o.assigned_to,
     } for o in onboarding]
+    ot_logs = db.query(models.DBOvertimeLog).filter(
+        models.DBOvertimeLog.employee_id == emp_id,
+        models.DBOvertimeLog.client_id == client_id,
+    ).order_by(models.DBOvertimeLog.created_at.desc()).limit(10).all()
+    overtime_list = [{
+        "date": l.date, "hours": l.hours, "reason": l.reason,
+        "announced_by": l.announced_by, "status": l.status,
+    } for l in ot_logs]
     days_present = sum(1 for r in records if r.status in ("present", "completed"))
     total_hours = sum(r.total_hours for r in records if r.total_hours)
+    total_breaks = sum(r.break_minutes or 0 for r in records)
     avg_hours = round(total_hours / max(len(records), 1), 2)
     return {
-        "employee": {"full_name": f"{emp.first_name} {emp.last_name}", "email": emp.email, "job_title": emp.job_title},
-        "attendance_summary": {"days_present": days_present, "total_hours": round(total_hours, 2), "avg_hours": avg_hours},
+        "employee": {
+            "full_name": f"{emp.first_name} {emp.last_name}", "email": emp.email,
+            "job_title": emp.job_title, "salary": emp.salary, "pay_frequency": emp.pay_frequency,
+            "bank_name": emp.bank_name, "bank_account": emp.bank_account, "tax_id": emp.tax_id,
+        },
+        "attendance_summary": {
+            "days_present": days_present, "total_hours": round(total_hours, 2),
+            "avg_hours": avg_hours, "total_break_minutes": round(total_breaks, 1),
+        },
         "attendance": attendance,
         "payslips": payslip_list,
         "onboarding": onboarding_list,
+        "overtime": overtime_list,
     }
 
 @app.post("/api/employee/heartbeat")

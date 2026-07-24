@@ -767,6 +767,7 @@
                             <button class="btn btn-outline" onclick="switchAttTab('live')" id="att-tab-live" style="font-weight:600;">Live</button>
                             <button class="btn btn-outline" onclick="switchAttTab('history')" id="att-tab-history">History</button>
                             <button class="btn btn-outline" onclick="switchAttTab('analytics')" id="att-tab-analytics">Analytics</button>
+                            <button class="btn btn-outline" onclick="switchAttTab('overtime')" id="att-tab-overtime">Overtime</button>
                             <button class="btn btn-outline" onclick="switchAttTab('settings')" id="att-tab-settings"><i class="bi bi-gear"></i></button>
                             <input type="date" id="att-date-filter" class="form-control" style="display:inline-block;width:auto;" onchange="loadAttendance()">
                             <button class="btn btn-outline" onclick="exportAttendance()"><i class="bi bi-download"></i> Export</button>
@@ -865,6 +866,45 @@
                             <div class="widget-header"><h3>Daily Attendance (30 Days)</h3></div>
                             <div class="widget-content">
                                 <div id="analytics-chart" style="min-height:200px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OVERTIME TAB -->
+                    <div id="att-sub-overtime" class="d-none">
+                        <div class="glass-widget" style="max-width:700px;margin-bottom:24px;">
+                            <div class="widget-header"><h3><i class="bi bi-megaphone"></i> Announce Overtime</h3></div>
+                            <div class="widget-content">
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                                    <div class="form-group">
+                                        <label>Employee</label>
+                                        <select id="ot-employee" class="form-control"><option value="">Select employee...</option></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Date</label>
+                                        <input type="date" id="ot-date" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Overtime Hours</label>
+                                        <input type="number" id="ot-hours" class="form-control" step="0.5" min="0.5" value="1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Reason</label>
+                                        <input type="text" id="ot-reason" class="form-control" placeholder="e.g. Project deadline, client meeting...">
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary" onclick="announceOvertime()" style="margin-top:8px;">Announce Overtime</button>
+                            </div>
+                        </div>
+                        <div class="widget">
+                            <div class="widget-header"><h3>Overtime Log</h3></div>
+                            <div class="table-responsive">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr><th>Employee</th><th>Date</th><th>Hours</th><th>Reason</th><th>Announced By</th><th>Status</th></tr>
+                                    </thead>
+                                    <tbody id="overtime-log-body"></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

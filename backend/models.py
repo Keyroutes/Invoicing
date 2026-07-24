@@ -272,8 +272,12 @@ class DBAttendance(Base):
     location_lat = Column(Float, default=0.0)
     location_lng = Column(Float, default=0.0)
     location_label = Column(String, default="")
+    break_start = Column(String, default="")
     break_minutes = Column(Float, default=0.0)
+    is_on_break = Column(Boolean, default=False)
     overtime_hours = Column(Float, default=0.0)
+    overtime_announced = Column(Boolean, default=False)
+    overtime_announced_by = Column(String, default="")
     notes = Column(String, default="")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -309,4 +313,18 @@ class DBClientLoginLog(Base):
     device_info = Column(String, default="")
     location_label = Column(String, default="")
     status = Column(String, default="success")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBOvertimeLog(Base):
+    __tablename__ = "overtime_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    date = Column(String, nullable=False)
+    hours = Column(Float, default=0.0)
+    reason = Column(String, default="")
+    announced_by = Column(String, default="")
+    status = Column(String, default="announced")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

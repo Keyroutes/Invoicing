@@ -322,6 +322,10 @@ def ensure_columns():
                 "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_hours FLOAT DEFAULT 0.0",
                 "ALTER TABLE clients ADD COLUMN IF NOT EXISTS last_login VARCHAR DEFAULT ''",
                 "ALTER TABLE clients ADD COLUMN IF NOT EXISTS login_count INTEGER DEFAULT 0",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS break_start VARCHAR DEFAULT ''",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS is_on_break BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_announced BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS overtime_announced_by VARCHAR DEFAULT ''",
             ]
             for stmt in alter_statements:
                 try:
@@ -349,6 +353,27 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_client_id ON client_login_logs (client_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_email ON client_login_logs (email)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_created_at ON client_login_logs (created_at)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Create overtime_logs table
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS overtime_logs (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        employee_id INTEGER REFERENCES employees(id) NOT NULL,
+                        date VARCHAR NOT NULL,
+                        hours FLOAT DEFAULT 0.0,
+                        reason VARCHAR DEFAULT '',
+                        announced_by VARCHAR DEFAULT '',
+                        status VARCHAR DEFAULT 'announced',
+                        created_at VARCHAR DEFAULT ''
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_overtime_logs_client_id ON overtime_logs (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_overtime_logs_employee_id ON overtime_logs (employee_id)"))
                 conn.commit()
             except Exception:
                 pass
