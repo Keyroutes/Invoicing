@@ -1264,10 +1264,13 @@ async function submitNewEmployee() {
     var lastName = document.getElementById('emp-last-name').value.trim();
     var email = document.getElementById('emp-email').value.trim();
     if (!firstName || !lastName || !email) { showToast('First name, last name, and email are required', 'error'); return; }
+    var password = document.getElementById('emp-password').value.trim();
+    if (!password) { showToast('Password is required for employee login', 'error'); return; }
     var deptVal = document.getElementById('emp-department').value;
     var mgrVal = document.getElementById('emp-reports-to').value;
     var payload = {
         first_name: firstName, last_name: lastName, email: email,
+        password: password,
         phone: document.getElementById('emp-phone').value,
         job_title: document.getElementById('emp-job-title').value,
         department_id: deptVal ? parseInt(deptVal) : null,
@@ -1306,6 +1309,22 @@ async function startOffboarding() {
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
 window.startOffboarding = startOffboarding;
+
+async function resetEmpPassword() {
+    if (!currentEmployeeId) return;
+    var newPass = prompt('Enter new password for this employee:');
+    if (!newPass || newPass.length < 4) { showToast('Password must be at least 4 characters', 'error'); return; }
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/reset-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: newPass })
+        });
+        var data = await res.json();
+        if (res.ok) { showToast('Password updated', 'success'); }
+        else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.resetEmpPassword = resetEmpPassword;
 
 async function deleteCurrentEmployee() {
     if (!currentEmployeeId) return;

@@ -1334,6 +1334,7 @@ class EmployeeCreate(BaseModel):
     emergency_phone: Optional[str] = ""
     start_date: Optional[str] = ""
     employee_id: Optional[str] = ""
+    password: Optional[str] = ""
 
 class PayslipCreate(BaseModel):
     employee_id: int
@@ -1467,6 +1468,7 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
         tax_id=body.tax_id,
         emergency_contact=body.emergency_contact, emergency_phone=body.emergency_phone,
         start_date=body.start_date, status="onboarding",
+        password_hash=models.hash_password(body.password) if body.password else "",
     )
     db.add(emp)
     db.flush()
@@ -1565,6 +1567,19 @@ def delete_employee(emp_id: int, request: Request, db: Session = Depends(get_db)
     db.delete(emp)
     db.commit()
     return {"message": "Employee deleted"}
+
+@app.post("/api/employees/{emp_id}/reset-password")
+def reset_employee_password(emp_id: int, body: dict, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    new_pass = body.get("password", "")
+    if not new_pass or len(new_pass) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    emp.password_hash = models.hash_password(new_pass)
+    db.commit()
+    return {"message": "Password updated successfully"}
 
 @app.post("/api/employees/{emp_id}/offboard")
 def start_offboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
