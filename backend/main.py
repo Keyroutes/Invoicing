@@ -2741,7 +2741,7 @@ def employee_dashboard(request: Request, db: Session = Depends(get_db)):
         "announced_by": l.announced_by, "status": l.status,
     } for l in ot_logs]
     days_present = sum(1 for r in records if r.status in ("present", "completed"))
-    total_hours = sum(r.total_hours for r in records if r.total_hours)
+    total_hours = sum(max(r.total_hours, 0) for r in records if r.total_hours)
     total_breaks = sum(r.break_minutes or 0 for r in records)
     avg_hours = round(total_hours / max(len(records), 1), 2)
     return {
