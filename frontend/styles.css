@@ -473,3 +473,5 @@ input[type="number"] {
     border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 .contact-autocomplete-new:hover { background: rgba(255,255,255,0.05); }
+.d-none { display: none !important; }
+.d-flex { display: flex !important; }

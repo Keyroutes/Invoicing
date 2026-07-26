@@ -1280,6 +1280,8 @@ async function submitNewEmployee() {
         salary: parseFloat(document.getElementById('emp-salary').value) || 0,
         tax_rate: parseFloat(document.getElementById('emp-tax-rate').value) || 0,
         start_date: document.getElementById('emp-start-date').value,
+        emergency_contact: document.getElementById('emp-emergency-contact').value,
+        emergency_phone: document.getElementById('emp-emergency-phone').value,
     };
     try {
         var res = await fetch('/api/employees', {
@@ -1375,6 +1377,7 @@ async function createDepartment(name, description) {
         else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
+window.createDepartment = createDepartment;
 
 async function deleteDepartment(id, name) {
     if (!confirm('Delete department "' + name + '"? Employees will be unassigned.')) return;
@@ -1873,7 +1876,7 @@ async function loadAttendance() {
         if (countEl) countEl.textContent = allAttendance.length + ' record' + (allAttendance.length !== 1 ? 's' : '');
     } catch (e) {
         var tbody = document.getElementById('attendance-table-body');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="loading">Failed to load attendance.</td></tr>';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="loading">Failed to load attendance.</td></tr>';
     }
 }
 
@@ -1980,6 +1983,7 @@ function switchAttTab(tab) {
     if (tab === 'settings') loadAttendanceSettings();
     if (tab === 'overtime') loadOvertimeTab();
 }
+window.switchAttTab = switchAttTab;
 
 // --- Live Attendance Board ---
 async function loadLiveAttendance() {
@@ -2020,6 +2024,7 @@ async function loadLiveAttendance() {
         if (el) el.textContent = working;
     } catch (e) {}
 }
+window.loadLiveAttendance = loadLiveAttendance;
 
 // --- Attendance Analytics ---
 async function loadAttendanceAnalytics() {
@@ -2084,11 +2089,12 @@ async function saveAttendanceSettings() {
             allow_remote: document.getElementById('set-allow-remote').checked,
             require_location: document.getElementById('set-require-loc').checked,
         };
-        var res = await fetch('/api/attendance/settings', { method: 'PUT', body: JSON.stringify(body) });
+        var res = await fetch('/api/attendance/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (res.ok) showToast('Settings saved successfully', 'success');
         else showToast('Failed to save settings', 'error');
     } catch (e) { showToast('Error saving settings', 'error'); }
 }
+window.saveAttendanceSettings = saveAttendanceSettings;
 
 // --- Overtime Management ---
 async function loadOvertimeTab() {
@@ -2136,6 +2142,7 @@ async function loadOvertimeLogs() {
         }).join('');
     } catch (e) {}
 }
+window.announceOvertime = announceOvertime;
 
 // --- Export Attendance ---
 async function exportAttendance() {
@@ -2157,6 +2164,7 @@ async function exportAttendance() {
         showToast('Exported ' + data.length + ' records', 'success');
     } catch (e) { showToast('Export failed', 'error'); }
 }
+window.exportAttendance = exportAttendance;
 
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -2194,14 +2202,22 @@ document.addEventListener('DOMContentLoaded', function() {
     if (dueEl) dueEl.value = dueDate;
 
     // Auto-refresh live attendance every 30 seconds when on attendance view
-    setInterval(function() {
-        var attView = document.getElementById('attendance-view');
-        if (attView && attView.style.display !== 'none') {
-            var liveSub = document.getElementById('att-sub-live');
-            if (liveSub && !liveSub.classList.contains('d-none')) {
-                loadLiveAttendance();
-                loadAttendanceStats();
+    var attRefreshInterval = null;
+    function startAttRefresh() {
+        if (attRefreshInterval) return;
+        attRefreshInterval = setInterval(function() {
+            var attView = document.getElementById('attendance-view');
+            if (attView && attView.style.display !== 'none') {
+                var liveSub = document.getElementById('att-sub-live');
+                if (liveSub && !liveSub.classList.contains('d-none')) {
+                    loadLiveAttendance();
+                    loadAttendanceStats();
+                }
+            } else {
+                clearInterval(attRefreshInterval);
+                attRefreshInterval = null;
             }
-        }
-    }, 30000);
+        }, 30000);
+    }
+    startAttRefresh();
 });

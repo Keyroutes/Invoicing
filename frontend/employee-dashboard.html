@@ -48,6 +48,7 @@
     .badge-office { background: #dbeafe; color: #1d4ed8; }
     .badge-remote { background: #d1fae5; color: #047857; }
     .badge-field { background: #fef3c7; color: #92400e; }
+    .badge-manual { background: #e2e8f0; color: #475569; }
     .payslip-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     .payslip-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(67,97,238,0.1); }
     .onboarding-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 8px; }
@@ -98,7 +99,7 @@
 
   <div class="content">
     <!-- ATTENDANCE TAB -->
-    <div id="tab-clock">
+    <div id="tab-clock" class="tab-panel">
       <div class="clock-section" id="clockSection">
         <div class="clock-time" id="liveTime">--:--:--</div>
         <div class="clock-date" id="liveDate"></div>
@@ -155,7 +156,7 @@
     </div>
 
     <!-- HISTORY TAB -->
-    <div id="tab-history" class="d-none">
+    <div id="tab-history" class="tab-panel d-none">
       <h5 class="section-title"><i class="bi bi-calendar3"></i> Attendance History</h5>
       <div class="table-responsive">
         <table class="table table-custom">
@@ -166,20 +167,20 @@
     </div>
 
     <!-- OVERTIME TAB -->
-    <div id="tab-overtime" class="d-none">
+    <div id="tab-overtime" class="tab-panel d-none">
       <h5 class="section-title"><i class="bi bi-clock-history"></i> HR-Announced Overtime</h5>
       <p style="color:#64748b; font-size:0.85rem; margin-bottom:16px;">Overtime is announced by HR and counted toward your payslip.</p>
       <div id="overtimeList"></div>
     </div>
 
     <!-- PAYSLIPS TAB -->
-    <div id="tab-payslips" class="d-none">
+    <div id="tab-payslips" class="tab-panel d-none">
       <h5 class="section-title"><i class="bi bi-receipt"></i> Payslips</h5>
       <div id="payslipList"></div>
     </div>
 
     <!-- ONBOARDING TAB -->
-    <div id="tab-onboarding" class="d-none">
+    <div id="tab-onboarding" class="tab-panel d-none">
       <h5 class="section-title"><i class="bi bi-clipboard-check"></i> Onboarding Checklist</h5>
       <div class="mb-4">
         <div class="d-flex align-items-center gap-3 mb-3">
@@ -229,14 +230,13 @@
       );
     }
 
-    const tabIds = ['clock', 'history', 'overtime', 'payslips', 'onboarding'];
     function switchTab(tab) {
-      tabIds.forEach(id => {
-        const navEl = document.querySelector('.nav-tab-item[data-tab="' + id + '"]');
-        const panel = document.getElementById('tab-' + id);
-        if (navEl) { navEl.classList.toggle('active', id === tab); }
-        if (panel) { panel.style.display = id === tab ? '' : 'none'; }
-      });
+      document.querySelectorAll('.nav-tab-item').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.add('d-none'); });
+      var navEl = document.querySelector('.nav-tab-item[data-tab="' + tab + '"]');
+      var panel = document.getElementById('tab-' + tab);
+      if (navEl) navEl.classList.add('active');
+      if (panel) panel.classList.remove('d-none');
     }
 
     async function loadProfile() {
@@ -301,10 +301,16 @@
       }, 1000);
     }
 
+    function parseElapsed(text) {
+      var m = text.match(/(\d+)h\s*(\d+)m/);
+      if (m) return parseInt(m[1]) + parseInt(m[2]) / 60;
+      return parseFloat(text) || 0;
+    }
+
     function startElapsedTimer() {
       if (elapsedInterval) clearInterval(elapsedInterval);
-      let base = parseFloat(document.getElementById('elapsedTime').textContent) || 0;
-      elapsedInterval = setInterval(() => {
+      var base = parseElapsed(document.getElementById('elapsedTime').textContent);
+      elapsedInterval = setInterval(function() {
         if (isOnBreak || !isClockedIn) return;
         base += 1/3600;
         updateElapsed(base);
@@ -350,6 +356,7 @@
         if (breakInterval) clearInterval(breakInterval);
         document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
         updateClockUI();
+        startElapsedTimer();
       } catch (e) { alert(e.message); }
     }
 
@@ -377,24 +384,29 @@
         const res = await API.get('/api/employee/dashboard');
         if (!res.ok) return;
         const data = await res.json();
-        document.getElementById('monthHours').textContent = data.attendance_summary.total_hours + 'h';
-        document.getElementById('daysPresent').textContent = data.attendance_summary.days_present;
-        const histBody = document.getElementById('historyBody');
-        histBody.innerHTML = data.attendance.map(r => {
-          const brk = r.break_minutes > 0 ? Math.round(r.break_minutes) + 'm' : '-';
+        var sum = data.attendance_summary || {};
+        document.getElementById('monthHours').textContent = (sum.total_hours || 0) + 'h';
+        document.getElementById('daysPresent').textContent = sum.days_present || 0;
+        var histBody = document.getElementById('historyBody');
+        var records = data.attendance || [];
+        histBody.innerHTML = records.map(function(r) {
+          var brk = r.break_minutes > 0 ? Math.round(r.break_minutes) + 'm' : '-';
+          var ct = r.check_type || 'manual';
+          var ctClass = ct === 'office' ? 'badge-office' : ct === 'remote' ? 'badge-remote' : ct === 'field' ? 'badge-field' : 'badge-manual';
           return '<tr>' +
             '<td>' + new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</td>' +
             '<td>' + (r.clock_in || '-') + '</td>' +
             '<td>' + (r.clock_out || '-') + '</td>' +
             '<td><strong>' + (r.total_hours || 0) + 'h</strong></td>' +
             '<td style="color:var(--warning);">' + brk + '</td>' +
-            '<td><span class="badge-type badge-' + (r.check_type || 'manual') + '">' + (r.check_type || 'manual') + '</span></td>' +
+            '<td><span class="badge-type ' + ctClass + '">' + ct + '</span></td>' +
             '<td><span class="badge bg-' + (r.status === 'completed' ? 'success' : 'primary') + '">' + r.status + '</span></td>' +
           '</tr>';
         }).join('') || '<tr><td colspan="7" class="text-center text-muted py-4">No records</td></tr>';
-        const otList = document.getElementById('overtimeList');
-        if (data.overtime && data.overtime.length > 0) {
-          otList.innerHTML = data.overtime.map(o => {
+        var otList = document.getElementById('overtimeList');
+        var ots = data.overtime || [];
+        if (ots.length > 0) {
+          otList.innerHTML = ots.map(function(o) {
             return '<div class="ot-card">' +
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div class="ot-hours">' + o.hours + 'h Overtime</div>' +
@@ -407,8 +419,9 @@
         } else {
           otList.innerHTML = '<div class="empty-state"><i class="bi bi-clock-history"></i><p>No overtime announced yet</p></div>';
         }
-        const payslipList = document.getElementById('payslipList');
-        payslipList.innerHTML = data.payslips.map(p => {
+        var payslipList = document.getElementById('payslipList');
+        var ps = data.payslips || [];
+        payslipList.innerHTML = ps.map(function(p) {
           return '<div class="payslip-card">' +
             '<div><div style="font-weight:600;">' + p.number + '</div>' +
             '<div style="color:#64748b; font-size:0.85rem;">' + p.period_start + ' to ' + p.period_end + '</div></div>' +
@@ -416,14 +429,15 @@
             '<span class="badge bg-' + (p.status === 'paid' ? 'success' : p.status === 'sent' ? 'primary' : 'secondary') + '">' + p.status + '</span></div>' +
           '</div>';
         }).join('') || '<div class="empty-state"><i class="bi bi-receipt"></i><p>No payslips yet</p></div>';
-        const onbList = document.getElementById('onboardingList');
-        const completed = data.onboarding.filter(o => o.is_completed).length;
-        const total = data.onboarding.length;
-        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+        var onbList = document.getElementById('onboardingList');
+        var items = data.onboarding || [];
+        var completed = items.filter(function(o) { return o.is_completed; }).length;
+        var total = items.length;
+        var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
         document.getElementById('onboardingPercent').textContent = pct + '%';
-        const circumference = 2 * Math.PI * 20;
+        var circumference = 2 * Math.PI * 20;
         document.getElementById('progressCircle').style.strokeDashoffset = circumference - (pct / 100) * circumference;
-        onbList.innerHTML = data.onboarding.map(o => {
+        onbList.innerHTML = items.map(function(o) {
           return '<div class="onboarding-item ' + (o.is_completed ? 'completed' : '') + '">' +
             '<div class="onboarding-check ' + (o.is_completed ? 'done' : '') + '">' +
               (o.is_completed ? '<i class="bi bi-check"></i>' : '') +
