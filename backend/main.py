@@ -1122,7 +1122,7 @@ def create_contact(request: Request, body: dict = None, db: Session = Depends(ge
 async def login(request: Request, role: str = "client"):
     request.session['oauth_role'] = role
     redirect_uri = str(request.url_for('auth_callback'))
-    if redirect_uri.startswith('http://'):
+    if redirect_uri.startswith('http://') and 'localhost' not in redirect_uri:
         redirect_uri = redirect_uri.replace('http://', 'https://', 1)
     return await oauth.google.authorize_redirect(request, redirect_uri, access_type='offline', prompt='consent')
 
@@ -2787,6 +2787,188 @@ def employee_heartbeat(request: Request, db: Session = Depends(get_db)):
         except Exception:
             pass
     return {"status": "ok"}
+
+# ============ RECRUITMENT ============
+
+class RecruitmentFormCreate(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    fields: Optional[str] = "[]"
+    pipeline_stages: Optional[str] = '["Applied","Screening","Interview","Offer","Hired"]'
+
+class FormSubmissionCreate(BaseModel):
+    answers: Optional[str] = "{}"
+    file_name: Optional[str] = ""
+    file_type: Optional[str] = ""
+    file_data: Optional[str] = ""
+    candidate_name: Optional[str] = ""
+    candidate_email: Optional[str] = ""
+
+@app.get("/api/recruitment/forms")
+def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    forms = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.client_id == client.id
+    ).order_by(models.DBRecruitmentForm.created_at.desc()).all()
+    result = []
+    for f in forms:
+        sub_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id).count()
+        result.append({
+            "id": f.id, "title": f.title, "description": f.description,
+            "fields": f.fields, "is_active": f.is_active,
+            "form_token": f.form_token, "pipeline_stages": f.pipeline_stages,
+            "created_at": f.created_at, "submission_count": sub_count,
+        })
+    return result
+
+@app.post("/api/recruitment/forms")
+def create_recruitment_form(request: Request, body: RecruitmentFormCreate, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    form = models.DBRecruitmentForm(
+        client_id=client.id, title=body.title, description=body.description, fields=body.fields,
+        pipeline_stages=body.pipeline_stages,
+    )
+    db.add(form)
+    db.commit()
+    db.refresh(form)
+    return {"id": form.id, "form_token": form.form_token, "message": "Form created"}
+
+@app.put("/api/recruitment/forms/{form_id}")
+def update_recruitment_form(form_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.id == form_id, models.DBRecruitmentForm.client_id == client.id
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    if "title" in body: form.title = body["title"]
+    if "description" in body: form.description = body["description"]
+    if "fields" in body: form.fields = body["fields"]
+    if "is_active" in body: form.is_active = body["is_active"]
+    if "pipeline_stages" in body: form.pipeline_stages = body["pipeline_stages"]
+    db.commit()
+    return {"message": "Form updated"}
+
+@app.delete("/api/recruitment/forms/{form_id}")
+def delete_recruitment_form(form_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.id == form_id, models.DBRecruitmentForm.client_id == client.id
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == form_id).delete()
+    db.delete(form)
+    db.commit()
+    return {"message": "Form deleted"}
+
+@app.get("/api/recruitment/forms/{form_id}/submissions")
+def list_form_submissions(form_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.id == form_id, models.DBRecruitmentForm.client_id == client.id
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    subs = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.form_id == form_id
+    ).order_by(models.DBFormSubmission.created_at.desc()).all()
+    return [{
+        "id": s.id, "answers": s.answers, "file_name": s.file_name,
+        "file_type": s.file_type, "file_data": s.file_data,
+        "candidate_name": s.candidate_name,
+        "candidate_email": s.candidate_email, "status": s.status,
+        "current_stage": getattr(s, 'current_stage', 'Applied'),
+        "stage_order": getattr(s, 'stage_order', 0),
+        "notes": s.notes, "created_at": s.created_at,
+    } for s in subs]
+
+@app.put("/api/recruitment/submissions/{sub_id}")
+def update_submission(sub_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = db.query(models.DBFormSubmission).join(models.DBRecruitmentForm).filter(
+        models.DBFormSubmission.id == sub_id,
+        models.DBRecruitmentForm.client_id == client.id,
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if "status" in body: sub.status = body["status"]
+    if "notes" in body: sub.notes = body["notes"]
+    db.commit()
+    return {"message": "Submission updated"}
+
+@app.get("/api/recruitment/forms/{form_id}/pipeline")
+def get_form_pipeline(form_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.id == form_id, models.DBRecruitmentForm.client_id == client.id
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    stages = form.pipeline_stages or '["Applied","Screening","Interview","Offer","Hired"]'
+    subs = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.form_id == form_id
+    ).order_by(models.DBFormSubmission.stage_order.asc(), models.DBFormSubmission.created_at.desc()).all()
+    pipeline = {}
+    for s in subs:
+        stage = getattr(s, 'current_stage', 'Applied') or 'Applied'
+        if stage not in pipeline:
+            pipeline[stage] = []
+        pipeline[stage].append({
+            "id": s.id, "answers": s.answers, "file_name": s.file_name,
+            "file_type": s.file_type, "candidate_name": s.candidate_name,
+            "candidate_email": s.candidate_email, "status": s.status,
+            "current_stage": stage, "stage_order": getattr(s, 'stage_order', 0),
+            "notes": s.notes, "created_at": s.created_at,
+        })
+    return {"stages": stages, "pipeline": pipeline}
+
+@app.put("/api/recruitment/submissions/{sub_id}/stage")
+def move_submission_stage(sub_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = db.query(models.DBFormSubmission).join(models.DBRecruitmentForm).filter(
+        models.DBFormSubmission.id == sub_id,
+        models.DBRecruitmentForm.client_id == client.id,
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    new_stage = body.get("stage")
+    stage_order = body.get("stage_order", 0)
+    if not new_stage:
+        raise HTTPException(status_code=400, detail="stage is required")
+    sub.current_stage = new_stage
+    sub.stage_order = stage_order
+    db.commit()
+    return {"message": f"Candidate moved to {new_stage}"}
+
+@app.get("/api/recruitment/form/{token}")
+def get_public_form(token: str, db: Session = Depends(get_db)):
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.form_token == token,
+        models.DBRecruitmentForm.is_active == True,
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or inactive")
+    return {"title": form.title, "description": form.description, "fields": form.fields}
+
+@app.post("/api/recruitment/form/{token}/submit")
+def submit_application(token: str, body: FormSubmissionCreate, db: Session = Depends(get_db)):
+    form = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.form_token == token,
+        models.DBRecruitmentForm.is_active == True,
+    ).first()
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or inactive")
+    sub = models.DBFormSubmission(
+        client_id=form.client_id, form_id=form.id,
+        answers=body.answers, file_name=body.file_name,
+        file_type=body.file_type, file_data=body.file_data,
+        candidate_name=body.candidate_name, candidate_email=body.candidate_email,
+    )
+    db.add(sub)
+    db.commit()
+    return {"message": "Application submitted successfully"}
+
 
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")

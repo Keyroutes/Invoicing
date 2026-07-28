@@ -378,5 +378,59 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Recruitment tables
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS recruitment_forms (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        title VARCHAR NOT NULL,
+                        description VARCHAR DEFAULT '',
+                        fields TEXT DEFAULT '[]',
+                        is_active BOOLEAN DEFAULT TRUE,
+                        form_token VARCHAR UNIQUE,
+                        pipeline_stages TEXT DEFAULT '["Applied","Screening","Interview","Offer","Hired"]',
+                        created_at VARCHAR DEFAULT ''
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recruitment_forms_client_id ON recruitment_forms (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recruitment_forms_form_token ON recruitment_forms (form_token)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS form_submissions (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        form_id INTEGER REFERENCES recruitment_forms(id) NOT NULL,
+                        answers TEXT DEFAULT '{}',
+                        file_name VARCHAR DEFAULT '',
+                        file_type VARCHAR DEFAULT '',
+                        file_data TEXT DEFAULT '',
+                        candidate_name VARCHAR DEFAULT '',
+                        candidate_email VARCHAR DEFAULT '',
+                        status VARCHAR DEFAULT 'new',
+                        current_stage VARCHAR DEFAULT 'Applied',
+                        stage_order INTEGER DEFAULT 0,
+                        notes VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT ''
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_form_submissions_client_id ON form_submissions (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_form_submissions_form_id ON form_submissions (form_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            try:
+                conn.execute(text("ALTER TABLE recruitment_forms ADD COLUMN IF NOT EXISTS pipeline_stages TEXT DEFAULT '[]'"))
+                conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS current_stage VARCHAR DEFAULT 'Applied'"))
+                conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS stage_order INTEGER DEFAULT 0"))
+                conn.commit()
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Column check skipped: {e}")

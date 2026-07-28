@@ -49,6 +49,7 @@ function showView(viewId) {
         'employee-detail-view': 'nav-people',
         'departments-view': 'nav-people',
         'attendance-view': 'nav-people',
+        'recruitment-view': 'nav-recruitment',
         'payroll-view': 'nav-payroll',
         'payslip-detail-view': 'nav-payroll',
         'orgchart-view': 'nav-org',
@@ -1964,6 +1965,7 @@ showView = function(viewId) {
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
+    if (viewId === 'recruitment-view') loadRecruitmentForms();
 };
 window.showView = showView;
 
@@ -2221,3 +2223,453 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     startAttRefresh();
 });
+
+// ============ RECRUITMENT ============
+var recFormFields = [];
+var recFormStages = [];
+var recEditingFormId = null;
+var recCurrentSubId = null;
+var recFormsSubId = null;
+var recFormsLookup = {};
+var recCurrentPipelineStages = [];
+
+async function loadRecruitmentForms() {
+    try {
+        var res = await fetch('/api/recruitment/forms');
+        if (!res.ok) { showToast('Not logged in', 'error'); return; }
+        var forms = await res.json();
+        recFormsLookup = {};
+        forms.forEach(function(f) { recFormsLookup[f.id] = f; });
+        var tbody = document.getElementById('rec-forms-tbody');
+        if (!forms.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">No forms yet</td></tr>'; return; }
+        tbody.innerHTML = forms.map(function(f) {
+            var fields = f.fields ? JSON.parse(f.fields) : [];
+            var d = new Date(f.created_at);
+            return '<tr>' +
+                '<td><strong>' + esc(f.title) + '</strong>' + (f.description ? '<br><span style="font-size:0.8rem;color:var(--text-secondary)">' + esc(f.description) + '</span>' : '') + '</td>' +
+                '<td>' + fields.length + '</td>' +
+                '<td>' + f.submission_count + '</td>' +
+                '<td>' + (f.is_active ? '<span style="color:var(--accent-success);font-weight:600;">Active</span>' : '<span style="color:var(--text-secondary);">Draft</span>') + '</td>' +
+                '<td>' + d.toLocaleDateString() + '</td>' +
+                '<td style="text-align:right;white-space:nowrap;">' +
+                    '<button class="btn btn-outline btn-sm" onclick="showRecFormSubmissions(' + f.id + ')" style="margin-right:6px;">Submissions</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="copyRecFormLink(\'' + f.form_token + '\')" style="margin-right:6px;" title="Copy link">Link</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="editRecForm(' + f.id + ')" style="margin-right:6px;">Edit</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="toggleRecForm(' + f.id + ',' + f.is_active + ')">' + (f.is_active ? 'Deactivate' : 'Activate') + '</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="deleteRecForm(' + f.id + ')" style="color:var(--accent-danger);border-color:var(--accent-danger);">Delete</button>' +
+                '</td></tr>';
+        }).join('');
+    } catch(e) { console.error('loadRecruitmentForms error:', e); }
+}
+
+function copyRecFormLink(token) {
+    var url = window.location.origin + '/recruitment.html?token=' + token;
+    navigator.clipboard.writeText(url).then(function() {
+        showToast('Link copied! Share it with candidates.', 'success');
+    }).catch(function() {
+        prompt('Copy this link:', url);
+    });
+}
+
+function showAddFormModal() {
+    recEditingFormId = null;
+    recFormFields = [];
+    recFormStages = ['Applied', 'Screening', 'Interview', 'Offer', 'Hired'];
+    document.getElementById('rec-form-modal-title').textContent = 'New Application Form';
+    document.getElementById('rec-form-title').value = '';
+    document.getElementById('rec-form-desc').value = '';
+    renderRecFields();
+    renderRecStages();
+    document.getElementById('add-rec-form-modal').style.display = 'flex';
+}
+
+function editRecForm(id) {
+    var f = recFormsLookup[id];
+    if (!f) { showToast('Form not found', 'error'); return; }
+    recEditingFormId = id;
+    recFormFields = f.fields ? JSON.parse(f.fields) : [];
+    recFormStages = f.pipeline_stages ? JSON.parse(f.pipeline_stages) : ['Applied', 'Screening', 'Interview', 'Offer', 'Hired'];
+    document.getElementById('rec-form-modal-title').textContent = 'Edit Application Form';
+    document.getElementById('rec-form-title').value = f.title || '';
+    document.getElementById('rec-form-desc').value = f.description || '';
+    renderRecFields();
+    renderRecStages();
+    document.getElementById('add-rec-form-modal').style.display = 'flex';
+}
+
+function closeRecFormModal() {
+    document.getElementById('add-rec-form-modal').style.display = 'none';
+}
+
+function addRecStage() {
+    recFormStages.push('New Stage');
+    renderRecStages();
+}
+
+function removeRecStage(idx) {
+    if (recFormStages.length <= 2) { showToast('Need at least 2 stages', 'error'); return; }
+    recFormStages.splice(idx, 1);
+    renderRecStages();
+}
+
+function renderRecStages() {
+    var container = document.getElementById('rec-stages-list');
+    if (!recFormStages.length) { container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No stages defined.</p>'; return; }
+    var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
+    container.innerHTML = recFormStages.map(function(s, i) {
+        var color = stageColors[i % stageColors.length];
+        return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 10px;">' +
+            '<span style="width:12px;height:12px;border-radius:50%;background:' + color + ';flex-shrink:0;"></span>' +
+            '<input type="text" value="' + esc(s) + '" class="form-control" style="flex:1;padding:4px 8px;font-size:0.85rem;" onchange="recFormStages[' + i + ']=this.value">' +
+            (i > 0 ? '<button class="btn-icon" onclick="moveRecStageUp(' + i + ')" style="color:var(--text-secondary);font-size:0.9rem;" title="Move up">&#9650;</button>' : '<span style="width:24px;"></span>') +
+            (i < recFormStages.length - 1 ? '<button class="btn-icon" onclick="moveRecStageDown(' + i + ')" style="color:var(--text-secondary);font-size:0.9rem;" title="Move down">&#9660;</button>' : '<span style="width:24px;"></span>') +
+            '<button class="btn-icon" onclick="removeRecStage(' + i + ')" style="color:var(--accent-danger);font-size:1.1rem;">&times;</button>' +
+            '</div>';
+    }).join('');
+}
+
+function moveRecStageUp(idx) {
+    if (idx <= 0) return;
+    var temp = recFormStages[idx];
+    recFormStages[idx] = recFormStages[idx - 1];
+    recFormStages[idx - 1] = temp;
+    renderRecStages();
+}
+
+function moveRecStageDown(idx) {
+    if (idx >= recFormStages.length - 1) return;
+    var temp = recFormStages[idx];
+    recFormStages[idx] = recFormStages[idx + 1];
+    recFormStages[idx + 1] = temp;
+    renderRecStages();
+}
+
+function addRecField() {
+    recFormFields.push({ label: '', type: 'text', required: true, options: '' });
+    renderRecFields();
+}
+
+function removeRecField(idx) {
+    recFormFields.splice(idx, 1);
+    renderRecFields();
+}
+
+function renderRecFields() {
+    var container = document.getElementById('rec-fields-list');
+    if (!recFormFields.length) { container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No fields added. Click "+ Add Field" to build your form.</p>'; return; }
+    container.innerHTML = recFormFields.map(function(f, i) {
+        return '<div style="display:grid;grid-template-columns:1fr 120px 80px 32px;gap:8px;margin-bottom:8px;align-items:center;">' +
+            '<input type="text" value="' + esc(f.label) + '" placeholder="Field label" class="form-control" onchange="recFormFields[' + i + '].label=this.value">' +
+            '<select class="form-control" onchange="recFormFields[' + i + '].type=this.value;renderRecFields();">' +
+                '<option value="text"' + (f.type==='text'?' selected':'') + '>Text</option>' +
+                '<option value="email"' + (f.type==='email'?' selected':'') + '>Email</option>' +
+                '<option value="phone"' + (f.type==='phone'?' selected':'') + '>Phone</option>' +
+                '<option value="textarea"' + (f.type==='textarea'?' selected':'') + '>Textarea</option>' +
+                '<option value="select"' + (f.type==='select'?' selected':'') + '>Dropdown</option>' +
+                '<option value="file"' + (f.type==='file'?' selected':'') + '>File Upload</option>' +
+            '</select>' +
+            '<label style="font-size:0.8rem;display:flex;align-items:center;gap:4px;">' +
+                '<input type="checkbox"' + (f.required?' checked':'') + ' onchange="recFormFields[' + i + '].required=this.checked"> Req' +
+            '</label>' +
+            '<button class="btn-icon" onclick="removeRecField(' + i + ')" style="color:var(--accent-danger);font-size:1.2rem;">&times;</button>' +
+            (f.type === 'select' ? '<div style="grid-column:1/-1;"><input type="text" value="' + esc(f.options||'') + '" placeholder="Options (comma separated)" class="form-control" onchange="recFormFields[' + i + '].options=this.value"></div>' : '') +
+            '</div>';
+    }).join('');
+}
+
+async function saveRecForm() {
+    var title = document.getElementById('rec-form-title').value.trim();
+    if (!title) { showToast('Form title is required', 'error'); return; }
+    if (recFormStages.length < 2) { showToast('Need at least 2 pipeline stages', 'error'); return; }
+    var body = {
+        title: title,
+        description: document.getElementById('rec-form-desc').value.trim(),
+        fields: JSON.stringify(recFormFields),
+        pipeline_stages: JSON.stringify(recFormStages),
+    };
+    try {
+        var url = recEditingFormId ? '/api/recruitment/forms/' + recEditingFormId : '/api/recruitment/forms';
+        var method = recEditingFormId ? 'PUT' : 'POST';
+        var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (!res.ok) {
+            var err = await res.json().catch(function() { return {}; });
+            showToast(err.detail || 'Failed to save form', 'error');
+            return;
+        }
+        showToast(recEditingFormId ? 'Form updated!' : 'Form created!', 'success');
+        closeRecFormModal();
+        loadRecruitmentForms();
+    } catch(e) { showToast('Error saving form: ' + e.message, 'error'); }
+}
+
+async function toggleRecForm(id, isActive) {
+    try {
+        var res = await fetch('/api/recruitment/forms/' + id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: !isActive })
+        });
+        if (!res.ok) { showToast('Failed to update', 'error'); return; }
+        showToast(isActive ? 'Form deactivated' : 'Form activated', 'success');
+        loadRecruitmentForms();
+    } catch(e) { showToast('Error', 'error'); }
+}
+
+async function deleteRecForm(id) {
+    if (!confirm('Delete this form and all its submissions?')) return;
+    try {
+        var res = await fetch('/api/recruitment/forms/' + id, { method: 'DELETE' });
+        if (!res.ok) { showToast('Failed to delete', 'error'); return; }
+        showToast('Form deleted', 'success');
+        loadRecruitmentForms();
+    } catch(e) { showToast('Error', 'error'); }
+}
+
+async function showRecFormSubmissions(formId) {
+    recFormsSubId = formId;
+    var f = recFormsLookup[formId];
+    document.getElementById('rec-sub-form-title').textContent = f ? f.title : 'Form';
+    recCurrentPipelineStages = (f && f.pipeline_stages) ? JSON.parse(f.pipeline_stages) : ['Applied', 'Screening', 'Interview', 'Offer', 'Hired'];
+    document.getElementById('rec-forms-list').style.display = 'none';
+    document.getElementById('rec-submissions-list').style.display = 'block';
+    document.getElementById('rec-sub-detail').style.display = 'none';
+    switchRecView('table');
+    loadRecSubmissions();
+}
+
+function switchRecView(view) {
+    document.getElementById('rec-table-view').style.display = view === 'table' ? 'block' : 'none';
+    document.getElementById('rec-pipeline-view').style.display = view === 'pipeline' ? 'block' : 'none';
+    var tb = document.getElementById('rec-view-table-btn');
+    var pb = document.getElementById('rec-view-pipeline-btn');
+    if (view === 'table') { tb.className = 'btn btn-primary btn-sm'; pb.className = 'btn btn-outline btn-sm'; }
+    else { tb.className = 'btn btn-outline btn-sm'; pb.className = 'btn btn-primary btn-sm'; loadRecPipeline(); }
+}
+
+async function loadRecSubmissions() {
+    try {
+        var res = await fetch('/api/recruitment/forms/' + recFormsSubId + '/submissions');
+        if (!res.ok) { showToast('Failed to load', 'error'); return; }
+        var subs = await res.json();
+        var tbody = document.getElementById('rec-subs-tbody');
+        if (!subs.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">No submissions yet</td></tr>'; return; }
+        tbody.innerHTML = subs.map(function(s) {
+            var d = new Date(s.created_at);
+            var stage = s.current_stage || 'Applied';
+            var stageIdx = recCurrentPipelineStages.indexOf(stage);
+            var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
+            var stageColor = stageColors[stageIdx >= 0 ? stageIdx % stageColors.length : 0];
+            return '<tr>' +
+                '<td>' + esc(s.candidate_name || '-') + '</td>' +
+                '<td>' + esc(s.candidate_email || '-') + '</td>' +
+                '<td>' + (s.file_name ? '<span style="font-size:0.85rem;">' + esc(s.file_name) + '</span>' : '<span style="color:var(--text-secondary)">—</span>') + '</td>' +
+                '<td><span style="padding:2px 10px;border-radius:12px;font-size:0.75rem;font-weight:600;background:' + stageColor + '20;color:' + stageColor + ';">' + esc(stage) + '</span></td>' +
+                '<td>' + d.toLocaleDateString() + '</td>' +
+                '<td style="text-align:right;white-space:nowrap;">' +
+                    '<button class="btn btn-outline btn-sm" onclick="showRecSubmissionDetail(' + s.id + ')" style="margin-right:4px;">View</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="showMoveStageMenu(' + s.id + ',\'' + esc(stage) + '\')" title="Move to next stage">&#8594;</button>' +
+                '</td></tr>';
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function loadRecPipeline() {
+    try {
+        var res = await fetch('/api/recruitment/forms/' + recFormsSubId + '/pipeline');
+        if (!res.ok) { showToast('Failed to load pipeline', 'error'); return; }
+        var data = await res.json();
+        var stages = data.stages || recCurrentPipelineStages;
+        var pipeline = data.pipeline || {};
+        var board = document.getElementById('rec-pipeline-board');
+        var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
+        board.innerHTML = stages.map(function(stage, i) {
+            var color = stageColors[i % stageColors.length];
+            var cards = pipeline[stage] || [];
+            var stagesJson = JSON.stringify(stages).replace(/"/g, '&quot;');
+            return '<div style="min-width:260px;max-width:280px;flex-shrink:0;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;">' +
+                '<div style="padding:12px 16px;border-bottom:2px solid ' + color + ';display:flex;align-items:center;justify-content:space-between;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                        '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';"></span>' +
+                        '<strong style="font-size:0.85rem;">' + esc(stage) + '</strong>' +
+                    '</div>' +
+                    '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:600;">' + cards.length + '</span>' +
+                '</div>' +
+                '<div style="padding:8px;display:flex;flex-direction:column;gap:8px;min-height:100px;">' +
+                    cards.map(function(c) {
+                        var email = c.candidate_email || '';
+                        return '<div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;cursor:pointer;" onclick="showRecSubmissionDetail(' + c.id + ')">' +
+                            '<div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">' + esc(c.candidate_name || email || 'Unknown') + '</div>' +
+                            (email ? '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;">' + esc(email) + '</div>' : '') +
+                            (c.file_name ? '<div style="font-size:0.72rem;color:var(--text-secondary);"><i class="bi bi-paperclip"></i> ' + esc(c.file_name) + '</div>' : '') +
+                            '<div style="display:flex;gap:4px;margin-top:8px;">' +
+                                (i > 0 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i-1]).replace(/"/g, '&quot;') + ',' + (i-1) + ')" style="font-size:0.7rem;padding:2px 6px;">&#9664; Prev</button>' : '') +
+                                (i < stages.length - 1 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i+1]).replace(/"/g, '&quot;') + ',' + (i+1) + ')" style="font-size:0.7rem;padding:2px 6px;">Next &#9654;</button>' : '') +
+                            '</div>' +
+                        '</div>';
+                    }).join('') +
+                    (cards.length === 0 ? '<div style="text-align:center;color:var(--text-secondary);font-size:0.8rem;padding:24px 0;">No candidates</div>' : '') +
+                '</div>' +
+            '</div>';
+        }).join('');
+    } catch(e) { console.error(e); }
+}
+
+async function moveCandidateStage(subId, newStage, stageOrder) {
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + subId + '/stage', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: newStage, stage_order: stageOrder })
+        });
+        if (!res.ok) { showToast('Failed to move candidate', 'error'); return; }
+        showToast('Moved to ' + newStage, 'success');
+        loadRecPipeline();
+        loadRecSubmissions();
+    } catch(e) { showToast('Error', 'error'); }
+}
+
+function showMoveStageMenu(subId, currentStage) {
+    var idx = recCurrentPipelineStages.indexOf(currentStage);
+    if (idx < recCurrentPipelineStages.length - 1) {
+        var nextStage = recCurrentPipelineStages[idx + 1];
+        moveCandidateStage(subId, nextStage, idx + 1);
+    } else {
+        showToast('Already at final stage', 'info');
+    }
+}
+
+function showRecFormsList() {
+    document.getElementById('rec-forms-list').style.display = 'block';
+    document.getElementById('rec-submissions-list').style.display = 'none';
+    document.getElementById('rec-sub-detail').style.display = 'none';
+}
+
+function showRecSubmissions() {
+    document.getElementById('rec-submissions-list').style.display = 'block';
+    document.getElementById('rec-sub-detail').style.display = 'none';
+}
+
+var _recSubmissionResume = null;
+async function showRecSubmissionDetail(subId) {
+    recCurrentSubId = subId;
+    document.getElementById('rec-submissions-list').style.display = 'none';
+    document.getElementById('rec-sub-detail').style.display = 'block';
+    try {
+        var res = await fetch('/api/recruitment/forms/' + recFormsSubId + '/submissions');
+        if (!res.ok) return;
+        var subs = await res.json();
+        var sub = subs.find(function(s) { return s.id === subId; });
+        if (!sub) return;
+        document.getElementById('rec-detail-status').value = sub.status || 'new';
+        document.getElementById('rec-detail-notes').value = sub.notes || '';
+        _recSubmissionResume = sub;
+        var answers = {};
+        try { answers = JSON.parse(sub.answers || '{}'); } catch(e) {}
+        var answersHtml = Object.entries(answers).map(function(entry) {
+            return '<div style="margin-bottom:12px;"><strong style="font-size:0.85rem;">' + esc(entry[0]) + '</strong><div style="color:var(--text-primary);margin-top:2px;">' + esc(String(entry[1])) + '</div></div>';
+        }).join('');
+        document.getElementById('rec-detail-answers').innerHTML = answersHtml || '<p style="color:var(--text-secondary);">No answers provided</p>';
+        var stage = sub.current_stage || 'Applied';
+        document.getElementById('rec-detail-stage').innerHTML = buildStageMoveHtml(sub.id, stage);
+        var resumeDiv = document.getElementById('rec-detail-resume');
+        var previewDiv = document.getElementById('rec-detail-preview');
+        if (sub.file_name) {
+            resumeDiv.style.display = 'block';
+            document.getElementById('rec-detail-filename').textContent = sub.file_name;
+            previewDiv.innerHTML = '';
+            if (sub.file_data) {
+                var mime = sub.file_type || 'application/octet-stream';
+                var dataUrl = 'data:' + mime + ';base64,' + sub.file_data;
+                if (mime === 'application/pdf') {
+                    previewDiv.innerHTML = '<iframe src="' + dataUrl + '" style="width:100%;height:500px;border:1px solid var(--border-color);border-radius:8px;"></iframe>';
+                } else if (mime.startsWith('image/')) {
+                    previewDiv.innerHTML = '<img src="' + dataUrl + '" style="max-width:100%;border-radius:8px;">';
+                } else if (mime === 'application/msword' || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                    previewDiv.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;"><i class="bi bi-file-earmark-word" style="font-size:2rem;display:block;margin-bottom:8px;"></i>Word document — use Download to view</div>';
+                } else {
+                    previewDiv.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;"><i class="bi bi-file-earmark" style="font-size:2rem;display:block;margin-bottom:8px;"></i>Preview not available — use Download</div>';
+                }
+            } else {
+                previewDiv.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;">No file uploaded</div>';
+            }
+        } else {
+            resumeDiv.style.display = 'none';
+        }
+    } catch(e) { console.error(e); }
+}
+
+function buildStageMoveHtml(subId, currentStage) {
+    var stages = recCurrentPipelineStages;
+    var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
+    var html = '<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    stages.forEach(function(s, i) {
+        var color = stageColors[i % stageColors.length];
+        var isCurrent = s === currentStage;
+        if (isCurrent) {
+            html += '<span style="padding:5px 14px;border-radius:16px;font-size:0.8rem;font-weight:600;background:' + color + ';color:white;">' + esc(s) + '</span>';
+        } else {
+            html += '<button class="btn btn-outline btn-sm" onclick="moveCandidateStage(' + subId + ',' + JSON.stringify(s).replace(/"/g, '&quot;') + ',' + i + ')" style="font-size:0.75rem;padding:3px 10px;border-color:' + color + '40;color:' + color + ';">' + esc(s) + '</button>';
+        }
+    });
+    html += '</div>';
+    return html;
+}
+
+async function updateRecSubmission() {
+    if (!recCurrentSubId) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: document.getElementById('rec-detail-status').value,
+                notes: document.getElementById('rec-detail-notes').value,
+            })
+        });
+        if (!res.ok) { showToast('Failed to update', 'error'); return; }
+        showToast('Submission updated', 'success');
+    } catch(e) { showToast('Error', 'error'); }
+}
+
+function downloadRecResume() {
+    var sub = _recSubmissionResume;
+    if (!sub || !sub.file_data) { showToast('No resume file available', 'error'); return; }
+    var byteStr = atob(sub.file_data);
+    var arr = new Uint8Array(byteStr.length);
+    for (var i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
+    var blob = new Blob([arr], { type: sub.file_type || 'application/octet-stream' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = sub.file_name || 'resume'; a.click();
+    URL.revokeObjectURL(url);
+}
+
+function esc(s) {
+    if (!s) return '';
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+window.showAddFormModal = showAddFormModal;
+window.closeRecFormModal = closeRecFormModal;
+window.addRecField = addRecField;
+window.removeRecField = removeRecField;
+window.saveRecForm = saveRecForm;
+window.editRecForm = editRecForm;
+window.toggleRecForm = toggleRecForm;
+window.deleteRecForm = deleteRecForm;
+window.copyRecFormLink = copyRecFormLink;
+window.showRecFormSubmissions = showRecFormSubmissions;
+window.showRecFormsList = showRecFormsList;
+window.showRecSubmissions = showRecSubmissions;
+window.showRecSubmissionDetail = showRecSubmissionDetail;
+window.updateRecSubmission = updateRecSubmission;
+window.downloadRecResume = downloadRecResume;
+window.switchRecView = switchRecView;
+window.addRecStage = addRecStage;
+window.removeRecStage = removeRecStage;
+window.moveRecStageUp = moveRecStageUp;
+window.moveRecStageDown = moveRecStageDown;
+window.moveCandidateStage = moveCandidateStage;
+window.showMoveStageMenu = showMoveStageMenu;

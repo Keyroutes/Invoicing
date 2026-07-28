@@ -328,3 +328,38 @@ class DBOvertimeLog(Base):
     announced_by = Column(String, default="")
     status = Column(String, default="announced")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBRecruitmentForm(Base):
+    __tablename__ = "recruitment_forms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    fields = Column(Text, default="[]")
+    is_active = Column(Boolean, default=True)
+    form_token = Column(String, unique=True, index=True, default=lambda: str(__import__('uuid').uuid4()))
+    pipeline_stages = Column(Text, default='["Applied","Screening","Interview","Offer","Hired"]')
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBFormSubmission(Base):
+    __tablename__ = "form_submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    form_id = Column(Integer, ForeignKey("recruitment_forms.id"), nullable=False, index=True)
+    answers = Column(Text, default="{}")
+    file_name = Column(String, default="")
+    file_type = Column(String, default="")
+    file_data = Column(Text, default="")
+    candidate_name = Column(String, default="")
+    candidate_email = Column(String, default="")
+    status = Column(String, default="new")
+    current_stage = Column(String, default="Applied")
+    stage_order = Column(Integer, default=0)
+    notes = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    form = relationship("DBRecruitmentForm")
