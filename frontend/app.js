@@ -81,12 +81,12 @@ function formatCurrency(amount, currency) {
 
 // --- Auth ---
 async function checkAuthStatus() {
+    var loginBtn = document.getElementById('login-btn');
+    var userInfo = document.getElementById('user-info');
     try {
         var res = await fetch('/api/auth/me');
         var data = await res.json();
         if (data.user) {
-            var loginBtn = document.getElementById('login-btn');
-            var userInfo = document.getElementById('user-info');
             if (loginBtn) loginBtn.style.display = 'none';
             if (userInfo) {
                 userInfo.style.display = 'flex';
@@ -95,13 +95,13 @@ async function checkAuthStatus() {
                 document.getElementById('user-avatar').textContent = name[0].toUpperCase();
             }
         } else {
-            var loginBtn2 = document.getElementById('login-btn');
-            var userInfo2 = document.getElementById('user-info');
-            if (loginBtn2) loginBtn2.style.display = 'inline-block';
-            if (userInfo2) userInfo2.style.display = 'none';
+            if (loginBtn) loginBtn.style.display = 'inline-block';
+            if (userInfo) userInfo.style.display = 'none';
         }
     } catch (e) {
         console.error("Auth check failed", e);
+        if (loginBtn) loginBtn.style.display = 'inline-block';
+        if (userInfo) userInfo.style.display = 'none';
     }
 }
 
@@ -2236,7 +2236,11 @@ var recCurrentPipelineStages = [];
 async function loadRecruitmentForms() {
     try {
         var res = await fetch('/api/recruitment/forms');
-        if (!res.ok) { showToast('Not logged in', 'error'); return; }
+        if (!res.ok) {
+            var tbody = document.getElementById('rec-forms-tbody');
+            if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="loading" style="padding:24px;"><a href="/api/auth/login" style="color:var(--accent-cyan);">Sign in with Google</a> to manage recruitment forms.</td></tr>';
+            return;
+        }
         var forms = await res.json();
         recFormsLookup = {};
         forms.forEach(function(f) { recFormsLookup[f.id] = f; });
