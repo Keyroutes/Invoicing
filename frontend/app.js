@@ -114,10 +114,16 @@ window.handleLogout = handleLogout;
 async function fetchDashboardData() {
     try {
         var response = await fetch('/api/dashboard-summary');
-        if (!response.ok) throw new Error('Failed');
+        if (!response.ok) {
+            var container = document.getElementById('cash-flow-container');
+            if (container) container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:40px;"><a href="/api/auth/login" style="color:var(--accent-cyan);">Sign in</a> to view dashboard</div>';
+            return;
+        }
         renderDashboard(await response.json());
     } catch (error) {
         console.error('Dashboard load failed:', error);
+        var container2 = document.getElementById('cash-flow-container');
+        if (container2) container2.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:40px;">Failed to load</div>';
     }
 }
 
