@@ -569,10 +569,10 @@ function generateInvoicePDF() {
 
     // ===== LINE ITEMS TABLE =====
     var colItem = ml;
-    var colDesc = ml + 140;
-    var colQty = mr - 220;
-    var colPrice = mr - 150;
-    var colDisc = mr - 80;
+    var colDesc = ml + 100;
+    var colQty = mr - 210;
+    var colPrice = mr - 140;
+    var colDisc = mr - 75;
     var colAmount = mr;
 
     // Header row
@@ -601,8 +601,9 @@ function generateInvoicePDF() {
         var disc = cells[4].textContent || '0';
         var amount = cells[6].textContent;
 
-        var descWidth = colQty - colDesc - 16;
-        var nameLines = doc.splitTextToSize(name || '-', 120);
+        doc.setFontSize(9.5);
+        var descWidth = colQty - colDesc - 24;
+        var nameLines = doc.splitTextToSize(name || '-', 85);
         var descLines = doc.splitTextToSize(desc || '-', descWidth);
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(20, maxLines * 12 + 8);
