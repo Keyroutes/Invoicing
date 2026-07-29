@@ -519,6 +519,60 @@ def get_gmail_credentials(access_token: str = None, refresh_token: str = None):
 def get_stored_refresh_token(db: Session):
     setting = db.query(models.DBSettings).filter(models.DBSettings.key == "GOOGLE_REFRESH_TOKEN").first()
     return setting.value if setting else None
+def prepare_email_message(to_email, subject, body_text, html_body, from_email, logo_data="", pdf_bytes=None, pdf_filename="invoice.pdf"):
+    """Build a properly structured MIME email with CID-embedded logo and PDF attachment."""
+    import re as _re
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders as _encoders
+
+    msg = MIMEMultipart('mixed')
+    msg['Subject'] = subject
+    msg['From'] = from_email
+    msg['To'] = to_email
+    msg['Reply-To'] = from_email
+    msg['List-Unsubscribe'] = '<mailto:hello@keyroutes.co?subject=unsubscribe>'
+    msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+
+    alt_part = MIMEMultipart('alternative')
+    alt_part.attach(MIMEText(body_text, 'plain', 'utf-8'))
+
+    if html_body and logo_data:
+        logo_cid = 'logo_' + uuid.uuid4().hex[:12]
+        data_url_match = _re.match(r'^data:(image/\w+);base64,(.+)$', logo_data, _re.DOTALL)
+        if data_url_match:
+            img_mime = data_url_match.group(1)
+            img_b64 = data_url_match.group(2)
+            img_sub = img_mime.split('/')[1] if '/' in img_mime else 'png'
+            if img_sub == 'jpeg':
+                img_sub = 'jpg'
+            img_bytes = base64.b64decode(img_b64)
+            logo_part = MIMEBase('image', img_sub)
+            logo_part.set_payload(img_bytes)
+            _encoders.encode_base64(logo_part)
+            logo_part.add_header('Content-ID', f'<{logo_cid}>')
+            logo_part.add_header('Content-Disposition', 'inline', filename='logo.' + img_sub)
+            msg.attach(logo_part)
+            html_body = html_body.replace(logo_data, f'cid:{logo_cid}')
+        elif logo_data.startswith('http'):
+            html_body = html_body
+        else:
+            logo_cid = 'logo_' + uuid.uuid4().hex[:12]
+            html_body = html_body.replace(logo_data, f'cid:{logo_cid}')
+
+    alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
+    msg.attach(alt_part)
+
+    if pdf_bytes:
+        pdf_part = MIMEBase('application', 'pdf')
+        pdf_part.set_payload(pdf_bytes)
+        _encoders.encode_base64(pdf_part)
+        pdf_part.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
+        msg.attach(pdf_part)
+
+    return msg.as_string()
+
 
 def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_bytes=None, pdf_filename="invoice.pdf"):
     smtp_host = os.getenv("SMTP_HOST", "")
@@ -528,30 +582,20 @@ def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_byt
     if not all([smtp_host, smtp_user, smtp_pass]):
         return False, "SMTP not configured"
     try:
-        msg = EmailMessage()
-        msg['Subject'] = subject
-        msg['From'] = from_email
-        msg['To'] = to_email
-        msg['Reply-To'] = from_email
-        msg['List-Unsubscribe'] = f'<mailto:hello@keyroutes.co?subject=unsubscribe>'
-        msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
-        msg.set_content(body)
-        if html_body:
-            msg.add_alternative(html_body, subtype='html', charset='utf-8')
-        if pdf_bytes:
-            msg.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_filename)
+        raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, "", pdf_bytes, pdf_filename)
         context = ssl.create_default_context()
         with smtplib.SMTP(smtp_host, smtp_port) as server:
             server.starttls(context=context)
             server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
+            server.sendmail(from_email, to_email, raw_msg)
         logger.info(f"Email sent via SMTP to {to_email}")
         return True, "Email sent via SMTP"
     except Exception as e:
         logger.error(f"SMTP failed: {e}")
         return False, f"SMTP error: {str(e)}"
 
-def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf"):
+
+def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf", logo_data: str = ""):
     pdf_bytes = None
     if pdf_b64:
         try:
@@ -559,26 +603,16 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
         except Exception as e:
             logger.error(f"Failed to decode PDF: {e}")
 
+    raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, logo_data or "", pdf_bytes, pdf_filename)
+
     with SessionLocal() as db:
         refresh_token = get_stored_refresh_token(db)
 
     if refresh_token:
         try:
             creds = get_gmail_credentials(access_token=None, refresh_token=refresh_token)
-            msg = EmailMessage()
-            msg['Subject'] = subject
-            msg['From'] = from_email
-            msg['To'] = to_email
-            msg['Reply-To'] = from_email
-            msg['List-Unsubscribe'] = '<mailto:hello@keyroutes.co?subject=unsubscribe>'
-            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
-            msg.set_content(body)
-            if html_body:
-                msg.add_alternative(html_body, subtype='html', charset='utf-8')
-            if pdf_bytes:
-                msg.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_filename)
             service = build('gmail', 'v1', credentials=creds)
-            encoded_message = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            encoded_message = base64.urlsafe_b64encode(raw_msg.encode('utf-8')).decode()
             send_result = service.users().messages().send(userId="me", body={'raw': encoded_message}).execute()
             logger.info(f"Email sent via Gmail API to {to_email} (ID: {send_result['id']})")
             return True, "Email sent via Gmail API"
@@ -1009,7 +1043,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{inv.number}.pdf" if pdf_b64 else "invoice.pdf"
 
-    background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename)
+    background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename, logo_data)
 
     inv.status = "Sent"
     inv.sent = datetime.now().strftime("%Y-%m-%d")
@@ -2143,7 +2177,7 @@ Best regards,
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{ps.number}.pdf" if pdf_b64 else "payslip.pdf"
 
-    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename)
+    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename, logo_data)
     ps.status = "Sent" if ps.status == "Draft" else ps.status
     ps.sent = datetime.now().strftime("%Y-%m-%d")
     db.commit()
