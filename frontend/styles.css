@@ -425,6 +425,21 @@ input[type="number"] {
 .line-items-table th {
     font-size: 0.75rem !important;
 }
+.line-items-table td {
+    vertical-align: top;
+}
+.line-items-table .item-desc-cell {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-width: 280px;
+}
+textarea.table-input.item-desc {
+    resize: vertical;
+    min-height: 32px;
+    max-height: 120px;
+    line-height: 1.4;
+    overflow: hidden;
+}
 
 /* ===== CONTACT AUTOCOMPLETE ===== */
 .contact-autocomplete-wrap {

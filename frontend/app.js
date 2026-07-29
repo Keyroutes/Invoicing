@@ -433,7 +433,7 @@ async function viewInvoice(number) {
                 if (taxType === 'exclusive') { itemVat = amount * 0.20; }
                 else if (taxType === 'inclusive') { itemVat = amount - (amount / 1.20); amount -= itemVat; }
                 subtotal += amount; vat += itemVat;
-                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;">' + (item.name || '') + '</td><td style="padding:12px 16px;">' + item.description + '</td><td style="padding:12px 16px;text-align:right;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;">20% VAT</td><td style="padding:12px 16px;text-align:right;">' + amount.toFixed(2) + '</td></tr>');
+                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + (item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + item.description + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
             });
         }
         document.getElementById('view-summary-subtotal').textContent = subtotal.toFixed(2);
@@ -458,8 +458,8 @@ function generateInvoicePDF() {
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({ unit: 'pt', format: 'letter' });
     var w = 612, h = 792;
-    var margin = 50;
-    var y = 40;
+    var ml = 50, mr = w - 50;
+    var y = 36;
 
     var number = document.getElementById('view-inv-number-val').textContent || 'Invoice';
     var contact = document.getElementById('view-inv-contact').textContent || '';
@@ -483,100 +483,108 @@ function generateInvoicePDF() {
     var compPhone = companyPhone ? companyPhone.textContent.replace('Phone: ', '') : '';
     var compAbn = companyAbn ? companyAbn.textContent.replace('ABN: ', '') : '';
 
-    // --- LOGO (top right) ---
+    // ===== TOP ACCENT BAR =====
+    doc.setFillColor(30, 41, 59);
+    doc.rect(0, 0, w, 4, 'F');
+
+    // ===== LOGO (top right) =====
     if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', w - margin - 100, y - 5, 100, 40); } catch(e) {}
+        try { doc.addImage(savedLogo, 'PNG', mr - 90, y, 90, 32); } catch(e) {}
     }
 
-    // --- TAX INVOICE title ---
+    // ===== TAX INVOICE title =====
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(24);
+    doc.setFontSize(26);
     doc.setTextColor(30, 41, 59);
-    doc.text('TAX INVOICE', margin, y + 20);
-    y += 40;
+    doc.text('TAX INVOICE', ml, y + 18);
+    y += 44;
 
-    // --- Company info (right side) ---
+    // ===== Company block (right) =====
+    var compY = y - 40;
     if (company) {
-        var compY = 45;
-        doc.setFontSize(10);
+        doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        var compLines = [];
-        compLines.push(company);
-        if (compAddr) {
-            var addrParts = compAddr.split(',').map(function(s) { return s.trim(); });
-            addrParts.forEach(function(p) { if (p) compLines.push(p); });
-        }
-        if (compPhone) compLines.push('Tel: ' + compPhone);
-        compLines.forEach(function(line) {
-            doc.text(line.substring(0, 40), w - margin, compY, { align: 'right' });
-            compY += 13;
+        doc.text(company, mr, compY, { align: 'right' });
+        compY += 14;
+    }
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    if (compAddr) {
+        compAddr.split(',').forEach(function(p) {
+            p = p.trim();
+            if (p) { doc.text(p.substring(0, 42), mr, compY, { align: 'right' }); compY += 12; }
         });
     }
+    if (compPhone) { doc.text('Tel: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
+    if (compEmail) { doc.text(compEmail, mr, compY, { align: 'right' }); compY += 12; }
 
-    // --- Customer info (left side) ---
-    y += 10;
-    doc.setFontSize(10);
+    // ===== Customer block (left) =====
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(148, 163, 184);
+    doc.text('SOLD TO', ml, y);
+    y += 12;
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
     if (contact) {
-        var custLines = contact.split(',').map(function(s) { return s.trim(); });
-        custLines.forEach(function(line) {
-            doc.text(line.substring(0, 50), margin, y);
-            y += 14;
+        contact.split(',').forEach(function(p) {
+            p = p.trim();
+            if (p) { doc.text(p.substring(0, 48), ml, y); y += 14; }
         });
     }
-    if (email && email !== 'No email') {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(100, 116, 139);
-        doc.text(email, margin, y);
-        y += 13;
-    }
-
-    // --- Invoice Date / Invoice Number (center-right) ---
-    var infoY = 110;
-    doc.setFontSize(10);
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text('Invoice Date', w / 2, infoY);
-    doc.text('Invoice Number', w / 2, infoY + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59);
-    doc.text(issueDate || '-', w / 2 + 80, infoY);
-    doc.text(number, w / 2 + 80, infoY + 18);
+    if (email && email !== 'No email') { doc.text(email, ml, y); y += 12; }
+    if (phone && phone !== 'No phone') { doc.text(phone, ml, y); y += 12; }
 
-    y = Math.max(y, infoY + 40) + 10;
-
-    // --- Divider ---
-    doc.setDrawColor(200, 210, 220);
+    // ===== Invoice Details (centered box) =====
+    y = Math.max(y, compY) + 16;
+    doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
-    doc.line(margin, y, w - margin, y);
+    doc.line(ml, y, mr, y);
+    y += 12;
+
+    var detW = (mr - ml) / 3;
+    var detLabels = ['INVOICE DATE', 'DUE DATE', 'INVOICE NO'];
+    var detValues = [issueDate || '-', dueDate || '-', number];
+    detLabels.forEach(function(label, i) {
+        var dx = ml + detW * i;
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(148, 163, 184);
+        doc.text(label, dx + 8, y);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 41, 59);
+        doc.text(detValues[i], dx + 8, y + 14);
+    });
+    y += 30;
+    doc.line(ml, y, mr, y);
     y += 20;
 
-    // === LINE ITEMS TABLE ===
-    var colDesc = margin;
-    var colQty = margin + 310;
-    var colPrice = margin + 370;
-    var colAmount = w - margin;
+    // ===== LINE ITEMS TABLE =====
+    var colDesc = ml;
+    var colQty = ml + 310;
+    var colPrice = ml + 370;
+    var colAmount = mr;
 
-    doc.setFillColor(245, 247, 250);
-    doc.rect(margin, y - 4, w - margin * 2, 20, 'F');
-    doc.setFontSize(8);
+    // Header row
+    doc.setFillColor(30, 41, 59);
+    doc.rect(ml, y, mr - ml, 20, 'F');
+    doc.setFontSize(7.5);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Description', colDesc + 4, y + 8);
-    doc.text('Quantity', colQty, y + 8, { align: 'right' });
-    doc.text('Unit Price', colPrice, y + 8, { align: 'right' });
-    doc.text('Amount GBP', colAmount, y + 8, { align: 'right' });
-    y += 22;
+    doc.setTextColor(220, 225, 235);
+    doc.text('Description', colDesc + 8, y + 13);
+    doc.text('Qty', colQty, y + 13, { align: 'right' });
+    doc.text('Unit Price', colPrice, y + 13, { align: 'right' });
+    doc.text('Amount GBP', colAmount - 8, y + 13, { align: 'right' });
+    y += 24;
 
-    doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.3);
-    doc.line(margin, y, w - margin, y);
-    y += 6;
-
-    // Line items
+    // Items with text wrapping
     var rowIdx = 0;
     document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
         var cells = tr.querySelectorAll('td');
@@ -587,157 +595,172 @@ function generateInvoicePDF() {
         var price = cells[3].textContent;
         var amount = cells[6].textContent;
 
-        var itemLabel = name ? (desc ? name + ' - ' + desc.substring(0, 35) : name) : desc.substring(0, 45);
+        var itemLabel = name ? (desc ? name + '  -  ' + desc : name) : desc;
+        var descWidth = colQty - colDesc - 16;
+        var lines = doc.splitTextToSize(itemLabel, descWidth);
+        var rowH = Math.max(20, lines.length * 12 + 8);
 
-        doc.setFontSize(10);
+        if (rowIdx % 2 === 0) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(ml, y, mr - ml, rowH, 'F');
+        }
+
+        doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(30, 41, 59);
-        doc.text(itemLabel.substring(0, 48), colDesc + 4, y);
+        doc.text(lines, colDesc + 8, y + 13);
         doc.setTextColor(100, 116, 139);
-        doc.text(qty, colQty, y, { align: 'right' });
-        doc.text(price, colPrice, y, { align: 'right' });
-        doc.setTextColor(30, 41, 59);
+        doc.text(qty, colQty, y + 13, { align: 'right' });
+        doc.text(price, colPrice, y + 13, { align: 'right' });
         doc.setFont('helvetica', 'bold');
-        doc.text(amount, colAmount, y, { align: 'right' });
-        doc.setFont('helvetica', 'normal');
-        y += 14;
-
-        doc.setDrawColor(230, 235, 240);
-        doc.setLineWidth(0.2);
-        doc.line(margin + 4, y - 4, w - margin - 4, y - 4);
+        doc.setTextColor(30, 41, 59);
+        doc.text(amount, colAmount - 8, y + 13, { align: 'right' });
+        y += rowH;
         rowIdx++;
     });
 
     if (rowIdx === 0) {
-        doc.setFontSize(10);
+        doc.setFillColor(248, 250, 252);
+        doc.rect(ml, y, mr - ml, 20, 'F');
+        doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', margin + 4, y);
-        y += 16;
+        doc.text('No line items', colDesc + 8, y + 13);
+        y += 20;
     }
 
-    y += 8;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(ml, y, mr, y);
+    y += 16;
 
-    // --- TOTALS (right-aligned) ---
-    var totalsX = w - margin - 160;
-    var totalsValX = w - margin;
+    // ===== TOTALS =====
+    var totLabelX = mr - 150;
+    var totValX = mr - 8;
 
-    doc.setFontSize(10);
+    doc.setFontSize(9.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text('Subtotal', totalsX, y);
+    doc.text('Subtotal', totLabelX, y);
     doc.setTextColor(30, 41, 59);
-    doc.text(subtotal, totalsValX, y, { align: 'right' });
-    y += 18;
+    doc.text(subtotal, totValX, y, { align: 'right' });
+    y += 16;
 
     doc.setTextColor(100, 116, 139);
-    doc.text('TOTAL NO VAT', totalsX, y);
+    doc.text('VAT (0%)', totLabelX, y);
     doc.setTextColor(30, 41, 59);
-    doc.text(vat, totalsValX, y, { align: 'right' });
+    doc.text(vat, totValX, y, { align: 'right' });
     y += 6;
 
     doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.5);
-    doc.line(totalsX, y, totalsValX, y);
+    doc.setLineWidth(0.3);
+    doc.line(totLabelX, y, totValX, y);
     y += 14;
 
-    doc.setFontSize(12);
+    doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
-    doc.text('TOTAL GBP', totalsX, y);
-    doc.text(total, totalsValX, y, { align: 'right' });
-    y += 28;
+    doc.text('TOTAL GBP', totLabelX, y);
+    doc.text(total, totValX, y, { align: 'right' });
+    y += 24;
 
-    // --- Due Date ---
-    doc.setFontSize(10);
+    // ===== Due Date =====
+    doc.setFillColor(254, 243, 199);
+    doc.roundedRect(ml, y, mr - ml, 26, 4, 4, 'F');
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59);
-    doc.text('Due Date: ' + dueDate, margin, y);
-    y += 18;
+    doc.setTextColor(146, 64, 14);
+    doc.text('Payment is due by ' + dueDate + '. Please reference ' + number + ' when paying.', ml + 10, y + 16);
+    y += 38;
 
-    // --- View and pay online ---
-    doc.setFontSize(10);
+    // ===== View and pay online =====
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(14, 165, 233);
     var payLink = 'View and pay online now';
-    doc.text(payLink, margin, y);
-    var linkW = doc.getTextWidth(payLink);
-    doc.link(margin, y - 10, linkW, 14, { url: window.location.origin + '/login.html' });
-    y += 30;
+    doc.text(payLink, ml, y);
+    doc.link(ml, y - 9, doc.getTextWidth(payLink), 12, { url: window.location.origin + '/login.html' });
+    y += 24;
 
     // ==========================================
-    // PAYMENT ADVICE SLIP (dashed cut line)
+    // PAYMENT ADVICE SLIP
     // ==========================================
-    var stubY = y + 10;
-
-    // Scissor + dashed line
-    doc.setFontSize(14);
-    doc.setTextColor(100, 116, 139);
-    doc.text('\u2702', margin - 4, stubY + 4);
-    doc.setDrawColor(150, 160, 170);
-    doc.setLineWidth(0.5);
-    doc.setLineDashPattern([4, 3], 0);
-    doc.line(margin + 16, stubY, w - margin, stubY);
+    // Dashed cut line with scissors
+    doc.setDrawColor(160, 170, 180);
+    doc.setLineWidth(0.4);
+    doc.setLineDashPattern([6, 4], 0);
+    doc.line(ml, y, mr, y);
     doc.setLineDashPattern([], 0);
-    stubY += 16;
+    doc.setFontSize(12);
+    doc.setTextColor(160, 170, 180);
+    doc.text('\u2702', ml - 2, y - 3);
+    y += 14;
 
-    // PAYMENT ADVICE title
+    // PAYMENT ADVICE header with subtle background
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(ml, y - 4, mr - ml, 28, 4, 4, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
+    doc.setFontSize(13);
     doc.setTextColor(30, 41, 59);
-    doc.text('PAYMENT ADVICE', margin, stubY + 6);
-    stubY += 28;
+    doc.text('PAYMENT ADVICE', ml + 10, y + 14);
+    y += 36;
 
-    // Left side: Company info
-    var stubLeft = margin + 10;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('To:', stubLeft, stubY);
-    stubY += 12;
+    // Two-column layout
+    var stubLeft = ml + 10;
+    var stubRight = w / 2 + 20;
+    var slY = y;
+
+    // Left: Company info
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
+    doc.setTextColor(148, 163, 184);
+    doc.text('PAY TO', stubLeft, slY);
+    slY += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
-    if (company) { doc.text(company, stubLeft, stubY); stubY += 12; }
+    if (company) { doc.text(company, stubLeft, slY); slY += 12; }
     doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
     if (compAddr) {
-        var addrParts2 = compAddr.split(',').map(function(s) { return s.trim(); });
-        addrParts2.forEach(function(p) {
-            if (p) { doc.text(p.substring(0, 40), stubLeft, stubY); stubY += 11; }
+        compAddr.split(',').forEach(function(p) {
+            p = p.trim();
+            if (p) { doc.text(p.substring(0, 38), stubLeft, slY); slY += 11; }
         });
     }
-    if (compPhone) { doc.text('Tel: ' + compPhone, stubLeft, stubY); stubY += 11; }
+    if (compPhone) { doc.text('Tel: ' + compPhone, stubLeft, slY); slY += 11; }
 
-    // Right side: Customer, Invoice #, Amount Due, Due Date
-    var stubRight = w / 2 + 30;
-    var sry = stubY - 12 - (compAddr ? compAddr.split(',').length * 11 : 0) - (compPhone ? 11 : 0) - 12;
-
-    var stubLabels = ['Customer', 'Invoice Number', 'Amount Due', 'Due Date', 'Amount Enclosed'];
-    var stubValues = [contact.substring(0, 35), number, total, dueDate, ''];
-
-    stubLabels.forEach(function(label, i) {
-        doc.setFontSize(9);
+    // Right: Invoice details
+    var srY = y;
+    var srLabels = ['Customer', 'Invoice Number', 'Amount Due', 'Due Date', 'Amount Enclosed'];
+    var srValues = [contact.substring(0, 38), number, total, dueDate];
+    srLabels.forEach(function(label, i) {
+        doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(label, stubRight, sry);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 116, 139);
-        if (i === 4) {
+        doc.text(label, stubRight, srY);
+        if (i < 4) {
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(100, 116, 139);
+            doc.text(srValues[i], stubRight + 80, srY);
+        } else {
             doc.setDrawColor(180, 190, 200);
             doc.setLineWidth(0.3);
-            doc.line(stubRight, sry + 4, stubRight + 160, sry + 4);
-        } else {
-            doc.text(stubValues[i], stubRight + 80, sry);
+            doc.line(stubRight + 80, srY + 3, stubRight + 180, srY + 3);
         }
-        sry += 16;
+        srY += 16;
     });
 
-    // Company registration footer
-    stubY = Math.max(stubY, sry) + 10;
+    // Footer
+    var footY = Math.max(slY, srY) + 16;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.line(ml, footY, mr, footY);
+    footY += 10;
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
-    var regText = 'Company Registration No: ' + (compAbn || '13930191') + '.  Registered Office: ' + (compAddr || 'N/A');
-    doc.text(regText, margin, stubY + 6);
+    doc.setTextColor(180, 190, 200);
+    doc.text('Company Registration No: ' + (compAbn || '13930191') + '  |  Registered Office: ' + (compAddr || 'N/A'), ml, footY);
 
     return doc;
 }
@@ -842,7 +865,7 @@ window.calculateTotals = calculateTotals;
 function addLineItemRow() {
     var tbody = document.getElementById('line-items-body');
     if (!tbody) return;
-    tbody.insertAdjacentHTML('beforeend', '<tr class="line-item-row" style="border-bottom:1px solid var(--border-color);background:var(--surface-color);"><td style="padding:8px;text-align:center;color:var(--text-secondary);cursor:grab;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td><td style="padding:0;"><input type="text" class="table-input item-name" style="width:100%;" placeholder="Item name"></td><td style="padding:0;"><input type="text" class="table-input item-desc" style="width:100%;"></td><td style="padding:0;"><input type="number" class="table-input item-qty" style="width:100%;text-align:right;" value="0" step="1" min="0"></td><td style="padding:0;"><input type="number" class="table-input item-price" style="width:100%;text-align:right;" value="0" step="0.01" min="0"></td><td style="padding:0;"><input type="number" class="table-input item-disc" style="width:100%;text-align:right;" placeholder="0" step="1" min="0" max="100"></td><td style="padding:0;"><select class="table-input" style="width:100%;"><option>200 - Sales</option></select></td><td style="padding:0;"><select class="table-input" style="width:100%;"><option>20% VAT</option><option>No Tax</option></select></td><td style="padding:12px 8px;text-align:right;" class="item-tax-amount">0.00</td><td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td><td style="padding:8px;text-align:center;"><button type="button" class="btn-icon delete-row" style="color:var(--danger-color);cursor:pointer;background:none;border:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td></tr>');
+    tbody.insertAdjacentHTML('beforeend', '<tr class="line-item-row" style="border-bottom:1px solid var(--border-color);background:var(--surface-color);"><td style="padding:8px;text-align:center;color:var(--text-secondary);cursor:grab;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td><td style="padding:0;"><input type="text" class="table-input item-name" style="width:100%;" placeholder="Item name"></td><td style="padding:0;"><textarea class="table-input item-desc" rows="1" style="width:100%;resize:vertical;min-height:32px;overflow:hidden;line-height:1.4;" oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px';"></textarea></td><td style="padding:0;"><input type="number" class="table-input item-qty" style="width:100%;text-align:right;" value="0" step="1" min="0"></td><td style="padding:0;"><input type="number" class="table-input item-price" style="width:100%;text-align:right;" value="0" step="0.01" min="0"></td><td style="padding:0;"><input type="number" class="table-input item-disc" style="width:100%;text-align:right;" placeholder="0" step="1" min="0" max="100"></td><td style="padding:0;"><select class="table-input" style="width:100%;"><option>200 - Sales</option></select></td><td style="padding:0;"><select class="table-input" style="width:100%;"><option>20% VAT</option><option>No Tax</option></select></td><td style="padding:12px 8px;text-align:right;" class="item-tax-amount">0.00</td><td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td><td style="padding:8px;text-align:center;"><button type="button" class="btn-icon delete-row" style="color:var(--danger-color);cursor:pointer;background:none;border:none;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td></tr>');
 }
 window.addLineItemRow = addLineItemRow;
 
@@ -883,7 +906,7 @@ function previewInvoice() {
             var vat = 0;
             if (taxType === 'exclusive') { vat = amount * 0.20; }
             else if (taxType === 'inclusive') { vat = amount - (amount / 1.20); amount -= vat; }
-            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;">' + name + '</td><td style="padding:12px 16px;">' + desc + '</td><td style="padding:12px 16px;text-align:right;">' + qty + '</td><td style="padding:12px 16px;text-align:right;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;">' + disc + '%</td><td style="padding:12px 16px;">20% VAT</td><td style="padding:12px 16px;text-align:right;">' + amount.toFixed(2) + '</td></tr>');
+            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + name + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + desc + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + disc + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
         }
     });
 
@@ -2380,8 +2403,8 @@ function generatePayslipPDF() {
     doc.text('Pay Date:', rightX, pdY + 16);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-    doc.text(period || '-', rightX + 50, pdY);
-    doc.text(payDate || '-', rightX + 50, pdY + 16);
+    doc.text(period || '-', rightX + 56, pdY);
+    doc.text(payDate || '-', rightX + 56, pdY + 16);
 
     y = Math.max(y, pdY + 40) + 16;
 

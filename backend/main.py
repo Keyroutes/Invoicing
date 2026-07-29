@@ -2100,17 +2100,17 @@ Best regards,
 </div>
 </div>
 <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-<tr style="background:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Amount</th></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.basic_salary:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.overtime_pay:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.bonus:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;">${ps.allowances:.2f}</td></tr>
-<tr style="font-weight:700;background:#f0fdf4;"><td style="padding:12px 16px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;">${ps.gross_pay:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.tax_amount:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.insurance:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.retirement:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;">-${ps.other_deductions:.2f}</td></tr>
-<tr style="font-weight:700;background:#fef2f2;"><td style="padding:12px 16px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;">-${ps.total_deductions:.2f}</td></tr>
+<tr style="background:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.basic_salary:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.overtime_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.bonus:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.allowances:.2f}</td></tr>
+<tr style="font-weight:700;background:#f0fdf4;"><td style="padding:12px 16px;font-size:14px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;font-size:14px;">${ps.gross_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.tax_amount:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.insurance:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.retirement:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.other_deductions:.2f}</td></tr>
+<tr style="font-weight:700;background:#fef2f2;"><td style="padding:12px 16px;font-size:14px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;font-size:14px;">-${ps.total_deductions:.2f}</td></tr>
 </table>
 <div style="background:linear-gradient(135deg,#0ea5e9,#7877c6);border-radius:12px;padding:24px;text-align:right;">
 <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:4px;">NET PAY</div>
