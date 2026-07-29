@@ -133,7 +133,7 @@ admin.add_view(SettingsAdmin)
 admin.add_view(ContactAdmin)
 admin.add_view(AdminUserAdmin)
 
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax", https_only=True, max_age=86400)
 
 oauth = OAuth()
 oauth.register(
