@@ -568,58 +568,90 @@ function generateInvoicePDF() {
     y += 20;
 
     // ===== LINE ITEMS TABLE =====
-    var colItem = ml;
-    var colDesc = ml + 100;
-    var colQty = mr - 180;
-    var colPrice = mr - 120;
-    var colDisc = mr - 60;
-    var colAmount = mr;
+    var pageBottom = h - 40;
+    var footerReserve = 200;
 
-    // Header row
-    doc.setFillColor(30, 41, 59);
-    doc.rect(ml, y, mr - ml, 20, 'F');
-    doc.setFontSize(7.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(220, 225, 235);
-    doc.text('Item', colItem + 8, y + 13);
-    doc.text('Description', colDesc + 8, y + 13);
-    doc.text('Qty', colQty, y + 13, { align: 'right' });
-    doc.text('Unit Price', colPrice - 4, y + 13, { align: 'right' });
-    doc.text('Disc', colDisc - 4, y + 13, { align: 'right' });
-    doc.text('Amount GBP', colAmount - 8, y + 13, { align: 'right' });
-    y += 24;
+    function drawHeaderRow(doc, y, ml, mr, cols) {
+        doc.setFillColor(30, 41, 59);
+        doc.rect(ml, y, mr - ml, 20, 'F');
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(220, 225, 235);
+        doc.text('Item', cols.item + 8, y + 13);
+        doc.text('Description', cols.desc + 8, y + 13);
+        doc.text('Qty', cols.qty, y + 13, { align: 'right' });
+        doc.text('Unit Price', cols.price - 4, y + 13, { align: 'right' });
+        doc.text('Disc', cols.disc - 4, y + 13, { align: 'right' });
+        doc.text('Amount GBP', cols.amount - 8, y + 13, { align: 'right' });
+        return y + 24;
+    }
 
-    // Items with text wrapping
+    function drawPageFooter(doc, pageNum, totalPages, ml, mr, h) {
+        doc.setDrawColor(200, 210, 220);
+        doc.setLineWidth(0.3);
+        doc.setLineDashPattern([2, 2], 0);
+        doc.line(ml, h - 24, mr, h - 24);
+        doc.setLineDashPattern([], 0);
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(148, 163, 184);
+        doc.text('Page ' + pageNum + ' of ' + totalPages, mr, h - 14, { align: 'right' });
+        doc.text(number + ' | aniprotech', ml, h - 14);
+    }
+
+    var cols = {
+        item: ml,
+        desc: ml + 90,
+        qty: mr - 175,
+        price: mr - 115,
+        disc: mr - 60,
+        amount: mr
+    };
+    var descMaxW = cols.qty - cols.desc - 30;
+
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'normal');
+    y = drawHeaderRow(doc, y, ml, mr, cols);
+
     var rowIdx = 0;
+    var pageNum = 1;
+    var rows = [];
+
     document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
         var cells = tr.querySelectorAll('td');
         if (cells.length < 7) return;
-        var name = cells[0].textContent;
-        var desc = cells[1].textContent;
-        var qty = cells[2].textContent;
-        var price = cells[3].textContent;
-        var disc = (cells[4].textContent || '0').replace('%', '').trim();
-        var amount = cells[6].textContent;
+        rows.push({
+            name: cells[0].textContent,
+            desc: cells[1].textContent,
+            qty: cells[2].textContent,
+            price: cells[3].textContent,
+            disc: (cells[4].textContent || '0').replace('%', '').trim(),
+            amount: cells[6].textContent
+        });
+    });
 
-        var descMaxW = colQty - colDesc - 20;
+    rows.forEach(function(row) {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
-        var nameLines = doc.splitTextToSize(name || '-', 85);
-        var rawDescLines = doc.splitTextToSize(desc || '-', descMaxW);
+        var nameLines = doc.splitTextToSize(row.name || '-', 75);
+        var rawDescLines = doc.splitTextToSize(row.desc || '-', descMaxW);
         var descLines = [];
         rawDescLines.forEach(function(line) {
-            if (doc.getTextWidth(line) > descMaxW) {
-                var truncated = line;
-                while (truncated.length > 0 && doc.getTextWidth(truncated + '...') > descMaxW) {
-                    truncated = truncated.slice(0, -1);
-                }
-                descLines.push(truncated + '...');
-            } else {
-                descLines.push(line);
+            while (line.length > 0 && doc.getTextWidth(line) > descMaxW) {
+                line = line.slice(0, -1);
             }
+            descLines.push(line);
         });
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(20, maxLines * 12 + 8);
+
+        if (y + rowH > pageBottom - footerReserve) {
+            drawPageFooter(doc, pageNum, pageNum, ml, mr, h);
+            doc.addPage();
+            pageNum++;
+            y = 40;
+            y = drawHeaderRow(doc, y, ml, mr, cols);
+        }
 
         if (rowIdx % 2 === 0) {
             doc.setFillColor(248, 250, 252);
@@ -629,17 +661,16 @@ function generateInvoicePDF() {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(nameLines, colItem + 8, y + 13);
+        doc.text(nameLines, cols.item + 8, y + 13);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 116, 139);
-        doc.text(descLines, colDesc + 8, y + 13);
-        doc.setTextColor(100, 116, 139);
-        doc.text(qty, colQty, y + 13, { align: 'right' });
-        doc.text(price, colPrice - 4, y + 13, { align: 'right' });
-        doc.text(disc, colDisc - 4, y + 13, { align: 'right' });
+        doc.text(descLines, cols.desc + 8, y + 13);
+        doc.text(row.qty, cols.qty, y + 13, { align: 'right' });
+        doc.text(row.price, cols.price - 4, y + 13, { align: 'right' });
+        doc.text(row.disc, cols.disc - 4, y + 13, { align: 'right' });
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(amount, colAmount - 8, y + 13, { align: 'right' });
+        doc.text(row.amount, cols.amount - 8, y + 13, { align: 'right' });
         y += rowH;
         rowIdx++;
     });
@@ -649,9 +680,11 @@ function generateInvoicePDF() {
         doc.rect(ml, y, mr - ml, 20, 'F');
         doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', colDesc + 8, y + 13);
+        doc.text('No line items', cols.desc + 8, y + 13);
         y += 20;
     }
+
+    drawPageFooter(doc, pageNum, pageNum, ml, mr, h);
 
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
