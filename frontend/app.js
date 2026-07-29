@@ -599,7 +599,7 @@ function generateInvoicePDF() {
         var qty = cells[2].textContent;
         var price = cells[3].textContent;
         var disc = cells[4].textContent || '0';
-        var amount = cells[7].textContent;
+        var amount = cells[6].textContent;
 
         var descWidth = colQty - colDesc - 16;
         var nameLines = doc.splitTextToSize(name || '-', 120);
@@ -622,6 +622,7 @@ function generateInvoicePDF() {
         doc.setTextColor(100, 116, 139);
         doc.text(qty, colQty, y + 13, { align: 'right' });
         doc.text(price, colPrice - 4, y + 13, { align: 'right' });
+        doc.text(disc.replace('%', ''), colDisc - 4, y + 13, { align: 'right' });
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
         doc.text(amount, colAmount - 8, y + 13, { align: 'right' });
