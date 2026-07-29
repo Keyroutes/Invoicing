@@ -505,6 +505,9 @@ def superadmin_get_client(client_id: int, request: Request, db: Session = Depend
 def get_gmail_credentials(access_token: str = None, refresh_token: str = None):
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        logger.error("GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured")
+        return None
     creds = Credentials(
         token=access_token,
         refresh_token=refresh_token,
@@ -512,13 +515,24 @@ def get_gmail_credentials(access_token: str = None, refresh_token: str = None):
         client_id=client_id,
         client_secret=client_secret
     )
-    if creds.expired or not creds.valid:
-        creds.refresh(GoogleRequest())
+    try:
+        if creds.expired or not creds.valid:
+            creds.refresh(GoogleRequest())
+    except Exception as e:
+        logger.error(f"Failed to refresh Gmail credentials: {e}")
+        return None
     return creds
 
 def get_stored_refresh_token(db: Session):
     setting = db.query(models.DBSettings).filter(models.DBSettings.key == "GOOGLE_REFRESH_TOKEN").first()
     return setting.value if setting else None
+
+def validate_email_address(email: str) -> bool:
+    import re as _re
+    if not email or not isinstance(email, str):
+        return False
+    pattern = r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$'
+    return bool(_re.match(pattern, email.strip()))
 def prepare_email_message(to_email, subject, body_text, html_body, from_email, logo_data="", pdf_bytes=None, pdf_filename="invoice.pdf"):
     """Build a properly structured MIME email with CID-embedded logo and PDF attachment."""
     import re as _re
@@ -532,6 +546,7 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
     msg['From'] = from_email
     msg['To'] = to_email
     msg['Reply-To'] = from_email
+    msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
     msg['List-Unsubscribe'] = '<mailto:hello@keyroutes.co?subject=unsubscribe>'
     msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
 
@@ -556,10 +571,9 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
             msg.attach(logo_part)
             html_body = html_body.replace(logo_data, f'cid:{logo_cid}')
         elif logo_data.startswith('http'):
-            html_body = html_body
+            pass
         else:
-            logo_cid = 'logo_' + uuid.uuid4().hex[:12]
-            html_body = html_body.replace(logo_data, f'cid:{logo_cid}')
+            pass
 
     alt_part.attach(MIMEText(html_body, 'html', 'utf-8'))
     msg.attach(alt_part)
@@ -574,7 +588,7 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
     return msg.as_string()
 
 
-def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_bytes=None, pdf_filename="invoice.pdf"):
+def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_bytes=None, pdf_filename="invoice.pdf", logo_data=""):
     smtp_host = os.getenv("SMTP_HOST", "")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER", "")
@@ -582,7 +596,7 @@ def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_byt
     if not all([smtp_host, smtp_user, smtp_pass]):
         return False, "SMTP not configured"
     try:
-        raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, "", pdf_bytes, pdf_filename)
+        raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, logo_data or "", pdf_bytes, pdf_filename)
         context = ssl.create_default_context()
         with smtplib.SMTP(smtp_host, smtp_port) as server:
             server.starttls(context=context)
@@ -619,7 +633,7 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
         except Exception as e:
             logger.warning(f"Gmail API failed, trying SMTP fallback: {e}")
 
-    return send_email_smtp(to_email, subject, body, from_email, html_body, pdf_bytes, pdf_filename)
+    return send_email_smtp(to_email, subject, body, from_email, html_body, pdf_bytes, pdf_filename, logo_data)
 
 # --- API Endpoints ---
 
@@ -864,6 +878,8 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
         raise HTTPException(status_code=404, detail="Invoice not found")
     if not inv.email:
         raise HTTPException(status_code=400, detail="Invoice has no email address associated with it")
+    if not validate_email_address(inv.email):
+        raise HTTPException(status_code=400, detail=f"Invalid email address: {inv.email}")
 
     user = request.session.get('user', {})
     from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
@@ -2078,6 +2094,8 @@ def send_payslip_email(ps_id: int, request: Request, background_tasks: Backgroun
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == ps.employee_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if not emp.email or not validate_email_address(emp.email):
+        raise HTTPException(status_code=400, detail=f"Invalid employee email address")
 
     settings_rows = db.query(models.DBSettings).filter(models.DBSettings.client_id == client.id).all()
     settings_map = {s.key: s.value for s in settings_rows}
