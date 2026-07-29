@@ -131,6 +131,8 @@ class DBDepartment(Base):
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
     name = Column(String, nullable=False)
     description = Column(String, default="")
+    color = Column(String, default="#00f0ff")
+    icon = Column(String, default="building")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     client = relationship("DBClient", back_populates="departments")
@@ -251,8 +253,19 @@ class DBOnboardingItem(Base):
     completed_at = Column(String, default="")
     assigned_to = Column(String, default="")
     due_date = Column(String, default="")
+    sort_order = Column(Integer, default=0)
 
     employee = relationship("DBEmployee", back_populates="onboarding_items")
+
+
+class DBOnboardingTemplate(Base):
+    __tablename__ = "onboarding_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    items_json = Column(Text, default="[]")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 class DBAttendance(Base):

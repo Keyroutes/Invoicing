@@ -32,6 +32,7 @@
                     <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')">Reports</a>
                     <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')">Contacts</a>
                     <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')">People</a>
+                    <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')">Onboarding</a>
                     <a href="#" class="nav-item" id="nav-recruitment" onclick="event.preventDefault();showView('recruitment-view')">Recruitment</a>
                     <a href="#" class="nav-item" id="nav-payroll" onclick="event.preventDefault();showView('payroll-view')">Payroll</a>
                     <a href="#" class="nav-item" id="nav-org" onclick="event.preventDefault();showView('orgchart-view')">Org Chart</a>
@@ -739,22 +740,168 @@
                             <h1>Departments</h1>
                         </div>
                         <div class="invoices-actions">
-                            <button class="btn btn-primary" onclick="showAddDeptModal()">+ Add Department</button>
+                            <button class="btn btn-primary" onclick="openDeptModal()">+ Add Department</button>
                         </div>
                     </div>
-                    <div class="widget">
-                        <div class="table-responsive">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Description</th>
-                                        <th>Employees</th>
-                                        <th class="text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="departments-table-body"></tbody>
-                            </table>
+                    <div id="dept-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;"></div>
+                    <div id="dept-empty" style="display:none;text-align:center;padding:60px 20px;">
+                        <div style="font-size:3rem;margin-bottom:12px;">&#127970;</div>
+                        <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px;">No departments yet</div>
+                        <div style="color:var(--text-secondary);margin-bottom:20px;">Create departments to organize your team</div>
+                        <button class="btn btn-primary" onclick="openDeptModal()">+ Create First Department</button>
+                    </div>
+                </div>
+
+                <!-- Department Add/Edit Modal -->
+                <div id="dept-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal" style="max-width:440px;">
+                        <div class="modal-header">
+                            <h3 id="dept-modal-title">Add Department</h3>
+                            <button class="modal-close" onclick="closeDeptModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>Name *</label>
+                                <input type="text" id="dept-name" class="form-control" placeholder="e.g. Engineering">
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <input type="text" id="dept-desc" class="form-control" placeholder="What does this team do?">
+                            </div>
+                            <div class="form-group">
+                                <label>Color</label>
+                                <div id="dept-color-picker" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Icon</label>
+                                <div id="dept-icon-picker" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="closeDeptModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveDept()">Save</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Department Detail Panel -->
+                <div id="dept-detail-panel" class="modal-overlay" style="display:none;">
+                    <div class="modal" style="max-width:520px;">
+                        <div class="modal-header">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div id="dept-detail-icon" style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;"></div>
+                                <div>
+                                    <h3 id="dept-detail-name" style="margin:0;"></h3>
+                                    <div id="dept-detail-desc" style="font-size:0.82rem;color:var(--text-secondary);"></div>
+                                </div>
+                            </div>
+                            <button class="modal-close" onclick="closeDeptDetail()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="dept-detail-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;"></div>
+                            <div style="font-weight:600;font-size:0.85rem;margin-bottom:10px;color:var(--text-secondary);">Team Members</div>
+                            <div id="dept-detail-employees"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="closeDeptDetail()">Close</button>
+                            <button id="dept-detail-edit-btn" class="btn btn-outline" onclick="">Edit</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== ONBOARDING HUB ========== -->
+                <div id="onboarding-hub-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <h1>Onboarding Hub</h1>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="showOnboardingTemplates()">&#128203; Templates</button>
+                            <button class="btn btn-primary" onclick="showBulkOnboardModal()">+ Bulk Onboard</button>
+                        </div>
+                    </div>
+                    <div id="onboarding-hub-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;"></div>
+                    <div class="invoices-tabs">
+                        <button class="tab active" onclick="filterOnboardingHub('all',this)">All</button>
+                        <button class="tab" onclick="filterOnboardingHub('onboarding',this)">In Progress</button>
+                        <button class="tab" onclick="filterOnboardingHub('complete',this)">Completed</button>
+                        <button class="tab" onclick="filterOnboardingHub('overdue',this)">Overdue</button>
+                    </div>
+                    <div id="onboarding-hub-list"></div>
+                    <div id="onboarding-hub-empty" style="display:none;text-align:center;padding:60px 20px;">
+                        <div style="font-size:3rem;margin-bottom:12px;">&#128640;</div>
+                        <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px;">No onboarding tasks</div>
+                        <div style="color:var(--text-secondary);margin-bottom:20px;">Employees will appear here when their onboarding checklists have items</div>
+                    </div>
+                </div>
+
+                <!-- Bulk Onboard Modal -->
+                <div id="bulk-onboard-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal" style="max-width:500px;">
+                        <div class="modal-header">
+                            <h3>Bulk Onboard Employees</h3>
+                            <button class="modal-close" onclick="closeBulkOnboardModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>Select Employees</label>
+                                <div id="bulk-emp-select" style="max-height:200px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;padding:8px;"></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Choose Source</label>
+                                <div style="display:flex;gap:8px;">
+                                    <button class="btn btn-outline btn-sm" onclick="loadBulkFromTemplate()" style="flex:1;">From Template</button>
+                                    <button class="btn btn-outline btn-sm" onclick="loadBulkDefault()" style="flex:1;">Default Checklist</button>
+                                </div>
+                            </div>
+                            <div id="bulk-items-preview" style="display:none;margin-top:12px;">
+                                <div style="font-weight:600;font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Items to add:</div>
+                                <div id="bulk-items-list" style="max-height:200px;overflow-y:auto;"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="closeBulkOnboardModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="applyBulkOnboard()">Apply</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Onboarding Templates Modal -->
+                <div id="onb-templates-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal" style="max-width:500px;">
+                        <div class="modal-header">
+                            <h3>Onboarding Templates</h3>
+                            <button class="modal-close" onclick="closeOnbTemplatesModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="onb-templates-list"></div>
+                            <button class="btn btn-outline" onclick="createNewTemplate()" style="width:100%;margin-top:12px;">+ New Template</button>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="closeOnbTemplatesModal()">Close</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Onboarding Employee Detail Modal -->
+                <div id="onb-emp-modal" class="modal-overlay" style="display:none;">
+                    <div class="modal" style="max-width:560px;">
+                        <div class="modal-header">
+                            <div>
+                                <h3 id="onb-emp-name" style="margin:0;"></h3>
+                                <div id="onb-emp-meta" style="font-size:0.82rem;color:var(--text-secondary);"></div>
+                            </div>
+                            <button class="modal-close" onclick="closeOnbEmpModal()">&times;</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="onb-emp-progress" style="margin-bottom:16px;"></div>
+                            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                                <button class="btn btn-outline btn-sm" onclick="addOnbItemToEmp()">+ Add Item</button>
+                            </div>
+                            <div id="onb-emp-items"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="closeOnbEmpModal()">Close</button>
                         </div>
                     </div>
                 </div>

@@ -1314,6 +1314,8 @@ from sqlalchemy import func as sqlfunc, or_
 class DepartmentCreate(BaseModel):
     name: str
     description: Optional[str] = ""
+    color: Optional[str] = "#00f0ff"
+    icon: Optional[str] = "building"
 
 class EmployeeCreate(BaseModel):
     first_name: str
@@ -1368,12 +1370,28 @@ def get_departments(request: Request, db: Session = Depends(get_db)):
     depts = db.query(models.DBDepartment).filter(models.DBDepartment.client_id == client.id).all()
     result = []
     for d in depts:
-        emp_count = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == d.id).count()
+        employees = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == d.id).all()
+        emp_list = [{"id": e.id, "name": (e.first_name + " " + e.last_name).strip(), "job_title": e.job_title or "", "email": e.email or ""} for e in employees]
         result.append({
             "id": d.id, "name": d.name, "description": d.description,
-            "employee_count": emp_count, "created_at": d.created_at,
+            "color": d.color or "#00f0ff", "icon": d.icon or "building",
+            "employee_count": len(employees), "employees": emp_list, "created_at": d.created_at,
         })
     return result
+
+@app.get("/api/departments/{dept_id}")
+def get_department(dept_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    d = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Department not found")
+    employees = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == d.id).all()
+    emp_list = [{"id": e.id, "name": (e.first_name + " " + e.last_name).strip(), "job_title": e.job_title or "", "email": e.email or "", "status": e.status or ""} for e in employees]
+    return {
+        "id": d.id, "name": d.name, "description": d.description,
+        "color": d.color or "#00f0ff", "icon": d.icon or "building",
+        "employee_count": len(employees), "employees": emp_list, "created_at": d.created_at,
+    }
 
 @app.post("/api/departments")
 def create_department(request: Request, body: DepartmentCreate, db: Session = Depends(get_db)):
@@ -1383,11 +1401,24 @@ def create_department(request: Request, body: DepartmentCreate, db: Session = De
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Department already exists")
-    dept = models.DBDepartment(name=body.name, description=body.description, client_id=client.id)
+    dept = models.DBDepartment(name=body.name, description=body.description, color=body.color, icon=body.icon, client_id=client.id)
     db.add(dept)
     db.commit()
     db.refresh(dept)
-    return {"id": dept.id, "name": dept.name, "description": dept.description, "employee_count": 0}
+    return {"id": dept.id, "name": dept.name, "description": dept.description, "color": dept.color, "icon": dept.icon, "employee_count": 0}
+
+@app.put("/api/departments/{dept_id}")
+def update_department(dept_id: int, request: Request, body: DepartmentCreate, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    dept.name = body.name
+    dept.description = body.description
+    dept.color = body.color
+    dept.icon = body.icon
+    db.commit()
+    return {"id": dept.id, "name": dept.name, "description": dept.description, "color": dept.color, "icon": dept.icon}
 
 @app.delete("/api/departments/{dept_id}")
 def delete_department(dept_id: int, request: Request, db: Session = Depends(get_db)):
@@ -1612,13 +1643,40 @@ def complete_offboarding(emp_id: int, request: Request, body: dict = None, db: S
 
 # --- Onboarding API ---
 
+@app.get("/api/onboarding/hub")
+def get_onboarding_hub(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.in_(["onboarding", "active"])
+    ).all()
+    result = []
+    for emp in employees:
+        items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
+        completed = sum(1 for i in items if i.is_completed)
+        overdue = 0
+        today = datetime.now().strftime("%Y-%m-%d")
+        for i in items:
+            if not i.is_completed and i.due_date and i.due_date < today:
+                overdue += 1
+        result.append({
+            "id": emp.id, "name": (emp.first_name + " " + emp.last_name).strip(),
+            "job_title": emp.job_title or "", "department": emp.department.name if emp.department else "",
+            "status": emp.status or "", "start_date": emp.start_date or "",
+            "total": len(items), "completed": completed,
+            "progress": round((completed / len(items)) * 100) if items else 0,
+            "overdue": overdue,
+        })
+    result.sort(key=lambda x: (-x["overdue"], x["progress"]))
+    return result
+
 @app.get("/api/employees/{emp_id}/onboarding")
 def get_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).all()
+    items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).order_by(models.DBOnboardingItem.sort_order).all()
     completed = sum(1 for i in items if i.is_completed)
     return {
         "total": len(items), "completed": completed,
@@ -1626,7 +1684,7 @@ def get_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db))
         "items": [{"id": i.id, "title": i.title, "description": i.description,
                     "category": i.category, "is_completed": i.is_completed,
                     "completed_at": i.completed_at, "assigned_to": i.assigned_to,
-                    "due_date": i.due_date} for i in items],
+                    "due_date": i.due_date, "sort_order": i.sort_order} for i in items],
     }
 
 @app.put("/api/onboarding/{item_id}")
@@ -1640,14 +1698,19 @@ def update_onboarding_item(item_id: int, request: Request, body: dict = None, db
             item.is_completed = body["is_completed"]
             if body["is_completed"]:
                 item.completed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                item.completed_at = ""
         if "title" in body:
             item.title = body["title"]
+        if "description" in body:
+            item.description = body["description"]
+        if "category" in body:
+            item.category = body["category"]
         if "assigned_to" in body:
             item.assigned_to = body["assigned_to"]
         if "due_date" in body:
             item.due_date = body["due_date"]
     db.commit()
-    # Check if all items completed
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == item.employee_id).first()
     if emp:
         all_items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
@@ -1657,21 +1720,105 @@ def update_onboarding_item(item_id: int, request: Request, body: dict = None, db
             db.commit()
     return {"message": "Item updated"}
 
+@app.delete("/api/onboarding/{item_id}")
+def delete_onboarding_item(item_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    db.delete(item)
+    db.commit()
+    return {"message": "Item deleted"}
+
 @app.post("/api/employees/{emp_id}/onboarding")
 def add_onboarding_item(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    max_order = db.query(func.max(models.DBOnboardingItem.sort_order)).filter(models.DBOnboardingItem.employee_id == emp_id).scalar() or 0
     item = models.DBOnboardingItem(
         client_id=client.id, employee_id=emp_id,
         title=body.get("title", ""), description=body.get("description", ""),
         category=body.get("category", "general"), assigned_to=body.get("assigned_to", ""),
-        due_date=body.get("due_date", ""),
+        due_date=body.get("due_date", ""), sort_order=max_order + 1,
     )
     db.add(item)
     db.commit()
     return {"id": item.id, "title": item.title, "message": "Item added"}
+
+@app.post("/api/employees/{emp_id}/onboarding/bulk")
+def bulk_add_onboarding(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    items = body.get("items", []) if body else []
+    max_order = db.query(func.max(models.DBOnboardingItem.sort_order)).filter(models.DBOnboardingItem.employee_id == emp_id).scalar() or 0
+    added = []
+    for i, item_data in enumerate(items):
+        oitem = models.DBOnboardingItem(
+            client_id=client.id, employee_id=emp_id,
+            title=item_data.get("title", ""), description=item_data.get("description", ""),
+            category=item_data.get("category", "general"), assigned_to=item_data.get("assigned_to", ""),
+            due_date=item_data.get("due_date", ""), sort_order=max_order + i + 1,
+        )
+        db.add(oitem)
+        added.append(item_data.get("title", ""))
+    db.commit()
+    return {"added": len(added), "message": f"Added {len(added)} items"}
+
+@app.post("/api/onboarding/apply-template")
+def apply_onboarding_template(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp_ids = body.get("employee_ids", []) if body else []
+    template_items = body.get("items", []) if body else []
+    count = 0
+    for emp_id in emp_ids:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
+        if not emp:
+            continue
+        max_order = db.query(func.max(models.DBOnboardingItem.sort_order)).filter(models.DBOnboardingItem.employee_id == emp_id).scalar() or 0
+        for i, item_data in enumerate(template_items):
+            db.add(models.DBOnboardingItem(
+                client_id=client.id, employee_id=emp_id,
+                title=item_data.get("title", ""), description=item_data.get("description", ""),
+                category=item_data.get("category", "general"), assigned_to=item_data.get("assigned_to", ""),
+                due_date=item_data.get("due_date", ""), sort_order=max_order + i + 1,
+            ))
+            count += 1
+    db.commit()
+    return {"added": count, "message": f"Added {count} items to {len(emp_ids)} employees"}
+
+@app.get("/api/onboarding/templates")
+def get_onboarding_templates(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    templates = db.query(models.DBOnboardingTemplate).filter(models.DBOnboardingTemplate.client_id == client.id).all()
+    return [{"id": t.id, "name": t.name, "items": json.loads(t.items_json) if t.items_json else [], "created_at": t.created_at} for t in templates]
+
+@app.post("/api/onboarding/templates")
+def create_onboarding_template(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("name"):
+        raise HTTPException(status_code=400, detail="Name required")
+    template = models.DBOnboardingTemplate(
+        client_id=client.id, name=body["name"],
+        items_json=json.dumps(body.get("items", [])),
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return {"id": template.id, "name": template.name, "message": "Template created"}
+
+@app.delete("/api/onboarding/templates/{template_id}")
+def delete_onboarding_template(template_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    template = db.query(models.DBOnboardingTemplate).filter(models.DBOnboardingTemplate.id == template_id, models.DBOnboardingTemplate.client_id == client.id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    db.delete(template)
+    db.commit()
+    return {"message": "Template deleted"}
 
 # --- Payroll API ---
 

@@ -49,6 +49,7 @@ function showView(viewId) {
         'employee-detail-view': 'nav-people',
         'departments-view': 'nav-people',
         'attendance-view': 'nav-people',
+        'onboarding-hub-view': 'nav-onboarding',
         'recruitment-view': 'nav-recruitment',
         'payroll-view': 'nav-payroll',
         'payslip-detail-view': 'nav-payroll',
@@ -1299,7 +1300,7 @@ async function viewEmployee(empId) {
             items.forEach(function(item) {
                 var checkedAttr = item.is_completed ? 'checked' : '';
                 var style = item.is_completed ? 'text-decoration:line-through;color:var(--text-secondary);' : '';
-                listEl.insertAdjacentHTML('beforeend', '<label style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);cursor:pointer;font-size:0.9rem;' + style + '"><input type="checkbox" ' + checkedAttr + ' onchange="toggleOnboardingItem(' + item.id + ', this.checked)" style="margin-top:4px;accent-color:var(--primary-color);"><div><div style="font-weight:500;">' + item.title + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (item.category || '') + ' &bull; ' + (item.assigned_to || '') + '</div></div></label>');
+                listEl.insertAdjacentHTML('beforeend', '<label style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);cursor:pointer;font-size:0.9rem;' + style + '"><input type="checkbox" ' + checkedAttr + ' onchange="toggleOnbItem(' + item.id + ', this.checked)" style="margin-top:4px;accent-color:var(--primary-color);"><div><div style="font-weight:500;">' + item.title + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (item.category || '') + ' &bull; ' + (item.assigned_to || '') + '</div></div></label>');
             });
         }
 
@@ -1329,18 +1330,6 @@ async function viewEmployee(empId) {
     }
 }
 window.viewEmployee = viewEmployee;
-
-async function toggleOnboardingItem(itemId, isCompleted) {
-    try {
-        await fetch('/api/onboarding/' + itemId, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ is_completed: isCompleted })
-        });
-        if (currentEmployeeId) viewEmployee(currentEmployeeId);
-    } catch (e) { showToast('Failed to update item', 'error'); }
-}
-window.toggleOnboardingItem = toggleOnboardingItem;
 
 // --- Add Employee Modal ---
 async function showAddEmployeeModal() {
@@ -1451,54 +1440,510 @@ async function deleteCurrentEmployee() {
 window.deleteCurrentEmployee = deleteCurrentEmployee;
 
 // --- Departments ---
+var deptIcons = [
+    { id: 'building', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="17"/><line x1="15" y1="22" x2="15" y2="17"/><line x1="9" y1="12" x2="9" y2="12.01"/><line x1="15" y1="12" x2="15" y2="12.01"/><line x1="9" y1="8" x2="9" y2="8.01"/><line x1="15" y1="8" x2="15" y2="8.01"/><line x1="9" y1="17" x2="9" y2="22"/><line x1="15" y1="17" x2="15" y2="22"/></svg>' },
+    { id: 'code', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>' },
+    { id: 'users', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' },
+    { id: 'chart', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>' },
+    { id: 'star', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>' },
+    { id: 'shield', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' },
+    { id: 'heart', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>' },
+    { id: 'rocket', svg: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>' },
+];
+var deptColors = ['#00f0ff','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#f97316','#06b6d4','#84cc16','#6366f1'];
+var editingDeptId = null;
+var selectedDeptColor = '#00f0ff';
+var selectedDeptIcon = 'building';
+
 async function fetchDepartments() {
     try {
         var res = await fetch('/api/departments');
         if (!res.ok) throw new Error('Failed');
         var depts = await res.json();
-        var tbody = document.getElementById('departments-table-body');
-        if (!tbody) return;
-        tbody.innerHTML = '';
+        var grid = document.getElementById('dept-cards-grid');
+        var empty = document.getElementById('dept-empty');
+        if (!grid) return;
+        grid.innerHTML = '';
         if (depts.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-secondary);">No departments yet.</td></tr>';
+            if (empty) empty.style.display = 'block';
+            grid.style.display = 'none';
             return;
         }
+        if (empty) empty.style.display = 'none';
+        grid.style.display = 'grid';
         depts.forEach(function(d) {
-            tbody.insertAdjacentHTML('beforeend', '<tr><td style="font-weight:500;">' + d.name + '</td><td style="color:var(--text-secondary);">' + (d.description || '-') + '</td><td>' + (d.employee_count || 0) + '</td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="deleteDepartment(' + d.id + ', \'' + d.name.replace(/'/g, "\\'") + '\')" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button></td></tr>');
+            var iconObj = deptIcons.find(function(i) { return i.id === d.icon; }) || deptIcons[0];
+            var color = d.color || '#00f0ff';
+            grid.insertAdjacentHTML('beforeend',
+                '<div class="dept-card" onclick="openDeptDetail(' + d.id + ')" style="background:var(--surface-color);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:24px;cursor:pointer;transition:all 0.2s;border-top:3px solid ' + color + ';">' +
+                    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+                        '<div style="width:44px;height:44px;border-radius:12px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;">' + iconObj.svg + '</div>' +
+                        '<div><div style="font-weight:600;font-size:1rem;">' + d.name + '</div>' +
+                        '<div style="font-size:0.78rem;color:var(--text-secondary);">' + (d.description || 'No description') + '</div></div>' +
+                    '</div>' +
+                    '<div style="display:flex;align-items:center;gap:8px;">' +
+                        '<div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:600;">' + (d.employee_count || 0) + '</div>' +
+                        '<div style="font-size:0.82rem;color:var(--text-secondary);">' + (d.employee_count === 1 ? 'employee' : 'employees') + '</div>' +
+                    '</div>' +
+                '</div>'
+            );
         });
     } catch (e) { console.error('Depts error:', e); }
 }
 
-function showAddDeptModal() {
-    var name = prompt('Department name:');
-    if (!name) return;
-    var desc = prompt('Description (optional):') || '';
-    createDepartment(name, desc);
+function openDeptModal(dept) {
+    editingDeptId = dept ? dept.id : null;
+    document.getElementById('dept-modal-title').textContent = dept ? 'Edit Department' : 'Add Department';
+    document.getElementById('dept-name').value = dept ? dept.name : '';
+    document.getElementById('dept-desc').value = dept ? (dept.description || '') : '';
+    selectedDeptColor = dept ? (dept.color || '#00f0ff') : '#00f0ff';
+    selectedDeptIcon = dept ? (dept.icon || 'building') : 'building';
+    renderDeptColorPicker();
+    renderDeptIconPicker();
+    document.getElementById('dept-modal').style.display = 'flex';
 }
-window.showAddDeptModal = showAddDeptModal;
+window.openDeptModal = openDeptModal;
 
-async function createDepartment(name, description) {
+function closeDeptModal() {
+    document.getElementById('dept-modal').style.display = 'none';
+    editingDeptId = null;
+}
+window.closeDeptModal = closeDeptModal;
+
+function renderDeptColorPicker() {
+    var el = document.getElementById('dept-color-picker');
+    el.innerHTML = '';
+    deptColors.forEach(function(c) {
+        el.insertAdjacentHTML('beforeend',
+            '<div onclick="selectDeptColor(\'' + c + '\')" style="width:32px;height:32px;border-radius:8px;background:' + c + ';cursor:pointer;border:3px solid ' + (c === selectedDeptColor ? 'white' : 'transparent') + ';transition:border 0.15s;"></div>'
+        );
+    });
+}
+window.renderDeptColorPicker = renderDeptColorPicker;
+
+function selectDeptColor(c) {
+    selectedDeptColor = c;
+    renderDeptColorPicker();
+}
+window.selectDeptColor = selectDeptColor;
+
+function renderDeptIconPicker() {
+    var el = document.getElementById('dept-icon-picker');
+    el.innerHTML = '';
+    deptIcons.forEach(function(i) {
+        var isSelected = i.id === selectedDeptIcon;
+        el.insertAdjacentHTML('beforeend',
+            '<div onclick="selectDeptIcon(\'' + i.id + '\')" style="width:36px;height:36px;border-radius:8px;background:' + (isSelected ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)') + ';display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid ' + (isSelected ? selectedDeptColor : 'transparent') + ';transition:all 0.15s;">' + i.svg + '</div>'
+        );
+    });
+}
+window.renderDeptIconPicker = renderDeptIconPicker;
+
+function selectDeptIcon(id) {
+    selectedDeptIcon = id;
+    renderDeptIconPicker();
+}
+window.selectDeptIcon = selectDeptIcon;
+
+async function saveDept() {
+    var name = document.getElementById('dept-name').value.trim();
+    if (!name) { showToast('Department name is required', 'error'); return; }
+    var desc = document.getElementById('dept-desc').value.trim();
+    var payload = { name: name, description: desc, color: selectedDeptColor, icon: selectedDeptIcon };
     try {
-        var res = await fetch('/api/departments', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, description: description })
-        });
+        var url = editingDeptId ? '/api/departments/' + editingDeptId : '/api/departments';
+        var method = editingDeptId ? 'PUT' : 'POST';
+        var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         var data = await res.json();
-        if (res.ok) { showToast('Department created', 'success'); fetchDepartments(); loadHRStats(); }
-        else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+        if (res.ok) { showToast(editingDeptId ? 'Department updated' : 'Department created', 'success'); closeDeptModal(); fetchDepartments(); loadHRStats(); }
+        else { showToast(data.detail || 'Error', 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
-window.createDepartment = createDepartment;
+window.saveDept = saveDept;
+
+async function openDeptDetail(id) {
+    try {
+        var res = await fetch('/api/departments/' + id);
+        if (!res.ok) throw new Error('Failed');
+        var d = await res.json();
+        var iconObj = deptIcons.find(function(i) { return i.id === d.icon; }) || deptIcons[0];
+        document.getElementById('dept-detail-icon').innerHTML = iconObj.svg;
+        document.getElementById('dept-detail-icon').style.background = d.color + '20';
+        document.getElementById('dept-detail-icon').style.color = d.color;
+        document.getElementById('dept-detail-name').textContent = d.name;
+        document.getElementById('dept-detail-desc').textContent = d.description || 'No description';
+        document.getElementById('dept-detail-edit-btn').onclick = function() { closeDeptDetail(); openDeptModal(d); };
+        document.getElementById('dept-detail-stats').innerHTML =
+            '<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:14px;"><div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;">Team Size</div><div style="font-size:1.4rem;font-weight:700;">' + d.employee_count + '</div></div>' +
+            '<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:14px;"><div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;">Created</div><div style="font-size:0.85rem;font-weight:500;">' + (d.created_at || 'Unknown').split(' ')[0] + '</div></div>';
+        var empList = document.getElementById('dept-detail-employees');
+        empList.innerHTML = '';
+        if (d.employees.length === 0) {
+            empList.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-secondary);font-size:0.85rem;">No employees in this department</div>';
+        } else {
+            d.employees.forEach(function(e) {
+                var initial = (e.name || '?')[0].toUpperCase();
+                empList.insertAdjacentHTML('beforeend',
+                    '<div onclick="closeDeptDetail();viewEmployee(' + e.id + ')" style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;cursor:pointer;transition:background 0.15s;border-bottom:1px solid var(--border-color);">' +
+                        '<div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,' + d.color + '40,' + d.color + '20);color:' + d.color + ';display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.85rem;">' + initial + '</div>' +
+                        '<div><div style="font-weight:500;font-size:0.9rem;">' + e.name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (e.job_title || '') + '</div></div>' +
+                    '</div>'
+                );
+            });
+        }
+        document.getElementById('dept-detail-panel').style.display = 'flex';
+    } catch (e) { showToast('Failed to load department', 'error'); }
+}
+window.openDeptDetail = openDeptDetail;
+
+function closeDeptDetail() {
+    document.getElementById('dept-detail-panel').style.display = 'none';
+}
+window.closeDeptDetail = closeDeptDetail;
 
 async function deleteDepartment(id, name) {
     if (!confirm('Delete department "' + name + '"? Employees will be unassigned.')) return;
     try {
         var res = await fetch('/api/departments/' + id, { method: 'DELETE' });
         if (res.ok) { showToast('Department deleted', 'success'); fetchDepartments(); loadHRStats(); }
-        else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+        else { var data = await res.json(); showToast(data.detail || 'Error', 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
 window.deleteDepartment = deleteDepartment;
+
+// --- Onboarding Hub ---
+var onboardingHubData = [];
+var onboardingHubFilter = 'all';
+var onboardingBulkItems = [];
+
+async function loadOnboardingHub() {
+    try {
+        var res = await fetch('/api/onboarding/hub');
+        if (!res.ok) throw new Error('Failed');
+        onboardingHubData = await res.json();
+        renderOnboardingHub();
+    } catch (e) { console.error('Onboarding hub error:', e); }
+}
+
+function renderOnboardingHub() {
+    var data = onboardingHubData;
+    if (onboardingHubFilter === 'onboarding') data = data.filter(function(e) { return e.status === 'onboarding' && e.progress < 100; });
+    else if (onboardingHubFilter === 'complete') data = data.filter(function(e) { return e.progress === 100; });
+    else if (onboardingHubFilter === 'overdue') data = data.filter(function(e) { return e.overdue > 0; });
+
+    var totalEmps = onboardingHubData.length;
+    var inProgress = onboardingHubData.filter(function(e) { return e.status === 'onboarding' && e.progress < 100; }).length;
+    var completed = onboardingHubData.filter(function(e) { return e.progress === 100; }).length;
+    var overdue = onboardingHubData.filter(function(e) { return e.overdue > 0; }).length;
+
+    document.getElementById('onboarding-hub-stats').innerHTML =
+        '<div class="widget" style="padding:20px;"><div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total</div><div style="font-size:1.5rem;font-weight:700;">' + totalEmps + '</div></div>' +
+        '<div class="widget" style="padding:20px;"><div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">In Progress</div><div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);">' + inProgress + '</div></div>' +
+        '<div class="widget" style="padding:20px;"><div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Completed</div><div style="font-size:1.5rem;font-weight:700;color:var(--success-color);">' + completed + '</div></div>' +
+        '<div class="widget" style="padding:20px;"><div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Overdue</div><div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);">' + overdue + '</div></div>';
+
+    var list = document.getElementById('onboarding-hub-list');
+    var empty = document.getElementById('onboarding-hub-empty');
+    if (!list) return;
+    list.innerHTML = '';
+    if (data.length === 0) {
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    data.forEach(function(e) {
+        var barColor = e.progress === 100 ? 'var(--success-color)' : e.overdue > 0 ? 'var(--danger-color)' : 'var(--primary-color)';
+        list.insertAdjacentHTML('beforeend',
+            '<div class="widget" style="padding:16px 20px;margin-bottom:12px;cursor:pointer;" onclick="openOnbEmpDetail(' + e.id + ')">' +
+                '<div style="display:flex;align-items:center;gap:16px;">' +
+                    '<div style="width:42px;height:42px;border-radius:10px;background:rgba(0,240,255,0.1);color:var(--primary-color);display:flex;align-items:center;justify-content:center;font-weight:600;">' + (e.name || '?')[0].toUpperCase() + '</div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
+                            '<span style="font-weight:600;font-size:0.95rem;">' + e.name + '</span>' +
+                            '<span style="font-size:0.75rem;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.08);color:var(--text-secondary);">' + (e.department || 'No dept') + '</span>' +
+                            (e.overdue > 0 ? '<span style="font-size:0.72rem;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.15);color:var(--danger-color);">' + e.overdue + ' overdue</span>' : '') +
+                        '</div>' +
+                        '<div style="display:flex;align-items:center;gap:12px;">' +
+                            '<div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">' +
+                                '<div style="height:100%;width:' + e.progress + '%;background:' + barColor + ';border-radius:3px;transition:width 0.4s;"></div>' +
+                            '</div>' +
+                            '<span style="font-size:0.82rem;font-weight:600;color:' + barColor + ';">' + e.completed + '/' + e.total + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>' +
+                '</div>' +
+            '</div>'
+        );
+    });
+}
+
+function filterOnboardingHub(filter, btn) {
+    onboardingHubFilter = filter;
+    document.querySelectorAll('#onboarding-hub-view .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    renderOnboardingHub();
+}
+window.filterOnboardingHub = filterOnboardingHub;
+
+async function openOnbEmpDetail(empId) {
+    try {
+        var [empRes, onbRes] = await Promise.all([
+            fetch('/api/employees').then(function(r) { return r.ok ? r.json() : []; }),
+            fetch('/api/employees/' + empId + '/onboarding').then(function(r) { return r.ok ? r.json() : { items: [], progress: 0 }; })
+        ]);
+        var emp = empRes.find(function(e) { return e.id === empId; });
+        if (!emp) return;
+        document.getElementById('onb-emp-name').textContent = (emp.first_name + ' ' + emp.last_name).trim();
+        document.getElementById('onb-emp-meta').textContent = (emp.job_title || '') + (emp.department_name ? ' • ' + emp.department_name : '');
+        var items = onbRes.items || [];
+        var completed = items.filter(function(i) { return i.is_completed; }).length;
+        var pct = items.length ? Math.round((completed / items.length) * 100) : 0;
+        var barColor = pct === 100 ? 'var(--success-color)' : 'var(--primary-color)';
+        document.getElementById('onb-emp-progress').innerHTML =
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+                '<span style="font-size:0.85rem;color:var(--text-secondary);">Progress</span>' +
+                '<span style="font-weight:600;color:' + barColor + ';">' + pct + '% (' + completed + '/' + items.length + ')</span>' +
+            '</div>' +
+            '<div style="height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden;">' +
+                '<div style="height:100%;width:' + pct + '%;background:' + barColor + ';border-radius:4px;transition:width 0.4s;"></div>' +
+            '</div>';
+        var list = document.getElementById('onb-emp-items');
+        list.innerHTML = '';
+        var categories = {};
+        items.forEach(function(i) {
+            var cat = i.category || 'General';
+            if (!categories[cat]) categories[cat] = [];
+            categories[cat].push(i);
+        });
+        for (var cat in categories) {
+            list.insertAdjacentHTML('beforeend', '<div style="font-weight:600;font-size:0.82rem;color:var(--text-secondary);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">' + cat + '</div>');
+            categories[cat].forEach(function(item) {
+                var isOverdue = !item.is_completed && item.due_date && item.due_date < new Date().toISOString().split('T')[0];
+                list.insertAdjacentHTML('beforeend',
+                    '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:6px;background:rgba(255,255,255,0.02);">' +
+                        '<input type="checkbox" ' + (item.is_completed ? 'checked' : '') + ' onchange="toggleOnbItem(' + item.id + ', this.checked)" style="accent-color:var(--primary-color);cursor:pointer;">' +
+                        '<div style="flex:1;min-width:0;">' +
+                            '<div style="font-size:0.9rem;' + (item.is_completed ? 'text-decoration:line-through;color:var(--text-secondary);' : '') + '">' + item.title + '</div>' +
+                            '<div style="font-size:0.75rem;color:var(--text-secondary);">' + (item.assigned_to || '') + (item.due_date ? ' • Due ' + item.due_date : '') + (isOverdue ? ' <span style="color:var(--danger-color);">OVERDUE</span>' : '') + '</div>' +
+                        '</div>' +
+                        '<button onclick="deleteOnbItem(' + item.id + ')" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;padding:4px;" title="Delete">' +
+                            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                        '</button>' +
+                    '</div>'
+                );
+            });
+        }
+        if (items.length === 0) {
+            list.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-secondary);">No onboarding items yet. Click "+ Add Item" to get started.</div>';
+        }
+        document.getElementById('onb-emp-modal').dataset.empId = empId;
+        document.getElementById('onb-emp-modal').style.display = 'flex';
+    } catch (e) { showToast('Failed to load details', 'error'); }
+}
+window.openOnbEmpDetail = openOnbEmpDetail;
+
+function closeOnbEmpModal() {
+    document.getElementById('onb-emp-modal').style.display = 'none';
+}
+window.closeOnbEmpModal = closeOnbEmpModal;
+
+async function toggleOnbItem(itemId, isCompleted) {
+    try {
+        await fetch('/api/onboarding/' + itemId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_completed: isCompleted }) });
+        var empId = document.getElementById('onb-emp-modal').dataset.empId;
+        if (empId) openOnbEmpDetail(parseInt(empId));
+        loadOnboardingHub();
+    } catch (e) { showToast('Failed to update', 'error'); }
+}
+window.toggleOnbItem = toggleOnbItem;
+
+async function deleteOnbItem(itemId) {
+    if (!confirm('Delete this item?')) return;
+    try {
+        await fetch('/api/onboarding/' + itemId, { method: 'DELETE' });
+        var empId = document.getElementById('onb-emp-modal').dataset.empId;
+        if (empId) openOnbEmpDetail(parseInt(empId));
+        loadOnboardingHub();
+    } catch (e) { showToast('Failed to delete', 'error'); }
+}
+window.deleteOnbItem = deleteOnbItem;
+
+async function addOnbItemToEmp() {
+    var empId = document.getElementById('onb-emp-modal').dataset.empId;
+    if (!empId) return;
+    var title = prompt('Task title:');
+    if (!title) return;
+    var category = prompt('Category (e.g. Legal, IT, General):') || 'General';
+    var assignee = prompt('Assigned to:') || '';
+    var dueDate = prompt('Due date (YYYY-MM-DD, optional):') || '';
+    try {
+        await fetch('/api/employees/' + empId + '/onboarding', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title, category: category, assigned_to: assignee, due_date: dueDate })
+        });
+        openOnbEmpDetail(parseInt(empId));
+        loadOnboardingHub();
+    } catch (e) { showToast('Failed to add item', 'error'); }
+}
+window.addOnbItemToEmp = addOnbItemToEmp;
+
+async function showBulkOnboardModal() {
+    try {
+        var res = await fetch('/api/employees?status=onboarding');
+        var emps = await res.json();
+        var select = document.getElementById('bulk-emp-select');
+        select.innerHTML = '';
+        emps.forEach(function(e) {
+            select.insertAdjacentHTML('beforeend',
+                '<label style="display:flex;align-items:center;gap:8px;padding:8px;border-radius:6px;cursor:pointer;transition:background 0.15s;">' +
+                    '<input type="checkbox" value="' + e.id + '" class="bulk-emp-check" style="accent-color:var(--primary-color);">' +
+                    '<span style="font-size:0.9rem;">' + (e.first_name + ' ' + e.last_name).trim() + '</span>' +
+                    '<span style="font-size:0.75rem;color:var(--text-secondary);">' + (e.department_name || '') + '</span>' +
+                '</label>'
+            );
+        });
+        if (emps.length === 0) {
+            select.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);">No onboarding employees found</div>';
+        }
+        onboardingBulkItems = [];
+        document.getElementById('bulk-items-preview').style.display = 'none';
+        document.getElementById('bulk-onboard-modal').style.display = 'flex';
+    } catch (e) { showToast('Failed to load employees', 'error'); }
+}
+window.showBulkOnboardModal = showBulkOnboardModal;
+
+function closeBulkOnboardModal() {
+    document.getElementById('bulk-onboard-modal').style.display = 'none';
+}
+window.closeBulkOnboardModal = closeBulkOnboardModal;
+
+function loadBulkDefault() {
+    onboardingBulkItems = [
+        { title: 'Sign employment contract', category: 'Legal', assigned_to: 'HR' },
+        { title: 'Provide government-issued ID', category: 'Legal', assigned_to: 'HR' },
+        { title: 'Submit bank details for payroll', category: 'Finance', assigned_to: 'Finance' },
+        { title: 'Provide emergency contact information', category: 'General', assigned_to: 'HR' },
+        { title: 'Company policy acknowledgment', category: 'Compliance', assigned_to: 'HR' },
+        { title: 'IT equipment setup', category: 'Technical', assigned_to: 'IT' },
+        { title: 'Email and system access setup', category: 'Technical', assigned_to: 'IT' },
+        { title: 'Introduction to team members', category: 'Social', assigned_to: 'Manager' },
+        { title: 'Complete tax withholding forms', category: 'Finance', assigned_to: 'Finance' },
+        { title: 'Review employee handbook', category: 'Compliance', assigned_to: 'HR' },
+    ];
+    renderBulkItemsPreview();
+}
+window.loadBulkDefault = loadBulkDefault;
+
+async function loadBulkFromTemplate() {
+    try {
+        var res = await fetch('/api/onboarding/templates');
+        var templates = await res.json();
+        if (templates.length === 0) { showToast('No templates found. Create one first.', 'error'); return; }
+        var names = templates.map(function(t, i) { return (i + 1) + '. ' + t.name; }).join('\n');
+        var choice = prompt('Choose template:\n' + names + '\nEnter number:');
+        if (!choice) return;
+        var idx = parseInt(choice) - 1;
+        if (idx >= 0 && idx < templates.length) {
+            onboardingBulkItems = templates[idx].items || [];
+            renderBulkItemsPreview();
+        }
+    } catch (e) { showToast('Failed to load templates', 'error'); }
+}
+window.loadBulkFromTemplate = loadBulkFromTemplate;
+
+function renderBulkItemsPreview() {
+    var preview = document.getElementById('bulk-items-preview');
+    var list = document.getElementById('bulk-items-list');
+    preview.style.display = 'block';
+    list.innerHTML = '';
+    onboardingBulkItems.forEach(function(item) {
+        list.insertAdjacentHTML('beforeend',
+            '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:0.85rem;border-bottom:1px solid var(--border-color);">' +
+                '<span style="color:var(--primary-color);">&#10003;</span>' +
+                '<span style="flex:1;">' + item.title + '</span>' +
+                '<span style="font-size:0.72rem;color:var(--text-secondary);">' + (item.category || '') + '</span>' +
+            '</div>'
+        );
+    });
+}
+window.renderBulkItemsPreview = renderBulkItemsPreview;
+
+async function applyBulkOnboard() {
+    var empIds = [];
+    document.querySelectorAll('.bulk-emp-check:checked').forEach(function(cb) { empIds.push(parseInt(cb.value)); });
+    if (empIds.length === 0) { showToast('Select at least one employee', 'error'); return; }
+    if (onboardingBulkItems.length === 0) { showToast('Load a checklist first', 'error'); return; }
+    try {
+        var res = await fetch('/api/onboarding/apply-template', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_ids: empIds, items: onboardingBulkItems })
+        });
+        var data = await res.json();
+        if (res.ok) { showToast(data.message, 'success'); closeBulkOnboardModal(); loadOnboardingHub(); }
+        else { showToast(data.detail || 'Error', 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.applyBulkOnboard = applyBulkOnboard;
+
+async function showOnboardingTemplates() {
+    try {
+        var res = await fetch('/api/onboarding/templates');
+        var templates = await res.json();
+        var list = document.getElementById('onb-templates-list');
+        list.innerHTML = '';
+        if (templates.length === 0) {
+            list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-secondary);">No templates yet. Create one to reuse checklists.</div>';
+        } else {
+            templates.forEach(function(t) {
+                list.insertAdjacentHTML('beforeend',
+                    '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;">' +
+                        '<div><div style="font-weight:600;">' + t.name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (t.items ? t.items.length : 0) + ' items</div></div>' +
+                        '<button onclick="deleteOnbTemplate(' + t.id + ')" style="background:none;border:none;color:var(--danger-color);cursor:pointer;padding:4px;" title="Delete">' +
+                            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                        '</button>' +
+                    '</div>'
+                );
+            });
+        }
+        document.getElementById('onb-templates-modal').style.display = 'flex';
+    } catch (e) { showToast('Failed to load templates', 'error'); }
+}
+window.showOnboardingTemplates = showOnboardingTemplates;
+
+function closeOnbTemplatesModal() {
+    document.getElementById('onb-templates-modal').style.display = 'none';
+}
+window.closeOnbTemplatesModal = closeOnbTemplatesModal;
+
+async function createNewTemplate() {
+    var name = prompt('Template name:');
+    if (!name) return;
+    var itemsJson = prompt('Enter items (one per line, format: Title | Category | Assigned To):');
+    if (!itemsJson) return;
+    var items = itemsJson.split('\n').map(function(line) {
+        var parts = line.split('|').map(function(s) { return s.trim(); });
+        return { title: parts[0] || '', category: parts[1] || 'General', assigned_to: parts[2] || '' };
+    }).filter(function(i) { return i.title; });
+    try {
+        var res = await fetch('/api/onboarding/templates', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, items: items })
+        });
+        if (res.ok) { showToast('Template created', 'success'); showOnboardingTemplates(); }
+        else { showToast('Failed', 'error'); }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.createNewTemplate = createNewTemplate;
+
+async function deleteOnbTemplate(id) {
+    if (!confirm('Delete this template?')) return;
+    try {
+        await fetch('/api/onboarding/templates/' + id, { method: 'DELETE' });
+        showOnboardingTemplates();
+    } catch (e) { showToast('Failed', 'error'); }
+}
+window.deleteOnbTemplate = deleteOnbTemplate;
 
 // --- Payslips ---
 async function fetchPayslips(statusFilter) {
@@ -2072,6 +2517,7 @@ showView = function(viewId) {
     origShowView(viewId);
     if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
     if (viewId === 'departments-view') fetchDepartments();
+    if (viewId === 'onboarding-hub-view') loadOnboardingHub();
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();

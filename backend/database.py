@@ -432,5 +432,36 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Department color/icon
+            try:
+                conn.execute(text("ALTER TABLE departments ADD COLUMN IF NOT EXISTS color VARCHAR DEFAULT '#00f0ff'"))
+                conn.execute(text("ALTER TABLE departments ADD COLUMN IF NOT EXISTS icon VARCHAR DEFAULT 'building'"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Onboarding item sort_order
+            try:
+                conn.execute(text("ALTER TABLE onboarding_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Onboarding templates table
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS onboarding_templates (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        name VARCHAR NOT NULL,
+                        items_json TEXT DEFAULT '[]',
+                        created_at VARCHAR DEFAULT ''
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_onboarding_templates_client_id ON onboarding_templates (client_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Column check skipped: {e}")

@@ -477,3 +477,21 @@ input[type="number"] {
 .contact-autocomplete-new:hover { background: rgba(255,255,255,0.05); }
 .d-none { display: none !important; }
 .d-flex { display: flex !important; }
+
+/* Department Cards */
+.dept-card:hover { border-color: rgba(255,255,255,0.15); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+
+/* Onboarding Hub */
+.onb-progress-ring {
+    width: 64px; height: 64px; position: relative;
+}
+.onb-progress-ring svg { transform: rotate(-90deg); }
+.onb-progress-ring circle {
+    fill: none; stroke-width: 4; stroke-linecap: round;
+}
+.onb-progress-ring .bg { stroke: rgba(255,255,255,0.08); }
+.onb-progress-ring .fill { transition: stroke-dashoffset 0.6s ease; }
+.onb-progress-ring .pct {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    font-size: 0.75rem; font-weight: 700;
+}
