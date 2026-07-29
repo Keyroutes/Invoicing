@@ -563,30 +563,21 @@ function generateInvoicePDF() {
     y += 20;
 
     // ===== LINE ITEMS TABLE =====
-    // Fixed column positions - all numeric cols right-aligned
-    // Page: w=612, ml=50, mr=562, usable=512
-    // Item: 80pt | Desc: ~175pt | gap | Qty(50) | Price(60) | Disc(40) | Amount(70) | gaps
-    var C = {
-        itemX: ml,
-        itemW: 78,
-        descX: ml + 82,
-        qtyR: mr - 160,
-        priceR: mr - 100,
-        discR: mr - 48,
+    // Page: w=612, h=792, ml=50, mr=562, usable=512
+    // Columns: Item(82) Desc(188) Qty(40) Price(60) Disc(48) Amount(80) + gaps=22
+    var COL = {
+        itemL: ml,       itemR: ml + 82,
+        descL: ml + 88,  descR: ml + 276,
+        qtyR:  mr - 148,
+        priceR: mr - 92,
+        discR: mr - 44,
         amountR: mr
     };
-    // Description: starts at descX+6, must end BEFORE qty column begins
-    // qtyR is right edge of qty. Worst case "999,999" is ~70pt wide.
-    // So qty text starts at qtyR-70. We need 10pt gap before that.
-    var descLeft = C.descX + 6;
-    var descRight = C.qtyR - 82;
-    var descW = descRight - descLeft;
 
-    function clipLine(text, maxW) {
+    function clipText(text, maxW) {
         var t = text || '-';
-        if (doc.getTextWidth(t) <= maxW) return t;
-        while (t.length > 1 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
-        return t;
+        while (t.length > 0 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
+        return t || '-';
     }
 
     function drawTableHeader(doc, yPos) {
@@ -595,16 +586,16 @@ function generateInvoicePDF() {
         doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(220, 225, 235);
-        doc.text('Item', C.itemX + 6, yPos + 13);
-        doc.text('Description', C.descX + 6, yPos + 13);
-        doc.text('Qty', C.qtyR, yPos + 13, { align: 'right' });
-        doc.text('Unit Price', C.priceR, yPos + 13, { align: 'right' });
-        doc.text('Disc', C.discR, yPos + 13, { align: 'right' });
-        doc.text('Amount GBP', C.amountR - 6, yPos + 13, { align: 'right' });
+        doc.text('Item', COL.itemL + 4, yPos + 13);
+        doc.text('Description', COL.descL + 4, yPos + 13);
+        doc.text('Qty', COL.qtyR, yPos + 13, { align: 'right' });
+        doc.text('Unit Price', COL.priceR, yPos + 13, { align: 'right' });
+        doc.text('Disc', COL.discR, yPos + 13, { align: 'right' });
+        doc.text('Amount GBP', COL.amountR - 4, yPos + 13, { align: 'right' });
         return yPos + 24;
     }
 
-    function drawPageNum(doc, pg) {
+    function drawPageNum(doc) {
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(148, 163, 184);
@@ -632,21 +623,24 @@ function generateInvoicePDF() {
     var rowIdx = 0;
     var pageNum = 1;
 
-    function neededHeight() {
+    function reservedHeight() {
         return 24 + 16 + 16 + 6 + 14 + 14 + 24 + 38 + 24 + 14 + 36 + 80 + 30;
     }
+
+    var descMaxW = COL.descR - COL.descL - 8;
 
     rows.forEach(function(row) {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
-        var nameLines = doc.splitTextToSize(row.name || '-', C.itemW - 12);
-        var rawDesc = doc.splitTextToSize(row.desc || '-', descW);
-        var descLines = rawDesc.map(function(l) { return clipLine(l, descW); });
+
+        var nameMaxW = COL.itemR - COL.itemL - 8;
+        var nameLines = doc.splitTextToSize(row.name || '-', nameMaxW);
+        var descLines = doc.splitTextToSize(row.desc || '-', descMaxW);
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(22, maxLines * 12 + 10);
 
-        if (y + rowH + neededHeight() > pageBottom) {
-            drawPageNum(doc, pageNum);
+        if (y + rowH + reservedHeight() > pageBottom) {
+            drawPageNum(doc);
             doc.addPage();
             pageNum++;
             y = 40;
@@ -659,21 +653,24 @@ function generateInvoicePDF() {
         }
 
         doc.setFontSize(9.5);
+
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(nameLines, C.itemX + 6, y + 14);
+        var nameC = nameLines.map(function(l) { return clipText(l, nameMaxW); });
+        doc.text(nameC, COL.itemL + 4, y + 14);
 
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 116, 139);
-        doc.text(descLines, descLeft, y + 14);
+        var descC = descLines.map(function(l) { return clipText(l, descMaxW); });
+        doc.text(descC, COL.descL + 4, y + 14);
 
-        doc.text(row.qty, C.qtyR, y + 14, { align: 'right' });
-        doc.text(row.price, C.priceR, y + 14, { align: 'right' });
-        doc.text(row.disc, C.discR, y + 14, { align: 'right' });
+        doc.text(row.qty, COL.qtyR, y + 14, { align: 'right' });
+        doc.text(row.price, COL.priceR, y + 14, { align: 'right' });
+        doc.text(row.disc, COL.discR, y + 14, { align: 'right' });
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(row.amount, C.amountR - 6, y + 14, { align: 'right' });
+        doc.text(row.amount, COL.amountR - 4, y + 14, { align: 'right' });
 
         y += rowH;
         rowIdx++;
@@ -684,11 +681,11 @@ function generateInvoicePDF() {
         doc.rect(ml, y, mr - ml, 22, 'F');
         doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', descLeft, y + 14);
+        doc.text('No line items', COL.descL + 4, y + 14);
         y += 22;
     }
 
-    drawPageNum(doc, pageNum);
+    drawPageNum(doc);
 
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
