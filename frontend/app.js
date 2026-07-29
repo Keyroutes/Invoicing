@@ -459,6 +459,7 @@ function generateInvoicePDF() {
     var doc = new jsPDF({ unit: 'pt', format: 'letter' });
     var w = 612, h = 792;
     var ml = 50, mr = w - 50;
+    var pageBottom = h - 30;
     var y = 36;
 
     var number = document.getElementById('view-inv-number-val').textContent || 'Invoice';
@@ -483,23 +484,19 @@ function generateInvoicePDF() {
     var compPhone = companyPhone ? companyPhone.textContent.replace('Phone: ', '') : '';
     var compAbn = companyAbn ? companyAbn.textContent.replace('ABN: ', '') : '';
 
-    // ===== TOP ACCENT BAR =====
     doc.setFillColor(30, 41, 59);
     doc.rect(0, 0, w, 4, 'F');
 
-    // ===== TAX INVOICE title =====
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(28);
     doc.setTextColor(30, 41, 59);
     doc.text('TAX INVOICE', ml, y + 20);
     y += 50;
 
-    // ===== Logo (top right, below title) =====
     if (savedLogo) {
         try { doc.addImage(savedLogo, 'PNG', mr - 100, 10, 100, 36); } catch(e) {}
     }
 
-    // ===== Company block (right, below logo) =====
     var compY = 54;
     if (company) {
         doc.setFontSize(11);
@@ -520,7 +517,6 @@ function generateInvoicePDF() {
     if (compPhone) { doc.text('Tel: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
     if (compEmail) { doc.text(compEmail, mr, compY, { align: 'right' }); compY += 12; }
 
-    // ===== Customer block (left, below title) =====
     var custY = y;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
@@ -542,7 +538,6 @@ function generateInvoicePDF() {
     if (email && email !== 'No email') { doc.text(email, ml, custY); custY += 12; }
     if (phone && phone !== 'No phone') { doc.text(phone, ml, custY); custY += 12; }
 
-    // ===== Invoice Details (below customer/company blocks) =====
     y = Math.max(custY, compY) + 12;
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
@@ -568,55 +563,59 @@ function generateInvoicePDF() {
     y += 20;
 
     // ===== LINE ITEMS TABLE =====
-    var pageBottom = h - 40;
-    var footerReserve = 200;
+    // Fixed column positions - all numeric cols right-aligned
+    // Page: w=612, ml=50, mr=562, usable=512
+    // Item: 80pt | Desc: ~175pt | gap | Qty(50) | Price(60) | Disc(40) | Amount(70) | gaps
+    var C = {
+        itemX: ml,
+        itemW: 78,
+        descX: ml + 82,
+        qtyR: mr - 160,
+        priceR: mr - 100,
+        discR: mr - 48,
+        amountR: mr
+    };
+    // Description: starts at descX+6, must end BEFORE qty column begins
+    // qtyR is right edge of qty. Worst case "999,999" is ~70pt wide.
+    // So qty text starts at qtyR-70. We need 10pt gap before that.
+    var descLeft = C.descX + 6;
+    var descRight = C.qtyR - 82;
+    var descW = descRight - descLeft;
 
-    function drawHeaderRow(doc, y, ml, mr, cols) {
+    function clipLine(text, maxW) {
+        var t = text || '-';
+        if (doc.getTextWidth(t) <= maxW) return t;
+        while (t.length > 1 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
+        return t;
+    }
+
+    function drawTableHeader(doc, yPos) {
         doc.setFillColor(30, 41, 59);
-        doc.rect(ml, y, mr - ml, 20, 'F');
+        doc.rect(ml, yPos, mr - ml, 20, 'F');
         doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(220, 225, 235);
-        doc.text('Item', cols.item + 8, y + 13);
-        doc.text('Description', cols.desc + 8, y + 13);
-        doc.text('Qty', cols.qty, y + 13, { align: 'right' });
-        doc.text('Unit Price', cols.price - 4, y + 13, { align: 'right' });
-        doc.text('Disc', cols.disc - 4, y + 13, { align: 'right' });
-        doc.text('Amount GBP', cols.amount - 8, y + 13, { align: 'right' });
-        return y + 24;
+        doc.text('Item', C.itemX + 6, yPos + 13);
+        doc.text('Description', C.descX + 6, yPos + 13);
+        doc.text('Qty', C.qtyR, yPos + 13, { align: 'right' });
+        doc.text('Unit Price', C.priceR, yPos + 13, { align: 'right' });
+        doc.text('Disc', C.discR, yPos + 13, { align: 'right' });
+        doc.text('Amount GBP', C.amountR - 6, yPos + 13, { align: 'right' });
+        return yPos + 24;
     }
 
-    function drawPageFooter(doc, pageNum, totalPages, ml, mr, h) {
-        doc.setDrawColor(200, 210, 220);
-        doc.setLineWidth(0.3);
-        doc.setLineDashPattern([2, 2], 0);
-        doc.line(ml, h - 24, mr, h - 24);
-        doc.setLineDashPattern([], 0);
+    function drawPageNum(doc, pg) {
         doc.setFontSize(7);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(148, 163, 184);
-        doc.text('Page ' + pageNum + ' of ' + totalPages, mr, h - 14, { align: 'right' });
         doc.text(number + ' | aniprotech', ml, h - 14);
     }
 
-    var cols = {
-        item: ml,
-        desc: ml + 90,
-        qty: mr - 175,
-        price: mr - 115,
-        disc: mr - 60,
-        amount: mr
-    };
-    var descMaxW = cols.qty - cols.desc - 50;
-
     doc.setFontSize(9.5);
     doc.setFont('helvetica', 'normal');
-    y = drawHeaderRow(doc, y, ml, mr, cols);
+    y = drawTableHeader(doc, y);
 
-    var rowIdx = 0;
-    var pageNum = 1;
     var rows = [];
-
     document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
         var cells = tr.querySelectorAll('td');
         if (cells.length < 7) return;
@@ -630,27 +629,28 @@ function generateInvoicePDF() {
         });
     });
 
+    var rowIdx = 0;
+    var pageNum = 1;
+
+    function neededHeight() {
+        return 24 + 16 + 16 + 6 + 14 + 14 + 24 + 38 + 24 + 14 + 36 + 80 + 30;
+    }
+
     rows.forEach(function(row) {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
-        var nameLines = doc.splitTextToSize(row.name || '-', 75);
-        var rawDescLines = doc.splitTextToSize(row.desc || '-', descMaxW);
-        var descLines = [];
-        rawDescLines.forEach(function(line) {
-            while (line.length > 0 && doc.getTextWidth(line) > descMaxW) {
-                line = line.slice(0, -1);
-            }
-            descLines.push(line);
-        });
+        var nameLines = doc.splitTextToSize(row.name || '-', C.itemW - 12);
+        var rawDesc = doc.splitTextToSize(row.desc || '-', descW);
+        var descLines = rawDesc.map(function(l) { return clipLine(l, descW); });
         var maxLines = Math.max(nameLines.length, descLines.length);
-        var rowH = Math.max(20, maxLines * 12 + 8);
+        var rowH = Math.max(22, maxLines * 12 + 10);
 
-        if (y + rowH > pageBottom - footerReserve) {
-            drawPageFooter(doc, pageNum, pageNum, ml, mr, h);
+        if (y + rowH + neededHeight() > pageBottom) {
+            drawPageNum(doc, pageNum);
             doc.addPage();
             pageNum++;
             y = 40;
-            y = drawHeaderRow(doc, y, ml, mr, cols);
+            y = drawTableHeader(doc, y);
         }
 
         if (rowIdx % 2 === 0) {
@@ -661,30 +661,34 @@ function generateInvoicePDF() {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(nameLines, cols.item + 8, y + 13);
+        doc.text(nameLines, C.itemX + 6, y + 14);
+
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 116, 139);
-        doc.text(descLines, cols.desc + 8, y + 13);
-        doc.text(row.qty, cols.qty, y + 13, { align: 'right' });
-        doc.text(row.price, cols.price - 4, y + 13, { align: 'right' });
-        doc.text(row.disc, cols.disc - 4, y + 13, { align: 'right' });
+        doc.text(descLines, descLeft, y + 14);
+
+        doc.text(row.qty, C.qtyR, y + 14, { align: 'right' });
+        doc.text(row.price, C.priceR, y + 14, { align: 'right' });
+        doc.text(row.disc, C.discR, y + 14, { align: 'right' });
+
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(row.amount, cols.amount - 8, y + 13, { align: 'right' });
+        doc.text(row.amount, C.amountR - 6, y + 14, { align: 'right' });
+
         y += rowH;
         rowIdx++;
     });
 
     if (rowIdx === 0) {
         doc.setFillColor(248, 250, 252);
-        doc.rect(ml, y, mr - ml, 20, 'F');
+        doc.rect(ml, y, mr - ml, 22, 'F');
         doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', cols.desc + 8, y + 13);
-        y += 20;
+        doc.text('No line items', descLeft, y + 14);
+        y += 22;
     }
 
-    drawPageFooter(doc, pageNum, pageNum, ml, mr, h);
+    drawPageNum(doc, pageNum);
 
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
