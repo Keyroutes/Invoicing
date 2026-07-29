@@ -607,7 +607,7 @@ function generateInvoicePDF() {
         disc: mr - 60,
         amount: mr
     };
-    var descMaxW = cols.qty - cols.desc - 30;
+    var descMaxW = cols.qty - cols.desc - 50;
 
     doc.setFontSize(9.5);
     doc.setFont('helvetica', 'normal');
