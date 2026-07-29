@@ -457,9 +457,9 @@ window.viewInvoice = viewInvoice;
 function generateInvoicePDF() {
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    var w = 612;
-    var margin = 50;
-    var y = margin;
+    var w = 612, h = 792;
+    var margin = 48;
+    var y = 0;
 
     var number = document.getElementById('view-inv-number-val').textContent || 'Invoice';
     var contact = document.getElementById('view-inv-contact').textContent || '';
@@ -472,7 +472,6 @@ function generateInvoicePDF() {
     var total = document.getElementById('view-summary-total').textContent || '0.00';
     var savedLogo = localStorage.getItem('company_logo') || '';
 
-    // Company details from view
     var companyName = document.getElementById('view-inv-company-name');
     var companyAddr = document.getElementById('view-inv-company-address');
     var companyEmail = document.getElementById('view-inv-company-email');
@@ -484,116 +483,119 @@ function generateInvoicePDF() {
     var compPhone = companyPhone ? companyPhone.textContent.replace('Phone: ', '') : '';
     var compAbn = companyAbn ? companyAbn.textContent.replace('ABN: ', '') : '';
 
-    // Logo (left)
+    // === HEADER BAR ===
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, w, 90, 'F');
+    doc.setFillColor(99, 102, 241);
+    doc.rect(0, 86, w, 4, 'F');
+
     if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', margin, y, 120, 40); } catch(e) {}
+        try { doc.addImage(savedLogo, 'PNG', margin, 22, 110, 36); } catch(e) {}
     }
 
-    // INVOICE title + number (right)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(28);
-    doc.setTextColor(26, 26, 46);
-    doc.text('INVOICE', w - margin, y + 10, { align: 'right' });
-    doc.setFontSize(12);
-    doc.setTextColor(100, 116, 139);
-    doc.text(number, w - margin, y + 28, { align: 'right' });
-    y += 50;
-
-    // Company details (right side under invoice number)
-    if (company) {
-        var cy = y - 30;
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(26, 26, 46);
-        doc.text(company, w - margin, cy, { align: 'right' });
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 116, 139);
-        if (compAddr) { cy += 13; doc.text(compAddr.substring(0, 40), w - margin, cy, { align: 'right' }); }
-        if (compEmail) { cy += 13; doc.text(compEmail, w - margin, cy, { align: 'right' }); }
-        if (compPhone) { cy += 13; doc.text(compPhone, w - margin, cy, { align: 'right' }); }
-        if (compAbn) { cy += 13; doc.text('ABN: ' + compAbn, w - margin, cy, { align: 'right' }); }
-    }
-
-    // Divider
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, w - margin, y);
-    y += 20;
-
-    // Bill To
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(148, 163, 184);
-    doc.text('BILL TO', margin, y);
-    doc.text('INVOICE DETAILS', w / 2 + 20, y);
-    y += 16;
-
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text(contact, margin, y);
-    y += 16;
-
-    if (email && email !== 'No email') {
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 116, 139);
-        doc.text(email, margin, y);
-        y += 14;
-    }
-    if (phone && phone !== 'No phone') {
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(100, 116, 139);
-        doc.text(phone, margin, y);
-        y += 14;
-    }
-
-    // Invoice details (right side)
-    var dx = w / 2 + 20;
-    var dy = y - 16 - 16;
-    if (email && email !== 'No email') dy += 16;
-    if (phone && phone !== 'No phone') dy += 14;
-
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(30);
+    doc.setTextColor(255, 255, 255);
+    doc.text('INVOICE', w - margin, 38, { align: 'right' });
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'normal');
-    doc.text('Issue Date:', dx, dy);
-    doc.text('Due Date:', dx, dy + 16);
-    doc.text('Invoice #:', dx, dy + 32);
+    doc.setTextColor(148, 163, 184);
+    doc.text(number, w - margin, 56, { align: 'right' });
 
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text(issueDate, dx + 70, dy);
-    doc.text(dueDate, dx + 70, dy + 16);
-    doc.text(number, dx + 70, dy + 32);
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    if (company) doc.text(company, w - margin, 72, { align: 'right' });
+    y = 108;
 
-    y = Math.max(y, dy + 50);
-    y += 10;
+    // === FROM / BILL TO ===
+    var leftX = margin;
+    var rightX = w / 2 + 20;
+    var labelColor = [148, 163, 184];
+    var valueColor = [30, 41, 59];
+    var subColor = [100, 116, 139];
 
-    // Table header background
-    doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y, w - margin * 2, 22, 'F');
-    y += 15;
-
-    // Table header text
+    // From section
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(100, 116, 139);
-    doc.text('NAME', margin + 6, y);
-    doc.text('DESCRIPTION', margin + 120, y);
-    doc.text('QTY', margin + 280, y, { align: 'right' });
-    doc.text('PRICE', margin + 330, y, { align: 'right' });
-    doc.text('DISC', margin + 380, y, { align: 'right' });
-    doc.text('AMOUNT', w - margin - 6, y, { align: 'right' });
-    y += 10;
+    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+    doc.text('FROM', leftX, y);
+    y += 14;
+    if (company) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+        doc.text(company, leftX, y);
+        y += 15;
+    }
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    if (compAddr) { doc.text(compAddr.substring(0, 45), leftX, y); y += 13; }
+    if (compEmail) { doc.text(compEmail, leftX, y); y += 13; }
+    if (compPhone) { doc.text(compPhone, leftX, y); y += 13; }
+    if (compAbn) { doc.text('ABN: ' + compAbn, leftX, y); y += 13; }
 
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, y, w - margin, y);
-    y += 5;
+    // Bill To section (right side)
+    var btY = 108;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+    doc.text('BILL TO', rightX, btY);
+    btY += 14;
+    if (contact) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+        doc.text(contact, rightX, btY);
+        btY += 15;
+    }
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    if (email && email !== 'No email') { doc.text(email, rightX, btY); btY += 13; }
+    if (phone && phone !== 'No phone') { doc.text(phone, rightX, btY); btY += 13; }
+
+    y = Math.max(y, btY) + 16;
+
+    // === INVOICE DETAILS BOX ===
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y, w - margin * 2, 52, 6, 6, 'F');
+    var boxY = y + 8;
+    var colW = (w - margin * 2) / 3;
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+    doc.text('ISSUE DATE', margin + 16, boxY);
+    doc.text('DUE DATE', margin + 16 + colW, boxY);
+    doc.text('INVOICE #', margin + 16 + colW * 2, boxY);
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.text(issueDate || '-', margin + 16, boxY + 16);
+    doc.text(dueDate || '-', margin + 16 + colW, boxY + 16);
+    doc.text(number, margin + 16 + colW * 2, boxY + 16);
+
+    y += 68;
+
+    // === LINE ITEMS TABLE ===
+    // Header
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
+    y += 16;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(200, 200, 220);
+    doc.text('DESCRIPTION', margin + 10, y);
+    doc.text('QTY', margin + 290, y, { align: 'right' });
+    doc.text('PRICE', margin + 340, y, { align: 'right' });
+    doc.text('DISC', margin + 390, y, { align: 'right' });
+    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
+    y += 12;
 
     // Line items
+    var rowIdx = 0;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
@@ -606,63 +608,93 @@ function generateInvoicePDF() {
         var disc = cells[4].textContent;
         var amount = cells[6].textContent;
 
-        doc.setTextColor(51, 51, 51);
-        doc.text(name.substring(0, 25), margin + 6, y);
-        doc.text(desc.substring(0, 35), margin + 120, y);
-        doc.text(qty, margin + 280, y, { align: 'right' });
-        doc.text(price, margin + 330, y, { align: 'right' });
-        doc.text(disc, margin + 380, y, { align: 'right' });
-        doc.setFont('helvetica', 'bold');
-        doc.text(amount, w - margin - 6, y, { align: 'right' });
-        doc.setFont('helvetica', 'normal');
-        y += 14;
+        var rowH = 22;
+        if (rowIdx % 2 === 0) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(margin, y - 9, w - margin * 2, rowH, 'F');
+        }
 
-        doc.setDrawColor(232, 236, 241);
-        doc.line(margin + 6, y - 4, w - margin - 6, y - 4);
+        var itemLabel = name ? name + (desc ? ' — ' + desc.substring(0, 30) : '') : desc.substring(0, 40);
+        doc.setTextColor(51, 51, 51);
+        doc.text(itemLabel.substring(0, 42), margin + 10, y);
+        doc.setTextColor(100, 116, 139);
+        doc.text(qty, margin + 290, y, { align: 'right' });
+        doc.text(price, margin + 340, y, { align: 'right' });
+        doc.text(disc, margin + 390, y, { align: 'right' });
+        doc.setTextColor(15, 23, 42);
+        doc.setFont('helvetica', 'bold');
+        doc.text(amount, w - margin - 10, y, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        y += rowH;
+        rowIdx++;
     });
 
-    y += 15;
+    if (rowIdx === 0) {
+        doc.setTextColor(148, 163, 184);
+        doc.text('No line items', margin + 10, y);
+        y += 22;
+    }
 
-    // Totals
-    var tx = w - margin - 200;
+    // Bottom border of table
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, w - margin, y);
+    y += 20;
+
+    // === TOTALS ===
+    var totalsX = w - margin - 190;
+    var totalsValX = w - margin - 10;
+
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139);
-    doc.text('Subtotal', tx, y);
-    doc.setTextColor(51, 51, 51);
-    doc.text(subtotal, w - margin - 6, y, { align: 'right' });
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    doc.text('Subtotal', totalsX, y);
+    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.text(subtotal, totalsValX, y, { align: 'right' });
     y += 18;
 
-    doc.setTextColor(100, 116, 139);
-    doc.text('VAT (20%)', tx, y);
-    doc.setTextColor(51, 51, 51);
-    doc.text(vat, w - margin - 6, y, { align: 'right' });
-    y += 5;
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    doc.text('Tax', totalsX, y);
+    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.text(vat, totalsValX, y, { align: 'right' });
+    y += 8;
 
     doc.setDrawColor(226, 232, 240);
-    doc.line(tx, y, w - margin - 6, y);
-    y += 15;
+    doc.line(totalsX, y, totalsValX, y);
+    y += 16;
 
-    doc.setFontSize(14);
+    // Total Due box
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(totalsX - 8, y - 8, (w - margin - 10) - totalsX + 18, 32, 6, 6, 'F');
+    doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text('Total Due', tx, y);
-    doc.setTextColor(14, 165, 233);
-    doc.text(total, w - margin - 6, y, { align: 'right' });
-    y += 30;
+    doc.setTextColor(255, 255, 255);
+    doc.text('TOTAL DUE', totalsX, y + 8);
+    doc.setTextColor(99, 102, 241);
+    doc.setFontSize(16);
+    doc.text(total, totalsValX + 4, y + 10, { align: 'right' });
+    y += 40;
 
-    // Footer
+    // === FOOTER ===
+    var footerY = h - 50;
     doc.setDrawColor(226, 232, 240);
-    doc.line(margin, y, w - margin, y);
-    y += 18;
+    doc.setLineWidth(0.5);
+    doc.line(margin, footerY, w - margin, footerY);
+    footerY += 16;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text('Thank you for your business', w / 2, y, { align: 'center' });
-    y += 12;
+    doc.text('Thank you for your business!', w / 2, footerY, { align: 'center' });
+    footerY += 14;
     doc.setFontSize(8);
     doc.setTextColor(203, 213, 225);
-    doc.text('Payment terms: Due within 14 days of issue', w / 2, y, { align: 'center' });
+    if (compAddr) doc.text(compAddr, w / 2, footerY, { align: 'center' });
+    footerY += 12;
+    if (compEmail) doc.text(compEmail + (compPhone ? '  •  ' + compPhone : ''), w / 2, footerY, { align: 'center' });
+    footerY += 14;
+    doc.setFontSize(7);
+    doc.setTextColor(203, 213, 225);
+    doc.text('Payment is due within 14 days of issue. Please reference ' + number + ' when making payment.', w / 2, footerY, { align: 'center' });
 
     return doc;
 }
@@ -2225,7 +2257,12 @@ window.deletePayslip = deletePayslip;
 function generatePayslipPDF() {
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    var w = 612, margin = 50, y = margin;
+    var w = 612, h = 792;
+    var margin = 48;
+    var y = 0;
+    var valueColor = [30, 41, 59];
+    var subColor = [100, 116, 139];
+    var labelColor = [148, 163, 184];
 
     var company = document.getElementById('ps-detail-company').textContent || '';
     var companyAddr = document.getElementById('ps-detail-company-addr').textContent || '';
@@ -2244,97 +2281,164 @@ function generatePayslipPDF() {
     var other = document.getElementById('ps-detail-other').textContent || '0.00';
     var dedTotal = document.getElementById('ps-detail-dedtotal').textContent || '0.00';
     var netPay = document.getElementById('ps-detail-net').textContent || '0.00';
+    var savedLogo = localStorage.getItem('company_logo') || '';
 
-    // Title
+    // === HEADER BAR ===
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, w, 90, 'F');
+    doc.setFillColor(16, 185, 129);
+    doc.rect(0, 86, w, 4, 'F');
+
+    if (savedLogo) {
+        try { doc.addImage(savedLogo, 'PNG', margin, 22, 110, 36); } catch(e) {}
+    }
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(28);
-    doc.setTextColor(26, 26, 46);
-    doc.text('PAYSLIP', margin, y + 10);
-    doc.setFontSize(12);
+    doc.setFontSize(30);
+    doc.setTextColor(255, 255, 255);
+    doc.text('PAYSLIP', w - margin, 38, { align: 'right' });
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text(number, w - margin, 56, { align: 'right' });
+    doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
-    doc.text(number, margin, y + 28);
-    y += 50;
+    if (company) doc.text(company, w - margin, 72, { align: 'right' });
+    y = 108;
 
-    // Company + employee
+    // === EMPLOYEE INFO ===
+    var leftX = margin;
+    var rightX = w / 2 + 20;
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
+    doc.text('EMPLOYEE', leftX, y);
+    doc.text('PAYMENT DETAILS', rightX, y);
+    y += 14;
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.text(empName || '-', leftX, y);
+    y += 16;
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    if (companyAddr) { doc.text(companyAddr.substring(0, 45), leftX, y); y += 13; }
+    if (company) { doc.text(company, leftX, y); y += 13; }
+
+    var pdY = 122;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    doc.text('Period:', rightX, pdY);
+    doc.text('Pay Date:', rightX, pdY + 16);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.text(period || '-', rightX + 50, pdY);
+    doc.text(payDate || '-', rightX + 50, pdY + 16);
+
+    y = Math.max(y, pdY + 40) + 16;
+
+    // === EARNINGS TABLE ===
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
+    y += 16;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(200, 200, 220);
+    doc.text('EARNINGS', margin + 10, y);
+    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
+    y += 12;
+
+    var earnings = [['Basic Salary', basic], ['Overtime Pay', otpay], ['Bonus', bonus], ['Allowances', allow]];
+    earnings.forEach(function(r, i) {
+        if (i % 2 === 0) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(margin, y - 9, w - margin * 2, 22, 'F');
+        }
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 51, 51);
+        doc.text(r[0], margin + 10, y);
+        doc.text(r[1], w - margin - 10, y, { align: 'right' });
+        y += 22;
+    });
+
+    // Gross Pay row
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(margin, y - 9, w - margin * 2, 26, 4, 4, 'F');
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text(company, w - margin, y, { align: 'right' });
-    if (companyAddr) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139); doc.text(companyAddr, w - margin, y + 14, { align: 'right' }); }
-    y += 30;
+    doc.setTextColor(5, 150, 105);
+    doc.text('Gross Pay', margin + 10, y + 4);
+    doc.text(gross, w - margin - 10, y + 4, { align: 'right' });
+    y += 34;
 
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, w - margin, y);
-    y += 20;
-
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Employee:', margin, y);
-    doc.text('Period:', margin, y + 16);
-    doc.text('Pay Date:', margin, y + 32);
+    // === DEDUCTIONS TABLE ===
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
+    y += 16;
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text(empName, margin + 70, y);
-    doc.text(period, margin + 70, y + 16);
-    doc.text(payDate, margin + 70, y + 32);
-    y += 60;
+    doc.setTextColor(200, 200, 220);
+    doc.text('DEDUCTIONS', margin + 10, y);
+    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
+    y += 12;
 
-    // Earnings table
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184);
-    doc.text('EARNINGS', margin, y);
-    doc.text('AMOUNT', w - margin - 6, y, { align: 'right' });
-    y += 14;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(51, 51, 51);
-    var earnings = [['Basic Salary', basic], ['Overtime Pay', otpay], ['Bonus', bonus], ['Allowances', allow]];
-    earnings.forEach(function(r) {
-        doc.text(r[0], margin, y);
-        doc.text(r[1], w - margin - 6, y, { align: 'right' });
-        y += 16;
+    var deductions = [['Tax', tax], ['Insurance', ins], ['Retirement', ret], ['Other Deductions', other]];
+    deductions.forEach(function(r, i) {
+        if (i % 2 === 0) {
+            doc.setFillColor(248, 250, 252);
+            doc.rect(margin, y - 9, w - margin * 2, 22, 'F');
+        }
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 51, 51);
+        doc.text(r[0], margin + 10, y);
+        doc.setTextColor(220, 38, 38);
+        doc.text(r[1], w - margin - 10, y, { align: 'right' });
+        y += 22;
     });
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(22, 163, 74);
-    doc.text('Gross Pay', margin, y);
-    doc.text(gross, w - margin - 6, y, { align: 'right' });
-    y += 24;
 
-    // Deductions table
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184);
-    doc.text('DEDUCTIONS', margin, y);
-    doc.text('AMOUNT', w - margin - 6, y, { align: 'right' });
-    y += 14;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.setTextColor(51, 51, 51);
-    var deductions = [['Tax', tax], ['Insurance', ins], ['Retirement', ret], ['Other', other]];
-    deductions.forEach(function(r) {
-        doc.text(r[0], margin, y);
-        doc.text(r[1], w - margin - 6, y, { align: 'right' });
-        y += 16;
-    });
+    // Total Deductions row
+    doc.setFillColor(254, 226, 226);
+    doc.roundedRect(margin, y - 9, w - margin * 2, 26, 4, 4, 'F');
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(220, 38, 38);
-    doc.text('Total Deductions', margin, y);
-    doc.text(dedTotal, w - margin - 6, y, { align: 'right' });
-    y += 24;
+    doc.text('Total Deductions', margin + 10, y + 4);
+    doc.text(dedTotal, w - margin - 10, y + 4, { align: 'right' });
+    y += 40;
 
-    doc.setDrawColor(226, 232, 240);
-    doc.line(margin, y, w - margin, y);
-    y += 18;
-
-    doc.setFontSize(16);
+    // === NET PAY BOX ===
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(margin, y, w - margin * 2, 56, 8, 8, 'F');
+    doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 46);
-    doc.text('Net Pay', margin, y);
-    doc.setTextColor(14, 165, 233);
-    doc.text('$' + netPay, w - margin - 6, y, { align: 'right' });
+    doc.setTextColor(148, 163, 184);
+    doc.text('NET PAY', margin + 20, y + 22);
+    doc.setFontSize(24);
+    doc.setTextColor(16, 185, 129);
+    doc.text('$' + netPay, w - margin - 20, y + 30, { align: 'right' });
+    y += 70;
+
+    // === FOOTER ===
+    var footerY = h - 50;
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(margin, footerY, w - margin, footerY);
+    footerY += 16;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text('This is a computer-generated payslip. No signature required.', w / 2, footerY, { align: 'center' });
+    footerY += 14;
+    doc.setFontSize(8);
+    doc.setTextColor(203, 213, 225);
+    if (company) doc.text(company + (companyAddr ? '  •  ' + companyAddr : ''), w / 2, footerY, { align: 'center' });
 
     return doc;
 }
