@@ -568,7 +568,8 @@ function generateInvoicePDF() {
     y += 20;
 
     // ===== LINE ITEMS TABLE =====
-    var colDesc = ml;
+    var colItem = ml;
+    var colDesc = ml + 140;
     var colQty = mr - 180;
     var colPrice = mr - 110;
     var colAmount = mr;
@@ -579,6 +580,7 @@ function generateInvoicePDF() {
     doc.setFontSize(7.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(220, 225, 235);
+    doc.text('Item', colItem + 8, y + 13);
     doc.text('Description', colDesc + 8, y + 13);
     doc.text('Qty', colQty, y + 13, { align: 'right' });
     doc.text('Unit Price', colPrice - 4, y + 13, { align: 'right' });
@@ -596,10 +598,11 @@ function generateInvoicePDF() {
         var price = cells[3].textContent;
         var amount = cells[6].textContent;
 
-        var itemLabel = name ? (desc ? name + '  -  ' + desc : name) : desc;
         var descWidth = colQty - colDesc - 16;
-        var lines = doc.splitTextToSize(itemLabel, descWidth);
-        var rowH = Math.max(20, lines.length * 12 + 8);
+        var nameLines = doc.splitTextToSize(name || '-', 120);
+        var descLines = doc.splitTextToSize(desc || '-', descWidth);
+        var maxLines = Math.max(nameLines.length, descLines.length);
+        var rowH = Math.max(20, maxLines * 12 + 8);
 
         if (rowIdx % 2 === 0) {
             doc.setFillColor(248, 250, 252);
@@ -607,9 +610,12 @@ function generateInvoicePDF() {
         }
 
         doc.setFontSize(9.5);
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(lines, colDesc + 8, y + 13);
+        doc.text(nameLines, colItem + 8, y + 13);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        doc.text(descLines, colDesc + 8, y + 13);
         doc.setTextColor(100, 116, 139);
         doc.text(qty, colQty, y + 13, { align: 'right' });
         doc.text(price, colPrice - 4, y + 13, { align: 'right' });

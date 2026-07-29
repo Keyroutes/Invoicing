@@ -533,12 +533,11 @@ def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_byt
         msg['From'] = from_email
         msg['To'] = to_email
         msg['Reply-To'] = from_email
-        msg['Precedence'] = 'bulk'
-        msg['X-Mailer'] = 'aniprotech'
-        msg['List-Unsubscribe'] = f'<mailto:{from_email}?subject=unsubscribe>'
+        msg['List-Unsubscribe'] = f'<mailto:hello@keyroutes.co?subject=unsubscribe>'
+        msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
         msg.set_content(body)
         if html_body:
-            msg.add_alternative(html_body, subtype='html')
+            msg.add_alternative(html_body, subtype='html', charset='utf-8')
         if pdf_bytes:
             msg.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_filename)
         context = ssl.create_default_context()
@@ -571,12 +570,11 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
             msg['From'] = from_email
             msg['To'] = to_email
             msg['Reply-To'] = from_email
-            msg['Precedence'] = 'bulk'
-            msg['X-Mailer'] = 'aniprotech'
-            msg['List-Unsubscribe'] = f'<mailto:{from_email}?subject=unsubscribe>'
+            msg['List-Unsubscribe'] = '<mailto:hello@keyroutes.co?subject=unsubscribe>'
+            msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
             msg.set_content(body)
             if html_body:
-                msg.add_alternative(html_body, subtype='html')
+                msg.add_alternative(html_body, subtype='html', charset='utf-8')
             if pdf_bytes:
                 msg.add_attachment(pdf_bytes, maintype='application', subtype='pdf', filename=pdf_filename)
             service = build('gmail', 'v1', credentials=creds)
@@ -848,7 +846,7 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
     company_abn = settings_map.get("company_abn", "") or (inv_client.abn if inv_client else "")
     company_website = settings_map.get("company_website", "") or (inv_client.website if inv_client else "")
 
-    sender_name = company_name
+    sender_name = os.getenv("FROM_NAME", "aniprotech")
     from_header = f"{sender_name} <{from_email}>"
     subject = f"Invoice {inv.number} from {sender_name}"
 
@@ -866,19 +864,20 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
             amount = li.qty * li.price
             if li.disc and li.disc > 0:
                 amount *= (1 - li.disc / 100)
-            item_label = f"{li.name} - {li.description}" if li.name else li.description
             rows += f'''
                 <tr>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;">{item_label}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;font-weight:600;">{li.name or '-'}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#64748b;">{li.description or ''}</td>
                     <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">{int(li.qty)}</td>
                     <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">${li.price:.2f}</td>
                     <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;font-weight:600;">${amount:.2f}</td>
                 </tr>'''
 
         line_items_html = f'''
-            <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
                 <thead>
-                    <tr style="background:#f8fafc;">
+                    <tr style="background-color:#f8fafc;">
+                        <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Item</th>
                         <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th>
                         <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Qty</th>
                         <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Price</th>
@@ -917,29 +916,28 @@ Best regards,
 To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."""
 
     html_body = f"""
+    <!DOCTYPE html>
     <html>
-      <body style="font-family: 'Helvetica Neue', Arial, sans-serif; color: #1e293b; line-height: 1.6; margin: 0; padding: 0; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);">
+      <body style="font-family: Arial, Helvetica, sans-serif; color: #1e293b; line-height: 1.6; margin: 0; padding: 0; background-color: #f1f5f9;">
         <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-          <div style="background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 25px 60px rgba(0,0,0,0.3);">
-            <!-- Gradient Header -->
-            <div style="background: linear-gradient(135deg, #0ea5e9 0%, #7877c6 50%, #00f0ff 100%); padding: 40px; text-align: center; position: relative;">
+          <div style="background: #ffffff; border-radius: 12px; overflow: hidden;">
+            <!-- Header -->
+            <div style="background-color: #0f172a; padding: 40px; text-align: center;">
               {logo_html}
-              <h1 style="font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 8px 0; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">INVOICE</h1>
-              <p style="font-size: 16px; color: rgba(255,255,255,0.9); margin: 0; font-weight: 600;">{inv.number}</p>
-              <div style="margin-top: 16px; display: inline-block; background: rgba(255,255,255,0.2); padding: 6px 16px; border-radius: 20px;">
-                <span style="font-size: 13px; color: #ffffff; font-weight: 600;">Amount Due: ${inv.due:.2f}</span>
+              <h1 style="font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 8px 0;">INVOICE</h1>
+              <p style="font-size: 16px; color: #94a3b8; margin: 0; font-weight: 600;">{inv.number}</p>
+              <div style="margin-top: 16px; display: inline-block; background-color: #0ea5e9; padding: 8px 20px; border-radius: 20px;">
+                <span style="font-size: 14px; color: #ffffff; font-weight: 600;">Amount Due: ${inv.due:.2f}</span>
               </div>
             </div>
 
             <!-- Company Details Bar -->
             {f'''
-            <div style="background: #f8fafc; padding: 16px 40px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <div style="background-color: #f8fafc; padding: 16px 40px; border-bottom: 1px solid #e2e8f0;">
               <div style="font-size: 13px; color: #475569;">
                 <strong style="color: #1e293b;">{company_name}</strong>
                 {f' &bull; {company_address}' if company_address else ''}
-              </div>
-              <div style="font-size: 13px; color: #475569;">
-                {f'{company_email}' if company_email else ''}
+                {f' &bull; {company_email}' if company_email else ''}
                 {f' &bull; {company_phone}' if company_phone else ''}
               </div>
             </div>
@@ -951,44 +949,55 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
               <p style="font-size: 14px; color: #64748b; margin: 0 0 32px 0;">Here's your invoice from <strong>{company_name or sender_name}</strong>. Please find the details below.</p>
 
               <!-- Invoice Details Cards -->
-              <div style="display: flex; gap: 16px; margin-bottom: 32px;">
-                <div style="flex: 1; background: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center;">
-                  <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 4px;">Issue Date</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.issue_date}</div>
-                </div>
-                <div style="flex: 1; background: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center;">
-                  <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 4px;">Due Date</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.due_date}</div>
-                </div>
-                <div style="flex: 1; background: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center;">
-                  <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; margin-bottom: 4px;">Invoice #</div>
-                  <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.number}</div>
-                </div>
+              <div style="margin-bottom: 32px;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse;">
+                  <tr>
+                    <td style="background-color: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center; width: 33%;">
+                      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Issue Date</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.issue_date}</div>
+                    </td>
+                    <td style="width: 10px;"></td>
+                    <td style="background-color: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center; width: 33%;">
+                      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Due Date</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.due_date}</div>
+                    </td>
+                    <td style="width: 10px;"></td>
+                    <td style="background-color: #f1f5f9; border-radius: 10px; padding: 16px; text-align: center; width: 33%;">
+                      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Invoice #</div>
+                      <div style="font-size: 14px; font-weight: 600; color: #1e293b;">{inv.number}</div>
+                    </td>
+                  </tr>
+                </table>
               </div>
 
               <!-- Line Items -->
               {line_items_html}
 
               <!-- Total -->
-              <div style="background: linear-gradient(135deg, #0ea5e9, #7877c6); border-radius: 12px; padding: 24px; text-align: right; margin-top: 24px;">
-                <div style="font-size: 13px; color: rgba(255,255,255,0.8); margin-bottom: 4px;">TOTAL AMOUNT</div>
-                <div style="font-size: 32px; font-weight: 800; color: #ffffff;">${inv.due:.2f}</div>
-              </div>
+              <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse: collapse; margin-top: 24px;">
+                <tr>
+                  <td style="background-color: #0f172a; border-radius: 12px; padding: 24px; text-align: right;">
+                    <div style="font-size: 13px; color: #94a3b8; margin-bottom: 4px;">TOTAL AMOUNT</div>
+                    <div style="font-size: 32px; font-weight: 800; color: #ffffff;">${inv.due:.2f}</div>
+                  </td>
+                </tr>
+              </table>
 
               <!-- Payment Note -->
-              <div style="margin-top: 32px; padding: 20px; background: #fefce8; border-radius: 10px; border-left: 4px solid #fcd34d;">
+              <div style="margin-top: 32px; padding: 20px; background-color: #fefce8; border-radius: 10px; border-left: 4px solid #fcd34d;">
                 <p style="font-size: 13px; color: #854d0e; margin: 0;"><strong>Payment Terms:</strong> Please pay by {inv.due_date}. For any questions, reply to this email.</p>
               </div>
+
+              <!-- View and Pay Online -->
+              <p style="margin-top: 20px;"><a href="{request.base_url}login.html" style="color: #0ea5e9; font-size: 14px; font-weight: 600;">View and pay online &rarr;</a></p>
             </div>
 
             <!-- Footer -->
-            <div style="padding: 24px 40px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
+            <div style="padding: 24px 40px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
               <p style="font-size: 13px; color: #94a3b8; margin: 0 0 4px 0;">Thank you for your business!</p>
-              <p style="font-size: 12px; color: #cbd5e1; margin: 0;">{sender_name}</p>
+              <p style="font-size: 12px; color: #64748b; margin: 0;">{sender_name}</p>
               {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{company_address}</p>' if company_address else ''}
-              {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{company_email}</p>' if company_email else ''}
-              {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{company_website}</p>' if company_website else ''}
-              <p style="font-size:10px; color:#cbd5e1; margin:12px 0 0 0;"><a href="mailto:{company_email}?subject=unsubscribe" style="color:#94a3b8;">Unsubscribe</a> from these notifications</p>
+              <p style="font-size: 11px; color: #94a3b8; margin: 12px 0 0 0;"><a href="mailto:hello@keyroutes.co?subject=unsubscribe" style="color: #94a3b8;">Unsubscribe</a> from these notifications</p>
             </div>
           </div>
         </div>
@@ -2067,63 +2076,68 @@ Best regards,
 {company_email}
 {company_phone}"""
 
-    html_body = f"""<html><body style="font-family:'Helvetica Neue',Arial,sans-serif;color:#1e293b;margin:0;padding:0;background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);">
+    html_body = f"""<!DOCTYPE html>
+<html><body style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;margin:0;padding:0;background-color:#f1f5f9;">
 <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
-<div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,0.3);">
-<div style="background:linear-gradient(135deg,#0ea5e9 0%,#7877c6 50%,#00f0ff 100%);padding:40px;text-align:center;">
+<div style="background:#fff;border-radius:12px;overflow:hidden;">
+<div style="background-color:#0f172a;padding:40px;text-align:center;">
 {logo_html}
 <h1 style="font-size:32px;font-weight:800;color:#fff;margin:0 0 8px 0;">PAYSLIP</h1>
-<p style="font-size:16px;color:rgba(255,255,255,0.9);margin:0;">{ps.number}</p>
-<div style="margin-top:16px;display:inline-block;background:rgba(255,255,255,0.2);padding:6px 16px;border-radius:20px;">
-<span style="font-size:13px;color:#fff;font-weight:600;">Net Pay: ${ps.net_pay:.2f}</span>
+<p style="font-size:16px;color:#94a3b8;margin:0;">{ps.number}</p>
+<div style="margin-top:16px;display:inline-block;background-color:#0ea5e9;padding:8px 20px;border-radius:20px;">
+<span style="font-size:14px;color:#fff;font-weight:600;">Net Pay: ${ps.net_pay:.2f}</span>
 </div>
 </div>
-<div style="background:#f8fafc;padding:16px 40px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-<div style="font-size:13px;color:#475569;"><strong style="color:#1e293b;">{company_name}</strong>{f' &bull; {company_address}' if company_address else ''}</div>
-<div style="font-size:13px;color:#475569;">{f'{company_email}' if company_email else ''}{f' &bull; {company_phone}' if company_phone else ''}</div>
+<div style="background-color:#f8fafc;padding:16px 40px;border-bottom:1px solid #e2e8f0;">
+<div style="font-size:13px;color:#475569;"><strong style="color:#1e293b;">{company_name}</strong>{f' &bull; {company_address}' if company_address else ''}{f' &bull; {company_email}' if company_email else ''}</div>
 </div>
 <div style="padding:40px;">
 <p style="font-size:16px;color:#1e293b;margin:0 0 6px 0;">Hello <strong>{emp.first_name}</strong>,</p>
 <p style="font-size:14px;color:#64748b;margin:0 0 24px 0;">Here's your payslip from <strong>{company_name}</strong> for the period {ps.period_start} to {ps.period_end}.</p>
-<div style="display:flex;gap:16px;margin-bottom:24px;">
-<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
+<tr>
+<td style="background-color:#f1f5f9;border-radius:10px;padding:16px;text-align:center;width:33%;">
 <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Period Start</div>
 <div style="font-size:14px;font-weight:600;">{ps.period_start}</div>
-</div>
-<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+</td>
+<td style="width:10px;"></td>
+<td style="background-color:#f1f5f9;border-radius:10px;padding:16px;text-align:center;width:33%;">
 <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Period End</div>
 <div style="font-size:14px;font-weight:600;">{ps.period_end}</div>
-</div>
-<div style="flex:1;background:#f1f5f9;border-radius:10px;padding:16px;text-align:center;">
+</td>
+<td style="width:10px;"></td>
+<td style="background-color:#f1f5f9;border-radius:10px;padding:16px;text-align:center;width:33%;">
 <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:4px;">Pay Date</div>
 <div style="font-size:14px;font-weight:600;">{ps.pay_date}</div>
-</div>
-</div>
-<table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-<tr style="background:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th></tr>
+</td>
+</tr>
+</table>
+<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
+<tr style="background-color:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.basic_salary:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.overtime_pay:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.bonus:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.allowances:.2f}</td></tr>
-<tr style="font-weight:700;background:#f0fdf4;"><td style="padding:12px 16px;font-size:14px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;font-size:14px;">${ps.gross_pay:.2f}</td></tr>
+<tr style="font-weight:700;background-color:#f0fdf4;"><td style="padding:12px 16px;font-size:14px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;font-size:14px;">${ps.gross_pay:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.tax_amount:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.insurance:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.retirement:.2f}</td></tr>
 <tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.other_deductions:.2f}</td></tr>
-<tr style="font-weight:700;background:#fef2f2;"><td style="padding:12px 16px;font-size:14px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;font-size:14px;">-${ps.total_deductions:.2f}</td></tr>
+<tr style="font-weight:700;background-color:#fef2f2;"><td style="padding:12px 16px;font-size:14px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;font-size:14px;">-${ps.total_deductions:.2f}</td></tr>
 </table>
-<div style="background:linear-gradient(135deg,#0ea5e9,#7877c6);border-radius:12px;padding:24px;text-align:right;">
-<div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:4px;">NET PAY</div>
-<div style="font-size:32px;font-weight:800;color:#fff;">${ps.net_pay:.2f}</div>
+<div style="background-color:#0f172a;border-radius:12px;padding:24px;text-align:right;">
+<div style="font-size:13px;color:#94a3b8;margin-bottom:4px;">NET PAY</div>
+<div style="font-size:32px;font-weight:800;color:#10b981;">${ps.net_pay:.2f}</div>
 </div>
 </div>
-<div style="padding:24px 40px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+<div style="padding:24px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
 <p style="font-size:13px;color:#94a3b8;margin:0;">Thank you for your hard work!</p>
-<p style="font-size:12px;color:#cbd5e1;margin:4px 0 0 0;">{company_name}</p>
+<p style="font-size:12px;color:#64748b;margin:4px 0 0 0;">{company_name}</p>
+<p style="font-size:11px;color:#94a3b8;margin:12px 0 0 0;"><a href="mailto:hello@keyroutes.co?subject=unsubscribe" style="color:#94a3b8;">Unsubscribe</a> from these notifications</p>
 </div>
 </div>
-</div></body></html>
-<img src="{request.base_url}api/payslip/track/open/{ps.tracking_id}" width="1" height="1" style="display:none;" alt="">
+</div><img src="{request.base_url}api/payslip/track/open/{ps.tracking_id}" width="1" height="1" style="display:none;" alt="">
+</body></html>
 """
 
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
