@@ -585,28 +585,7 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
         pdf_part.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
         msg.attach(pdf_part)
 
-    return msg.as_string()
-
-
-def send_email_smtp(to_email, subject, body, from_email, html_body=None, pdf_bytes=None, pdf_filename="invoice.pdf", logo_data=""):
-    smtp_host = os.getenv("SMTP_HOST", "")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_user = os.getenv("SMTP_USER", "")
-    smtp_pass = os.getenv("SMTP_PASSWORD", "")
-    if not all([smtp_host, smtp_user, smtp_pass]):
-        return False, "SMTP not configured"
-    try:
-        raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, logo_data or "", pdf_bytes, pdf_filename)
-        context = ssl.create_default_context()
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls(context=context)
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, to_email, raw_msg)
-        logger.info(f"Email sent via SMTP to {to_email}")
-        return True, "Email sent via SMTP"
-    except Exception as e:
-        logger.error(f"SMTP failed: {e}")
-        return False, f"SMTP error: {str(e)}"
+return msg.as_string()
 
 
 def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf", logo_data: str = ""):
@@ -622,18 +601,20 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
     with SessionLocal() as db:
         refresh_token = get_stored_refresh_token(db)
 
-    if refresh_token:
-        try:
-            creds = get_gmail_credentials(access_token=None, refresh_token=refresh_token)
-            service = build('gmail', 'v1', credentials=creds)
-            encoded_message = base64.urlsafe_b64encode(raw_msg.encode('utf-8')).decode()
-            send_result = service.users().messages().send(userId="me", body={'raw': encoded_message}).execute()
-            logger.info(f"Email sent via Gmail API to {to_email} (ID: {send_result['id']})")
-            return True, "Email sent via Gmail API"
-        except Exception as e:
-            logger.warning(f"Gmail API failed, trying SMTP fallback: {e}")
+    if not refresh_token:
+        return False, "Gmail refresh token not configured"
 
-    return send_email_smtp(to_email, subject, body, from_email, html_body, pdf_bytes, pdf_filename, logo_data)
+    try:
+        creds = get_gmail_credentials(access_token=None, refresh_token=refresh_token)
+        service = build('gmail', 'v1', credentials=creds)
+        encoded_message = base64.urlsafe_b64encode(raw_msg.encode('utf-8')).decode()
+        send_result = service.users().messages().send(userId="me", body={'raw': encoded_message}).execute()
+        logger.info(f"Email sent via Gmail API to {to_email} (ID: {send_result['id']})")
+        return True, "Email sent via Gmail API"
+    except Exception as e:
+        logger.error(f"Gmail API failed: {e}")
+        return False, f"Gmail API error: {str(e)}"
+
 
 # --- API Endpoints ---
 
