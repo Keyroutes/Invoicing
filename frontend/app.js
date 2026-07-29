@@ -570,8 +570,9 @@ function generateInvoicePDF() {
     // ===== LINE ITEMS TABLE =====
     var colItem = ml;
     var colDesc = ml + 140;
-    var colQty = mr - 180;
-    var colPrice = mr - 110;
+    var colQty = mr - 220;
+    var colPrice = mr - 150;
+    var colDisc = mr - 80;
     var colAmount = mr;
 
     // Header row
@@ -584,6 +585,7 @@ function generateInvoicePDF() {
     doc.text('Description', colDesc + 8, y + 13);
     doc.text('Qty', colQty, y + 13, { align: 'right' });
     doc.text('Unit Price', colPrice - 4, y + 13, { align: 'right' });
+    doc.text('Disc %', colDisc - 4, y + 13, { align: 'right' });
     doc.text('Amount GBP', colAmount - 8, y + 13, { align: 'right' });
     y += 24;
 
@@ -596,7 +598,8 @@ function generateInvoicePDF() {
         var desc = cells[1].textContent;
         var qty = cells[2].textContent;
         var price = cells[3].textContent;
-        var amount = cells[6].textContent;
+        var disc = cells[4].textContent || '0';
+        var amount = cells[7].textContent;
 
         var descWidth = colQty - colDesc - 16;
         var nameLines = doc.splitTextToSize(name || '-', 120);
@@ -1018,6 +1021,15 @@ function downloadPDF() {
     doc.save(number + '.pdf');
 }
 window.downloadPDF = downloadPDF;
+
+// --- PDF Preview ---
+function previewPDF() {
+    var doc = generateInvoicePDF();
+    var pdfBlob = doc.output('blob');
+    var pdfUrl = URL.createObjectURL(pdfBlob);
+    window.open(pdfUrl, '_blank');
+}
+window.previewPDF = previewPDF;
 
 // --- Reports ---
 async function loadReports() {
