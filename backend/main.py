@@ -658,7 +658,7 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
             continue
         try:
             inv_date = datetime.strptime(inv.issue_date, "%Y-%m-%d")
-        except:
+        except (ValueError, TypeError):
             continue
         for i in range(6):
             d = now - timedelta(days=30 * (5 - i))
@@ -1162,7 +1162,7 @@ def list_contacts(request: Request, db: Session = Depends(get_db)):
 def create_contact(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     if not body or not body.get("name"):
-        return {"error": "Name required"}
+        raise HTTPException(status_code=400, detail="Name required")
     existing = db.query(models.DBContact).filter(models.DBContact.name == body["name"], models.DBContact.client_id == client.id).first()
     if existing:
         if body.get("email") and not existing.email:
@@ -1271,7 +1271,7 @@ def get_current_user(request: Request):
     user = request.session.get('user')
     if user:
         return {"user": user}
-    return JSONResponse(status_code=200, content={"error": "Not authenticated"})
+    return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
 @app.get("/api/auth/logout")
 def logout(request: Request):
@@ -1643,7 +1643,7 @@ def update_employee(emp_id: int, request: Request, body: dict = None, db: Sessio
         raise HTTPException(status_code=404, detail="Employee not found")
     if body:
         for key, val in body.items():
-            if hasattr(emp, key) and key not in ("id", "client_id", "created_at"):
+            if hasattr(emp, key) and key not in ("id", "client_id", "created_at", "password_hash"):
                 setattr(emp, key, val)
     db.commit()
     return {"message": "Employee updated"}
@@ -1745,7 +1745,7 @@ def get_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db))
 @app.put("/api/onboarding/{item_id}")
 def update_onboarding_item(item_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id).first()
+    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id, models.DBOnboardingItem.client_id == client.id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     if body:
@@ -1778,7 +1778,7 @@ def update_onboarding_item(item_id: int, request: Request, body: dict = None, db
 @app.delete("/api/onboarding/{item_id}")
 def delete_onboarding_item(item_id: int, request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id).first()
+    item = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.id == item_id, models.DBOnboardingItem.client_id == client.id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     db.delete(item)
@@ -2052,7 +2052,7 @@ def update_payslip(ps_id: int, request: Request, body: dict = None, db: Session 
         raise HTTPException(status_code=404, detail="Payslip not found")
     if body:
         for key, val in body.items():
-            if hasattr(ps, key) and key not in ("id", "client_id", "created_at", "tracking_id"):
+            if hasattr(ps, key) and key not in ("id", "client_id", "created_at", "tracking_id", "net_pay", "gross_pay", "employee_id", "number"):
                 setattr(ps, key, val)
     db.commit()
     return {"message": "Payslip updated"}
@@ -2864,12 +2864,11 @@ def employee_break_stop(request: Request, db: Session = Depends(get_db)):
     try:
         now = datetime.now()
         today_str = now.strftime("%Y-%m-%d")
-        break_stop = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
         break_start = datetime.strptime(today_str + " " + att.break_start, "%Y-%m-%d %H:%M:%S")
         elapsed = round((now - break_start).total_seconds() / 60, 1)
         att.break_minutes = (att.break_minutes or 0) + elapsed
     except Exception:
-        pass
+        logger.error(f"Failed to calculate break duration for attendance {att.id}")
     att.is_on_break = False
     att.break_start = ""
     db.commit()

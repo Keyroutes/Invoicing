@@ -20,8 +20,8 @@ function showToast(message, type) {
 function toggleMobileMenu() {
     var nav = document.getElementById('main-nav');
     var overlay = document.getElementById('mobile-overlay');
-    nav.classList.toggle('mobile-open');
-    overlay.classList.toggle('active');
+    if (nav) nav.classList.toggle('mobile-open');
+    if (overlay) overlay.classList.toggle('active');
     document.body.classList.toggle('no-scroll');
 }
 window.toggleMobileMenu = toggleMobileMenu;
@@ -66,8 +66,10 @@ function showView(viewId) {
     if (viewId === 'settings-view' && typeof loadSettings === 'function') loadSettings();
     if (viewId === 'reports-view' && typeof loadReports === 'function') loadReports();
     // Close mobile menu
-    document.getElementById('main-nav').classList.remove('mobile-open');
-    document.getElementById('mobile-overlay').classList.remove('active');
+    var mainNav = document.getElementById('main-nav');
+    var mobileOverlay = document.getElementById('mobile-overlay');
+    if (mainNav) mainNav.classList.remove('mobile-open');
+    if (mobileOverlay) mobileOverlay.classList.remove('active');
     document.body.classList.remove('no-scroll');
 }
 window.showView = showView;
@@ -143,8 +145,8 @@ function renderDashboard(data) {
 
 function renderCashFlowChart(cashFlowData) {
     var container = document.getElementById('cash-flow-container');
-    if (!container) return;
-    var maxTotal = Math.max.apply(null, cashFlowData.money_in.concat(cashFlowData.money_out));
+    if (!container || !cashFlowData || !cashFlowData.money_in) return;
+    var maxTotal = Math.max.apply(null, cashFlowData.money_in.concat(cashFlowData.money_out)) || 1;
     var html = '<div class="chart-bars">';
     for (var i = 0; i < cashFlowData.months.length; i++) {
         var hIn = (cashFlowData.money_in[i] / maxTotal) * 100;
@@ -268,7 +270,7 @@ function showSearchResults(results, q) {
         for (var type in grouped) {
             html += '<div style="padding:8px 14px 4px;font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">' + (types[type] || type) + '</div>';
             grouped[type].slice(0, 5).forEach(function(r) {
-                var highlight = esc(r.label).replace(new RegExp('(' + esc(q) + ')', 'gi'), '<strong style="color:var(--primary-color);">$1</strong>');
+                var highlight = esc(r.label).replace(new RegExp('(' + escapeRegex(esc(q)) + ')', 'gi'), '<strong style="color:var(--primary-color);">$1</strong>');
                 html += '<div class="search-result-item" onclick="handleSearchResultClick(\'' + r.view + '\')" style="padding:8px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background 0.15s;">' +
                     '<span style="font-size:1rem;">' + (icons[r.type] || '&#128269;') + '</span>' +
                     '<div style="min-width:0;">' +
@@ -1091,6 +1093,7 @@ window.previewPDF = previewPDF;
 async function loadReports() {
     try {
         var res = await fetch('/api/invoices');
+        if (!res.ok) throw new Error('Failed');
         var invoices = await res.json();
         var statusCounts = {};
         invoices.forEach(function(inv) { statusCounts[inv.status] = (statusCounts[inv.status] || 0) + 1; });
@@ -1306,13 +1309,16 @@ window.handleSettingsLogoUpload = handleSettingsLogoUpload;
 
 // --- Contact Autocomplete ---
 var contactDropdownTimeout = null;
+var contactAutocompleteSetup = false;
 
 function setupContactAutocomplete() {
+    if (contactAutocompleteSetup) return;
     var wrap = document.getElementById('contact-autocomplete-wrap');
     if (!wrap) return;
     var input = document.getElementById('inv-contact');
     var dropdown = document.getElementById('contact-autocomplete-dropdown');
     if (!input || !dropdown) return;
+    contactAutocompleteSetup = true;
 
     input.addEventListener('input', function() {
         var val = input.value.trim();
@@ -3481,9 +3487,11 @@ function downloadRecResume() {
 
 function esc(s) {
     if (!s) return '';
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 window.showAddFormModal = showAddFormModal;
