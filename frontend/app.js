@@ -570,9 +570,9 @@ function generateInvoicePDF() {
     // ===== LINE ITEMS TABLE =====
     var colItem = ml;
     var colDesc = ml + 100;
-    var colQty = mr - 210;
-    var colPrice = mr - 140;
-    var colDisc = mr - 75;
+    var colQty = mr - 180;
+    var colPrice = mr - 120;
+    var colDisc = mr - 60;
     var colAmount = mr;
 
     // Header row
@@ -585,7 +585,7 @@ function generateInvoicePDF() {
     doc.text('Description', colDesc + 8, y + 13);
     doc.text('Qty', colQty, y + 13, { align: 'right' });
     doc.text('Unit Price', colPrice - 4, y + 13, { align: 'right' });
-    doc.text('Disc %', colDisc - 4, y + 13, { align: 'right' });
+    doc.text('Disc', colDisc - 4, y + 13, { align: 'right' });
     doc.text('Amount GBP', colAmount - 8, y + 13, { align: 'right' });
     y += 24;
 
@@ -598,11 +598,12 @@ function generateInvoicePDF() {
         var desc = cells[1].textContent;
         var qty = cells[2].textContent;
         var price = cells[3].textContent;
-        var disc = cells[4].textContent || '0';
+        var disc = (cells[4].textContent || '0').replace('%', '').trim();
         var amount = cells[6].textContent;
 
+        var descWidth = colQty - colDesc - 20;
         doc.setFontSize(9.5);
-        var descWidth = colQty - colDesc - 24;
+        doc.setFont('helvetica', 'normal');
         var nameLines = doc.splitTextToSize(name || '-', 85);
         var descLines = doc.splitTextToSize(desc || '-', descWidth);
         var maxLines = Math.max(nameLines.length, descLines.length);
@@ -623,7 +624,7 @@ function generateInvoicePDF() {
         doc.setTextColor(100, 116, 139);
         doc.text(qty, colQty, y + 13, { align: 'right' });
         doc.text(price, colPrice - 4, y + 13, { align: 'right' });
-        doc.text(disc.replace('%', ''), colDisc - 4, y + 13, { align: 'right' });
+        doc.text(disc, colDisc - 4, y + 13, { align: 'right' });
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
         doc.text(amount, colAmount - 8, y + 13, { align: 'right' });
