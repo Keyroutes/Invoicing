@@ -1097,6 +1097,12 @@ def search_contacts(request: Request, q: str = "", db: Session = Depends(get_db)
     contacts = query.limit(10).all()
     return [{"id": c.id, "name": c.name, "email": c.email or "", "phone_number": c.phone_number or ""} for c in contacts]
 
+@app.get("/api/contacts")
+def list_contacts(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    contacts = db.query(models.DBContact).filter(models.DBContact.client_id == client.id).all()
+    return [{"id": c.id, "name": c.name, "email": c.email or "", "phone_number": c.phone_number or ""} for c in contacts]
+
 @app.post("/api/contacts")
 def create_contact(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)

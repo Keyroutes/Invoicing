@@ -203,18 +203,107 @@ function searchInvoices() {
 }
 window.searchInvoices = searchInvoices;
 
+var searchDebounce = null;
 function handleGlobalSearch(e) {
+    clearTimeout(searchDebounce);
+    var q = e.target.value.trim().toLowerCase();
     if (e.key === 'Enter') {
-        var q = e.target.value.trim().toLowerCase();
         if (!q) return;
-        showView('invoices-view');
-        setTimeout(function() {
-            document.getElementById('invoice-search').value = q;
-            searchInvoices();
-        }, 100);
+        runGlobalSearch(q);
+        return;
     }
+    searchDebounce = setTimeout(function() {
+        if (q.length >= 2) runGlobalSearch(q);
+        else hideSearchResults();
+    }, 300);
 }
+
+function runGlobalSearch(q) {
+    var results = [];
+    allInvoices.forEach(function(inv) {
+        var text = (inv.number + ' ' + (inv.client_name || '') + ' ' + (inv.client_email || '') + ' ' + (inv.status || '')).toLowerCase();
+        if (text.includes(q)) results.push({ type: 'invoice', label: inv.number + ' — ' + (inv.client_name || 'No client'), status: inv.status, view: 'invoices-view' });
+    });
+    if (typeof allContacts !== 'undefined') {
+        allContacts.forEach(function(c) {
+            var text = ((c.name || '') + ' ' + (c.email || '') + ' ' + (c.phone || '')).toLowerCase();
+            if (text.includes(q)) results.push({ type: 'contact', label: (c.name || c.email || 'Unknown'), sub: c.email || '', view: 'contacts-view' });
+        });
+    }
+    if (typeof allEmployees !== 'undefined') {
+        allEmployees.forEach(function(emp) {
+            var text = ((emp.first_name || '') + ' ' + (emp.last_name || '') + ' ' + (emp.email || '') + ' ' + (emp.job_title || '') + ' ' + (emp.department || '')).toLowerCase();
+            if (text.includes(q)) results.push({ type: 'employee', label: (emp.first_name + ' ' + emp.last_name).trim(), sub: emp.email || emp.job_title || '', view: 'employees-view' });
+        });
+    }
+    if (typeof allPayslips !== 'undefined') {
+        allPayslips.forEach(function(ps) {
+            var text = ((ps.employee_name || '') + ' ' + (ps.period || '') + ' ' + (ps.status || '')).toLowerCase();
+            if (text.includes(q)) results.push({ type: 'payslip', label: (ps.employee_name || 'Unknown') + ' — ' + (ps.period || ''), sub: ps.status || '', view: 'payroll-view' });
+        });
+    }
+    showSearchResults(results, q);
+}
+
+function showSearchResults(results, q) {
+    hideSearchResults();
+    var bar = document.querySelector('.search-bar');
+    if (!bar) return;
+    var dropdown = document.createElement('div');
+    dropdown.id = 'search-results-dropdown';
+    dropdown.style.cssText = 'position:absolute;top:100%;left:0;right:0;margin-top:4px;background:rgba(17,24,39,0.98);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);border-radius:12px;max-height:400px;overflow-y:auto;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+    if (results.length === 0) {
+        dropdown.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:0.85rem;">No results for "' + esc(q) + '"</div>';
+    } else {
+        var types = { invoice: 'Invoices', contact: 'Contacts', employee: 'People', payslip: 'Payroll' };
+        var icons = { invoice: '&#128196;', contact: '&#128100;', employee: '&#128101;', payslip: '&#128176;' };
+        var grouped = {};
+        results.forEach(function(r) {
+            if (!grouped[r.type]) grouped[r.type] = [];
+            grouped[r.type].push(r);
+        });
+        var html = '';
+        for (var type in grouped) {
+            html += '<div style="padding:8px 14px 4px;font-size:0.72rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">' + (types[type] || type) + '</div>';
+            grouped[type].slice(0, 5).forEach(function(r) {
+                var highlight = esc(r.label).replace(new RegExp('(' + esc(q) + ')', 'gi'), '<strong style="color:var(--primary-color);">$1</strong>');
+                html += '<div class="search-result-item" onclick="handleSearchResultClick(\'' + r.view + '\')" style="padding:8px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background 0.15s;">' +
+                    '<span style="font-size:1rem;">' + (icons[r.type] || '&#128269;') + '</span>' +
+                    '<div style="min-width:0;">' +
+                        '<div style="font-size:0.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + highlight + '</div>' +
+                        (r.sub ? '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.sub) + '</div>' : '') +
+                    '</div>' +
+                    (r.status ? '<span style="margin-left:auto;font-size:0.7rem;padding:2px 6px;border-radius:8px;background:rgba(255,255,255,0.08);color:var(--text-secondary);">' + esc(r.status) + '</span>' : '') +
+                '</div>';
+            });
+        }
+        dropdown.innerHTML = html;
+    }
+    bar.style.position = 'relative';
+    bar.appendChild(dropdown);
+    var items = dropdown.querySelectorAll('.search-result-item');
+    items.forEach(function(item) {
+        item.addEventListener('mouseenter', function() { item.style.background = 'rgba(255,255,255,0.08)'; });
+        item.addEventListener('mouseleave', function() { item.style.background = 'transparent'; });
+    });
+}
+
+function hideSearchResults() {
+    var existing = document.getElementById('search-results-dropdown');
+    if (existing) existing.remove();
+}
+
+function handleSearchResultClick(view) {
+    hideSearchResults();
+    document.getElementById('global-search').value = '';
+    showView(view);
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.search-bar')) hideSearchResults();
+});
 window.handleGlobalSearch = handleGlobalSearch;
+window.handleSearchResultClick = handleSearchResultClick;
 
 async function fetchNextInvoiceNumber() {
     try {
@@ -1076,12 +1165,27 @@ function setupContactAutocomplete() {
 // HR MODULE
 // ============================================================
 
+var allContacts = [];
+var allContacts = [];
 var allEmployees = [];
 var allPayslips = [];
 var currentEmpFilter = '';
 var currentPsFilter = '';
 var currentEmployeeId = null;
 var currentPayslipId = null;
+
+async function preloadSearchData() {
+    try {
+        var [cRes, empRes, psRes] = await Promise.all([
+            fetch('/api/contacts').then(function(r) { return r.ok ? r.json() : []; }).catch(function() { return []; }),
+            fetch('/api/employees').then(function(r) { return r.ok ? r.json() : []; }).catch(function() { return []; }),
+            fetch('/api/payslips').then(function(r) { return r.ok ? r.json() : []; }).catch(function() { return []; })
+        ]);
+        allContacts = cRes || [];
+        allEmployees = empRes || [];
+        allPayslips = psRes || [];
+    } catch (e) {}
+}
 
 // --- HR Stats ---
 async function loadHRStats() {
@@ -2179,6 +2283,7 @@ document.addEventListener('DOMContentLoaded', function() {
     checkAuthStatus();
     fetchDashboardData();
     fetchInvoices();
+    preloadSearchData();
     loadSavedLogo();
     setupLogoUpload();
     if (document.querySelectorAll('.line-item-row').length === 0 && document.getElementById('line-items-body')) {
