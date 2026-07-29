@@ -904,15 +904,17 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
         rows = ""
         for li in inv.line_items:
             amount = li.qty * li.price
-            if li.disc and li.disc > 0:
-                amount *= (1 - li.disc / 100)
+            disc_val = li.disc or 0
+            if disc_val > 0:
+                amount *= (1 - disc_val / 100)
             rows += f'''
                 <tr>
                     <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;font-weight:600;">{li.name or '-'}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#64748b;">{li.description or ''}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#64748b;max-width:200px;word-wrap:break-word;">{li.description or ''}</td>
                     <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">{int(li.qty)}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">${li.price:.2f}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;font-weight:600;">${amount:.2f}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">&pound;{li.price:.2f}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">{disc_val:g}%</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;font-weight:600;">&pound;{amount:.2f}</td>
                 </tr>'''
 
         line_items_html = f'''
@@ -923,6 +925,7 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
                         <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th>
                         <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Qty</th>
                         <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Price</th>
+                        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Disc</th>
                         <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th>
                     </tr>
                 </thead>
@@ -941,9 +944,9 @@ Line Items:
 """
     for li in inv.line_items:
         item_label = f"{li.name} - {li.description}" if li.name else li.description
-        body += f"  - {item_label} x{int(li.qty)} @ ${li.price:.2f}\n"
+        body += f"  - {item_label} x{int(li.qty)} @ \u00a3{li.price:.2f}\n"
     body += f"""
-Total Amount Due: ${inv.due:.2f}
+Total Amount Due: \u00a3{inv.due:.2f}
 
 Payment is due by {inv.due_date}. If you have any questions about this invoice, please reply to this email.
 
@@ -969,7 +972,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
               <h1 style="font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 8px 0;">INVOICE</h1>
               <p style="font-size: 16px; color: #94a3b8; margin: 0; font-weight: 600;">{inv.number}</p>
               <div style="margin-top: 16px; display: inline-block; background-color: #0ea5e9; padding: 8px 20px; border-radius: 20px;">
-                <span style="font-size: 14px; color: #ffffff; font-weight: 600;">Amount Due: ${inv.due:.2f}</span>
+                <span style="font-size: 14px; color: #ffffff; font-weight: 600;">Amount Due: &pound;{inv.due:.2f}</span>
               </div>
             </div>
 
@@ -1020,7 +1023,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
                 <tr>
                   <td style="background-color: #0f172a; border-radius: 12px; padding: 24px; text-align: right;">
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 4px;">TOTAL AMOUNT</div>
-                    <div style="font-size: 32px; font-weight: 800; color: #ffffff;">${inv.due:.2f}</div>
+                    <div style="font-size: 32px; font-weight: 800; color: #ffffff;">&pound;{inv.due:.2f}</div>
                   </td>
                 </tr>
               </table>
@@ -1090,7 +1093,7 @@ def send_invoice_whatsapp(number: str, background_tasks: BackgroundTasks, reques
     if not inv.phone_number:
         raise HTTPException(status_code=400, detail="Invoice has no phone number")
 
-    message = f"Hello {inv.to_contact},\n\nPlease find the details of your invoice {inv.number} below:\n\nTotal Due: ${inv.due:.2f}\nDue Date: {inv.due_date}\n\nThank you for your business!"
+    message = f"Hello {inv.to_contact},\n\nPlease find the details of your invoice {inv.number} below:\n\nTotal Due: \u00a3{inv.due:.2f}\nDue Date: {inv.due_date}\n\nThank you for your business!"
     background_tasks.add_task(send_whatsapp_background, inv.phone_number, message)
 
     if inv.status == "Draft":
@@ -2109,10 +2112,10 @@ def send_payslip_email(ps_id: int, request: Request, background_tasks: Backgroun
 Please find your payslip {ps.number} for the period {ps.period_start} to {ps.period_end}.
 
 Pay Date: {ps.pay_date}
-Gross Pay: ${ps.gross_pay:.2f}
-Tax: ${ps.tax_amount:.2f}
-Total Deductions: ${ps.total_deductions:.2f}
-Net Pay: ${ps.net_pay:.2f}
+Gross Pay: \u00a3{ps.gross_pay:.2f}
+Tax: \u00a3{ps.tax_amount:.2f}
+Total Deductions: \u00a3{ps.total_deductions:.2f}
+Net Pay: \u00a3{ps.net_pay:.2f}
 
 Best regards,
 {company_name}
@@ -2129,7 +2132,7 @@ Best regards,
 <h1 style="font-size:32px;font-weight:800;color:#fff;margin:0 0 8px 0;">PAYSLIP</h1>
 <p style="font-size:16px;color:#94a3b8;margin:0;">{ps.number}</p>
 <div style="margin-top:16px;display:inline-block;background-color:#0ea5e9;padding:8px 20px;border-radius:20px;">
-<span style="font-size:14px;color:#fff;font-weight:600;">Net Pay: ${ps.net_pay:.2f}</span>
+<span style="font-size:14px;color:#fff;font-weight:600;">Net Pay: &pound;{ps.net_pay:.2f}</span>
 </div>
 </div>
 <div style="background-color:#f8fafc;padding:16px 40px;border-bottom:1px solid #e2e8f0;">
@@ -2158,20 +2161,20 @@ Best regards,
 </table>
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
 <tr style="background-color:#f8fafc;"><th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th><th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.basic_salary:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.overtime_pay:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.bonus:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">${ps.allowances:.2f}</td></tr>
-<tr style="font-weight:700;background-color:#f0fdf4;"><td style="padding:12px 16px;font-size:14px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;font-size:14px;">${ps.gross_pay:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.tax_amount:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.insurance:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.retirement:.2f}</td></tr>
-<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-${ps.other_deductions:.2f}</td></tr>
-<tr style="font-weight:700;background-color:#fef2f2;"><td style="padding:12px 16px;font-size:14px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;font-size:14px;">-${ps.total_deductions:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Basic Salary</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">&pound;{ps.basic_salary:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Overtime Pay</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">&pound;{ps.overtime_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Bonus</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">&pound;{ps.bonus:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;">Allowances</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:600;font-size:14px;">&pound;{ps.allowances:.2f}</td></tr>
+<tr style="font-weight:700;background-color:#f0fdf4;"><td style="padding:12px 16px;font-size:14px;">Gross Pay</td><td style="padding:12px 16px;text-align:right;color:#16a34a;font-size:14px;">&pound;{ps.gross_pay:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Tax</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-&pound;{ps.tax_amount:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Insurance</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-&pound;{ps.insurance:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Retirement</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-&pound;{ps.retirement:.2f}</td></tr>
+<tr><td style="padding:10px 16px;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">Other Deductions</td><td style="padding:10px 16px;text-align:right;border-bottom:1px solid #f1f5f9;color:#dc2626;font-size:14px;">-&pound;{ps.other_deductions:.2f}</td></tr>
+<tr style="font-weight:700;background-color:#fef2f2;"><td style="padding:12px 16px;font-size:14px;">Total Deductions</td><td style="padding:12px 16px;text-align:right;color:#dc2626;font-size:14px;">-&pound;{ps.total_deductions:.2f}</td></tr>
 </table>
 <div style="background-color:#0f172a;border-radius:12px;padding:24px;text-align:right;">
 <div style="font-size:13px;color:#94a3b8;margin-bottom:4px;">NET PAY</div>
-<div style="font-size:32px;font-weight:800;color:#10b981;">${ps.net_pay:.2f}</div>
+<div style="font-size:32px;font-weight:800;color:#10b981;">&pound;{ps.net_pay:.2f}</div>
 </div>
 </div>
 <div style="padding:24px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
