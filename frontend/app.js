@@ -601,11 +601,23 @@ function generateInvoicePDF() {
         var disc = (cells[4].textContent || '0').replace('%', '').trim();
         var amount = cells[6].textContent;
 
-        var descWidth = colQty - colDesc - 20;
+        var descMaxW = colQty - colDesc - 20;
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
         var nameLines = doc.splitTextToSize(name || '-', 85);
-        var descLines = doc.splitTextToSize(desc || '-', descWidth);
+        var rawDescLines = doc.splitTextToSize(desc || '-', descMaxW);
+        var descLines = [];
+        rawDescLines.forEach(function(line) {
+            if (doc.getTextWidth(line) > descMaxW) {
+                var truncated = line;
+                while (truncated.length > 0 && doc.getTextWidth(truncated + '...') > descMaxW) {
+                    truncated = truncated.slice(0, -1);
+                }
+                descLines.push(truncated + '...');
+            } else {
+                descLines.push(line);
+            }
+        });
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(20, maxLines * 12 + 8);
 
