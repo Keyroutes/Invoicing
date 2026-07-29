@@ -34,27 +34,6 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-app = FastAPI(title="aniprotech Invoicing", version="2.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Initialize database on startup (non-blocking for health checks)
-@app.on_event("startup")
-async def startup_event():
-    try:
-        models.Base.metadata.create_all(bind=engine)
-        ensure_columns()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        # Don't crash - let health checks pass, endpoints will handle DB errors
-
 def hash_password(password: str) -> str:
     salt = hashlib.sha256(os.urandom(32)).hexdigest().encode()
     pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
@@ -94,20 +73,34 @@ if not SECRET_KEY or SECRET_KEY == "generate_a_random_secret_string":
     SECRET_KEY = generate_secret_key()
     logger.warning("Generated new SECRET_KEY - set it in .env for persistence")
 
-with SessionLocal() as db:
-    existing_admin = db.query(models.DBAdminUser).first()
-    if not existing_admin:
-        admin_pwd = os.getenv("ADMIN_PASSWORD", "admin")
-        hashed = hash_password(admin_pwd)
-        db.add(models.DBAdminUser(username="admin", password=hashed))
-        db.commit()
-        logger.info("Created default admin user (username=admin)")
-    elif existing_admin.password and ':' not in existing_admin.password:
-        existing_admin.password = hash_password(existing_admin.password)
-        db.commit()
-        logger.info("Upgraded admin password to hashed format")
+def ensure_admin_user():
+    try:
+        with SessionLocal() as db:
+            existing_admin = db.query(models.DBAdminUser).first()
+            if not existing_admin:
+                admin_pwd = os.getenv("ADMIN_PASSWORD", "admin")
+                hashed = hash_password(admin_pwd)
+                db.add(models.DBAdminUser(username="admin", password=hashed))
+                db.commit()
+                logger.info("Created default admin user (username=admin)")
+            elif existing_admin.password and ':' not in existing_admin.password:
+                existing_admin.password = hash_password(existing_admin.password)
+                db.commit()
+                logger.info("Upgraded admin password to hashed format")
+    except Exception as e:
+        logger.error(f"Admin user init failed: {e}")
 
 app = FastAPI(title="Accounting Platform API")
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        models.Base.metadata.create_all(bind=engine)
+        ensure_columns()
+        ensure_admin_user()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
 
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: Request) -> bool:
@@ -603,7 +596,7 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
         pdf_part.add_header('Content-Disposition', 'attachment', filename=pdf_filename)
         msg.attach(pdf_part)
 
-return msg.as_string()
+    return msg.as_string()
 
 
 def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf", logo_data: str = ""):
