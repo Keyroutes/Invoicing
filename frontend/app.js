@@ -91,8 +91,8 @@ async function checkAuthStatus() {
             if (userInfo) {
                 userInfo.style.display = 'flex';
                 var name = data.user.name || data.user.email;
-                document.getElementById('user-name-display').textContent = name;
-                document.getElementById('user-avatar').textContent = name[0].toUpperCase();
+                var avatar = document.getElementById('user-avatar');
+                if (avatar) { avatar.textContent = name[0].toUpperCase(); avatar.title = name; }
             }
         } else {
             if (loginBtn) loginBtn.style.display = 'inline-block';

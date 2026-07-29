@@ -87,7 +87,7 @@ a { color: inherit; text-decoration: none; }
 .topbar-left { display: flex; align-items: center; gap: 24px; min-width: 0; flex-shrink: 0; }
 .logo { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.5px; white-space: nowrap; }
 .text-primary { color: var(--primary-light); }
-.topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
+.topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
 
 /* Hamburger */
 .hamburger {
@@ -110,16 +110,16 @@ a { color: inherit; text-decoration: none; }
 /* Search */
 .search-bar { position: relative; flex-shrink: 0; }
 .search-icon {
-    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
     color: var(--text-secondary); display: flex; pointer-events: none;
 }
 .search-bar input {
-    width: 180px; padding: 7px 14px 7px 36px; border: 1px solid rgba(255,255,255,0.15);
+    width: 40px; padding: 7px 10px 7px 34px; border: 1px solid rgba(255,255,255,0.15);
     border-radius: 20px; font-size: 0.82rem; font-family: inherit;
     background-color: rgba(255,255,255,0.08); color: white; transition: all 0.3s;
 }
 .search-bar input::placeholder { color: rgba(255,255,255,0.5); }
-.search-bar input:focus { outline: none; background-color: rgba(255,255,255,0.15); border-color: var(--primary-color); width: 240px; }
+.search-bar input:focus { outline: none; background-color: rgba(255,255,255,0.15); border-color: var(--primary-color); width: 200px; padding-right: 14px; }
 
 /* User */
 .user-profile { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: var(--radius-md); flex-shrink: 0; }
@@ -338,11 +338,10 @@ input[type="number"] {
 }
 
 @media (max-width: 480px) {
-    .topbar-right { gap: 8px; }
-    .user-name { display: none; }
+    .topbar-right { gap: 6px; }
     .btn { padding: 6px 12px; font-size: 0.82rem; }
-    .search-bar input { width: 120px; }
-    .search-bar input:focus { width: 160px; }
+    .search-bar input { width: 32px; }
+    .search-bar input:focus { width: 140px; }
 }
 
 /* ===== PRINT ===== */
