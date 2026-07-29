@@ -564,15 +564,17 @@ function generateInvoicePDF() {
 
     // ===== LINE ITEMS TABLE =====
     // Page: w=612, h=792, ml=50, mr=562, usable=512
-    // Columns: Item(82) Desc(188) Qty(40) Price(60) Disc(48) Amount(80) + gaps=22
+    // Right-aligned cols: Qty(396) Price(460) Disc(498) Amount(556)
+    // Gaps: Qty↔Price=10pt, Price↔Disc=10pt, Disc↔Amount=6pt
     var COL = {
-        itemL: ml,       itemR: ml + 82,
-        descL: ml + 88,  descR: ml + 276,
-        qtyR:  mr - 148,
-        priceR: mr - 92,
-        discR: mr - 44,
-        amountR: mr
+        itemL: ml,        itemR: ml + 80,
+        descL: ml + 86,
+        qtyR:  mr - 160,  // text right at 396
+        priceR: mr - 96,  // text right at 460
+        discR: mr - 64,   // text right at 498
+        amountR: mr       // text right at 556 (mr-6)
     };
+    var descMaxW = COL.qtyR - 12 - COL.descL; // ~254pt
 
     function clipText(text, maxW) {
         var t = text || '-';
@@ -591,7 +593,7 @@ function generateInvoicePDF() {
         doc.text('Qty', COL.qtyR, yPos + 13, { align: 'right' });
         doc.text('Unit Price', COL.priceR, yPos + 13, { align: 'right' });
         doc.text('Disc', COL.discR, yPos + 13, { align: 'right' });
-        doc.text('Amount GBP', COL.amountR - 4, yPos + 13, { align: 'right' });
+        doc.text('Amount', COL.amountR - 6, yPos + 13, { align: 'right' });
         return yPos + 24;
     }
 
@@ -623,23 +625,18 @@ function generateInvoicePDF() {
     var rowIdx = 0;
     var pageNum = 1;
 
-    function reservedHeight() {
-        return 24 + 16 + 16 + 6 + 14 + 14 + 24 + 38 + 24 + 14 + 36 + 80 + 30;
-    }
-
-    var descMaxW = COL.descR - COL.descL - 8;
+    var nameMaxW = COL.itemR - COL.itemL - 8;
 
     rows.forEach(function(row) {
         doc.setFontSize(9.5);
         doc.setFont('helvetica', 'normal');
 
-        var nameMaxW = COL.itemR - COL.itemL - 8;
         var nameLines = doc.splitTextToSize(row.name || '-', nameMaxW);
         var descLines = doc.splitTextToSize(row.desc || '-', descMaxW);
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(22, maxLines * 12 + 10);
 
-        if (y + rowH + reservedHeight() > pageBottom) {
+        if (y + rowH > pageBottom) {
             drawPageNum(doc);
             doc.addPage();
             pageNum++;
@@ -670,7 +667,7 @@ function generateInvoicePDF() {
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(row.amount, COL.amountR - 4, y + 14, { align: 'right' });
+        doc.text(row.amount, COL.amountR - 6, y + 14, { align: 'right' });
 
         y += rowH;
         rowIdx++;
@@ -683,6 +680,16 @@ function generateInvoicePDF() {
         doc.setTextColor(148, 163, 184);
         doc.text('No line items', COL.descL + 4, y + 14);
         y += 22;
+    }
+
+    // ===== TOTALS + PAYMENT ADVICE - check if they fit on current page =====
+    // Approx height needed: line(2) + subtotal(16) + vat(16) + spacer(6) + divider(14) + total(24) + duebox(38) + paylink(24) + scissors(14) + advicehdr(36) + advicebody(140) + footer(20) = ~350
+    var totalsNeeded = 360;
+    if (y + totalsNeeded > pageBottom) {
+        drawPageNum(doc);
+        doc.addPage();
+        pageNum++;
+        y = 40;
     }
 
     drawPageNum(doc);
