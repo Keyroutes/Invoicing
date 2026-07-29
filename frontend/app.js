@@ -458,8 +458,8 @@ function generateInvoicePDF() {
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({ unit: 'pt', format: 'letter' });
     var w = 612, h = 792;
-    var margin = 48;
-    var y = 0;
+    var margin = 50;
+    var y = 40;
 
     var number = document.getElementById('view-inv-number-val').textContent || 'Invoice';
     var contact = document.getElementById('view-inv-contact').textContent || '';
@@ -483,121 +483,101 @@ function generateInvoicePDF() {
     var compPhone = companyPhone ? companyPhone.textContent.replace('Phone: ', '') : '';
     var compAbn = companyAbn ? companyAbn.textContent.replace('ABN: ', '') : '';
 
-    // === HEADER BAR ===
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, w, 90, 'F');
-    doc.setFillColor(99, 102, 241);
-    doc.rect(0, 86, w, 4, 'F');
-
+    // --- LOGO (top right) ---
     if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', margin, 22, 110, 36); } catch(e) {}
+        try { doc.addImage(savedLogo, 'PNG', w - margin - 100, y - 5, 100, 40); } catch(e) {}
     }
 
+    // --- TAX INVOICE title ---
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(30);
-    doc.setTextColor(255, 255, 255);
-    doc.text('INVOICE', w - margin, 38, { align: 'right' });
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
-    doc.text(number, w - margin, 56, { align: 'right' });
+    doc.setFontSize(24);
+    doc.setTextColor(30, 41, 59);
+    doc.text('TAX INVOICE', margin, y + 20);
+    y += 40;
 
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    if (company) doc.text(company, w - margin, 72, { align: 'right' });
-    y = 108;
-
-    // === FROM / BILL TO ===
-    var leftX = margin;
-    var rightX = w / 2 + 20;
-    var labelColor = [148, 163, 184];
-    var valueColor = [30, 41, 59];
-    var subColor = [100, 116, 139];
-
-    // From section
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-    doc.text('FROM', leftX, y);
-    y += 14;
+    // --- Company info (right side) ---
     if (company) {
-        doc.setFontSize(12);
+        var compY = 45;
+        doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-        doc.text(company, leftX, y);
-        y += 15;
+        doc.setTextColor(30, 41, 59);
+        var compLines = [];
+        compLines.push(company);
+        if (compAddr) {
+            var addrParts = compAddr.split(',').map(function(s) { return s.trim(); });
+            addrParts.forEach(function(p) { if (p) compLines.push(p); });
+        }
+        if (compPhone) compLines.push('Tel: ' + compPhone);
+        compLines.forEach(function(line) {
+            doc.text(line.substring(0, 40), w - margin, compY, { align: 'right' });
+            compY += 13;
+        });
     }
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
-    if (compAddr) { doc.text(compAddr.substring(0, 45), leftX, y); y += 13; }
-    if (compEmail) { doc.text(compEmail, leftX, y); y += 13; }
-    if (compPhone) { doc.text(compPhone, leftX, y); y += 13; }
-    if (compAbn) { doc.text('ABN: ' + compAbn, leftX, y); y += 13; }
 
-    // Bill To section (right side)
-    var btY = 108;
-    doc.setFontSize(8);
+    // --- Customer info (left side) ---
+    y += 10;
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-    doc.text('BILL TO', rightX, btY);
-    btY += 14;
+    doc.setTextColor(30, 41, 59);
     if (contact) {
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-        doc.text(contact, rightX, btY);
-        btY += 15;
+        var custLines = contact.split(',').map(function(s) { return s.trim(); });
+        custLines.forEach(function(line) {
+            doc.text(line.substring(0, 50), margin, y);
+            y += 14;
+        });
     }
-    doc.setFontSize(9);
+    if (email && email !== 'No email') {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(100, 116, 139);
+        doc.text(email, margin, y);
+        y += 13;
+    }
+
+    // --- Invoice Date / Invoice Number (center-right) ---
+    var infoY = 110;
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
-    if (email && email !== 'No email') { doc.text(email, rightX, btY); btY += 13; }
-    if (phone && phone !== 'No phone') { doc.text(phone, rightX, btY); btY += 13; }
-
-    y = Math.max(y, btY) + 16;
-
-    // === INVOICE DETAILS BOX ===
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(margin, y, w - margin * 2, 52, 6, 6, 'F');
-    var boxY = y + 8;
-    var colW = (w - margin * 2) / 3;
-
-    doc.setFontSize(7);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Invoice Date', w / 2, infoY);
+    doc.text('Invoice Number', w / 2, infoY + 18);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-    doc.text('ISSUE DATE', margin + 16, boxY);
-    doc.text('DUE DATE', margin + 16 + colW, boxY);
-    doc.text('INVOICE #', margin + 16 + colW * 2, boxY);
+    doc.setTextColor(30, 41, 59);
+    doc.text(issueDate || '-', w / 2 + 80, infoY);
+    doc.text(number, w / 2 + 80, infoY + 18);
 
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-    doc.text(issueDate || '-', margin + 16, boxY + 16);
-    doc.text(dueDate || '-', margin + 16 + colW, boxY + 16);
-    doc.text(number, margin + 16 + colW * 2, boxY + 16);
+    y = Math.max(y, infoY + 40) + 10;
 
-    y += 68;
+    // --- Divider ---
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, w - margin, y);
+    y += 20;
 
     // === LINE ITEMS TABLE ===
-    // Header
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
-    y += 16;
-    doc.setFontSize(7);
+    var colDesc = margin;
+    var colQty = margin + 310;
+    var colPrice = margin + 370;
+    var colAmount = w - margin;
+
+    doc.setFillColor(245, 247, 250);
+    doc.rect(margin, y - 4, w - margin * 2, 20, 'F');
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(200, 200, 220);
-    doc.text('DESCRIPTION', margin + 10, y);
-    doc.text('QTY', margin + 290, y, { align: 'right' });
-    doc.text('PRICE', margin + 340, y, { align: 'right' });
-    doc.text('DISC', margin + 390, y, { align: 'right' });
-    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
-    y += 12;
+    doc.setTextColor(100, 116, 139);
+    doc.text('Description', colDesc + 4, y + 8);
+    doc.text('Quantity', colQty, y + 8, { align: 'right' });
+    doc.text('Unit Price', colPrice, y + 8, { align: 'right' });
+    doc.text('Amount GBP', colAmount, y + 8, { align: 'right' });
+    y += 22;
+
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.3);
+    doc.line(margin, y, w - margin, y);
+    y += 6;
 
     // Line items
     var rowIdx = 0;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
     document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
         var cells = tr.querySelectorAll('td');
         if (cells.length < 7) return;
@@ -605,96 +585,159 @@ function generateInvoicePDF() {
         var desc = cells[1].textContent;
         var qty = cells[2].textContent;
         var price = cells[3].textContent;
-        var disc = cells[4].textContent;
         var amount = cells[6].textContent;
 
-        var rowH = 22;
-        if (rowIdx % 2 === 0) {
-            doc.setFillColor(248, 250, 252);
-            doc.rect(margin, y - 9, w - margin * 2, rowH, 'F');
-        }
+        var itemLabel = name ? (desc ? name + ' - ' + desc.substring(0, 35) : name) : desc.substring(0, 45);
 
-        var itemLabel = name ? name + (desc ? ' — ' + desc.substring(0, 30) : '') : desc.substring(0, 40);
-        doc.setTextColor(51, 51, 51);
-        doc.text(itemLabel.substring(0, 42), margin + 10, y);
-        doc.setTextColor(100, 116, 139);
-        doc.text(qty, margin + 290, y, { align: 'right' });
-        doc.text(price, margin + 340, y, { align: 'right' });
-        doc.text(disc, margin + 390, y, { align: 'right' });
-        doc.setTextColor(15, 23, 42);
-        doc.setFont('helvetica', 'bold');
-        doc.text(amount, w - margin - 10, y, { align: 'right' });
+        doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        y += rowH;
+        doc.setTextColor(30, 41, 59);
+        doc.text(itemLabel.substring(0, 48), colDesc + 4, y);
+        doc.setTextColor(100, 116, 139);
+        doc.text(qty, colQty, y, { align: 'right' });
+        doc.text(price, colPrice, y, { align: 'right' });
+        doc.setTextColor(30, 41, 59);
+        doc.setFont('helvetica', 'bold');
+        doc.text(amount, colAmount, y, { align: 'right' });
+        doc.setFont('helvetica', 'normal');
+        y += 14;
+
+        doc.setDrawColor(230, 235, 240);
+        doc.setLineWidth(0.2);
+        doc.line(margin + 4, y - 4, w - margin - 4, y - 4);
         rowIdx++;
     });
 
     if (rowIdx === 0) {
+        doc.setFontSize(10);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', margin + 10, y);
-        y += 22;
+        doc.text('No line items', margin + 4, y);
+        y += 16;
     }
 
-    // Bottom border of table
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
-    doc.line(margin, y, w - margin, y);
-    y += 20;
+    y += 8;
 
-    // === TOTALS ===
-    var totalsX = w - margin - 190;
-    var totalsValX = w - margin - 10;
+    // --- TOTALS (right-aligned) ---
+    var totalsX = w - margin - 160;
+    var totalsValX = w - margin;
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
+    doc.setTextColor(100, 116, 139);
     doc.text('Subtotal', totalsX, y);
-    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.setTextColor(30, 41, 59);
     doc.text(subtotal, totalsValX, y, { align: 'right' });
     y += 18;
 
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
-    doc.text('Tax', totalsX, y);
-    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
+    doc.setTextColor(100, 116, 139);
+    doc.text('TOTAL NO VAT', totalsX, y);
+    doc.setTextColor(30, 41, 59);
     doc.text(vat, totalsValX, y, { align: 'right' });
-    y += 8;
+    y += 6;
 
-    doc.setDrawColor(226, 232, 240);
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.5);
     doc.line(totalsX, y, totalsValX, y);
-    y += 16;
+    y += 14;
 
-    // Total Due box
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(totalsX - 8, y - 8, (w - margin - 10) - totalsX + 18, 32, 6, 6, 'F');
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.text('TOTAL DUE', totalsX, y + 8);
-    doc.setTextColor(99, 102, 241);
-    doc.setFontSize(16);
-    doc.text(total, totalsValX + 4, y + 10, { align: 'right' });
-    y += 40;
+    doc.setTextColor(30, 41, 59);
+    doc.text('TOTAL GBP', totalsX, y);
+    doc.text(total, totalsValX, y, { align: 'right' });
+    y += 28;
 
-    // === FOOTER ===
-    var footerY = h - 50;
-    doc.setDrawColor(226, 232, 240);
+    // --- Due Date ---
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('Due Date: ' + dueDate, margin, y);
+    y += 18;
+
+    // --- View and pay online ---
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(14, 165, 233);
+    var payLink = 'View and pay online now';
+    doc.text(payLink, margin, y);
+    var linkW = doc.getTextWidth(payLink);
+    doc.link(margin, y - 10, linkW, 14, { url: window.location.origin + '/login.html' });
+    y += 30;
+
+    // ==========================================
+    // PAYMENT ADVICE SLIP (dashed cut line)
+    // ==========================================
+    var stubY = y + 10;
+
+    // Scissor + dashed line
+    doc.setFontSize(14);
+    doc.setTextColor(100, 116, 139);
+    doc.text('\u2702', margin - 4, stubY + 4);
+    doc.setDrawColor(150, 160, 170);
     doc.setLineWidth(0.5);
-    doc.line(margin, footerY, w - margin, footerY);
-    footerY += 16;
+    doc.setLineDashPattern([4, 3], 0);
+    doc.line(margin + 16, stubY, w - margin, stubY);
+    doc.setLineDashPattern([], 0);
+    stubY += 16;
+
+    // PAYMENT ADVICE title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(30, 41, 59);
+    doc.text('PAYMENT ADVICE', margin, stubY + 6);
+    stubY += 28;
+
+    // Left side: Company info
+    var stubLeft = margin + 10;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
-    doc.text('Thank you for your business!', w / 2, footerY, { align: 'center' });
-    footerY += 14;
-    doc.setFontSize(8);
-    doc.setTextColor(203, 213, 225);
-    if (compAddr) doc.text(compAddr, w / 2, footerY, { align: 'center' });
-    footerY += 12;
-    if (compEmail) doc.text(compEmail + (compPhone ? '  •  ' + compPhone : ''), w / 2, footerY, { align: 'center' });
-    footerY += 14;
+    doc.setTextColor(100, 116, 139);
+    doc.text('To:', stubLeft, stubY);
+    stubY += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    if (company) { doc.text(company, stubLeft, stubY); stubY += 12; }
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    if (compAddr) {
+        var addrParts2 = compAddr.split(',').map(function(s) { return s.trim(); });
+        addrParts2.forEach(function(p) {
+            if (p) { doc.text(p.substring(0, 40), stubLeft, stubY); stubY += 11; }
+        });
+    }
+    if (compPhone) { doc.text('Tel: ' + compPhone, stubLeft, stubY); stubY += 11; }
+
+    // Right side: Customer, Invoice #, Amount Due, Due Date
+    var stubRight = w / 2 + 30;
+    var sry = stubY - 12 - (compAddr ? compAddr.split(',').length * 11 : 0) - (compPhone ? 11 : 0) - 12;
+
+    var stubLabels = ['Customer', 'Invoice Number', 'Amount Due', 'Due Date', 'Amount Enclosed'];
+    var stubValues = [contact.substring(0, 35), number, total, dueDate, ''];
+
+    stubLabels.forEach(function(label, i) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 41, 59);
+        doc.text(label, stubRight, sry);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        if (i === 4) {
+            doc.setDrawColor(180, 190, 200);
+            doc.setLineWidth(0.3);
+            doc.line(stubRight, sry + 4, stubRight + 160, sry + 4);
+        } else {
+            doc.text(stubValues[i], stubRight + 80, sry);
+        }
+        sry += 16;
+    });
+
+    // Company registration footer
+    stubY = Math.max(stubY, sry) + 10;
     doc.setFontSize(7);
-    doc.setTextColor(203, 213, 225);
-    doc.text('Payment is due within 14 days of issue. Please reference ' + number + ' when making payment.', w / 2, footerY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(148, 163, 184);
+    var regText = 'Company Registration No: ' + (compAbn || '13930191') + '.  Registered Office: ' + (compAddr || 'N/A');
+    doc.text(regText, margin, stubY + 6);
 
     return doc;
 }
