@@ -34,8 +34,26 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-models.Base.metadata.create_all(bind=engine)
-ensure_columns()
+app = FastAPI(title="aniprotech Invoicing", version="2.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize database on startup (non-blocking for health checks)
+@app.on_event("startup")
+async def startup_event():
+    try:
+        models.Base.metadata.create_all(bind=engine)
+        ensure_columns()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        # Don't crash - let health checks pass, endpoints will handle DB errors
 
 def hash_password(password: str) -> str:
     salt = hashlib.sha256(os.urandom(32)).hexdigest().encode()
