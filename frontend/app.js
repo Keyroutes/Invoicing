@@ -24,6 +24,7 @@ function toggleMobileMenu() {
     overlay.classList.toggle('active');
     document.body.classList.toggle('no-scroll');
 }
+window.toggleMobileMenu = toggleMobileMenu;
 
 // --- View Switcher ---
 function showView(viewId) {
@@ -1166,7 +1167,6 @@ function setupContactAutocomplete() {
 // HR MODULE
 // ============================================================
 
-var allContacts = [];
 var allContacts = [];
 var allEmployees = [];
 var allPayslips = [];
@@ -2435,6 +2435,7 @@ async function loadAttendance() {
         if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="loading">Failed to load attendance.</td></tr>';
     }
 }
+window.loadAttendance = loadAttendance;
 
 function renderAttendance(records) {
     var tbody = document.getElementById('attendance-table-body');

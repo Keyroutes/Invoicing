@@ -3,8 +3,9 @@ import secrets
 import uuid
 import smtplib
 import ssl
+import json
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
-from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse
+from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, Response
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
