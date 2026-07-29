@@ -487,25 +487,25 @@ function generateInvoicePDF() {
     doc.setFillColor(30, 41, 59);
     doc.rect(0, 0, w, 4, 'F');
 
-    // ===== LOGO (top right) =====
-    if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', mr - 90, y, 90, 32); } catch(e) {}
-    }
-
     // ===== TAX INVOICE title =====
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(26);
+    doc.setFontSize(28);
     doc.setTextColor(30, 41, 59);
-    doc.text('TAX INVOICE', ml, y + 18);
-    y += 44;
+    doc.text('TAX INVOICE', ml, y + 20);
+    y += 50;
 
-    // ===== Company block (right) =====
-    var compY = y - 40;
+    // ===== Logo (top right, below title) =====
+    if (savedLogo) {
+        try { doc.addImage(savedLogo, 'PNG', mr - 100, 10, 100, 36); } catch(e) {}
+    }
+
+    // ===== Company block (right, below logo) =====
+    var compY = 54;
     if (company) {
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(company, mr, compY, { align: 'right' });
+        doc.text(company.substring(0, 44), mr, compY, { align: 'right' });
         compY += 14;
     }
     doc.setFontSize(9);
@@ -520,33 +520,34 @@ function generateInvoicePDF() {
     if (compPhone) { doc.text('Tel: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
     if (compEmail) { doc.text(compEmail, mr, compY, { align: 'right' }); compY += 12; }
 
-    // ===== Customer block (left) =====
+    // ===== Customer block (left, below title) =====
+    var custY = y;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(148, 163, 184);
-    doc.text('SOLD TO', ml, y);
-    y += 12;
+    doc.text('SOLD TO', ml, custY);
+    custY += 14;
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
     if (contact) {
         contact.split(',').forEach(function(p) {
             p = p.trim();
-            if (p) { doc.text(p.substring(0, 48), ml, y); y += 14; }
+            if (p) { doc.text(p.substring(0, 48), ml, custY); custY += 14; }
         });
     }
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    if (email && email !== 'No email') { doc.text(email, ml, y); y += 12; }
-    if (phone && phone !== 'No phone') { doc.text(phone, ml, y); y += 12; }
+    if (email && email !== 'No email') { doc.text(email, ml, custY); custY += 12; }
+    if (phone && phone !== 'No phone') { doc.text(phone, ml, custY); custY += 12; }
 
-    // ===== Invoice Details (centered box) =====
-    y = Math.max(y, compY) + 16;
+    // ===== Invoice Details (below customer/company blocks) =====
+    y = Math.max(custY, compY) + 12;
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
     doc.line(ml, y, mr, y);
-    y += 12;
+    y += 14;
 
     var detW = (mr - ml) / 3;
     var detLabels = ['INVOICE DATE', 'DUE DATE', 'INVOICE NO'];
@@ -562,14 +563,14 @@ function generateInvoicePDF() {
         doc.setTextColor(30, 41, 59);
         doc.text(detValues[i], dx + 8, y + 14);
     });
-    y += 30;
+    y += 32;
     doc.line(ml, y, mr, y);
     y += 20;
 
     // ===== LINE ITEMS TABLE =====
     var colDesc = ml;
-    var colQty = ml + 310;
-    var colPrice = ml + 370;
+    var colQty = mr - 180;
+    var colPrice = mr - 110;
     var colAmount = mr;
 
     // Header row
@@ -580,7 +581,7 @@ function generateInvoicePDF() {
     doc.setTextColor(220, 225, 235);
     doc.text('Description', colDesc + 8, y + 13);
     doc.text('Qty', colQty, y + 13, { align: 'right' });
-    doc.text('Unit Price', colPrice, y + 13, { align: 'right' });
+    doc.text('Unit Price', colPrice - 4, y + 13, { align: 'right' });
     doc.text('Amount GBP', colAmount - 8, y + 13, { align: 'right' });
     y += 24;
 
@@ -611,7 +612,7 @@ function generateInvoicePDF() {
         doc.text(lines, colDesc + 8, y + 13);
         doc.setTextColor(100, 116, 139);
         doc.text(qty, colQty, y + 13, { align: 'right' });
-        doc.text(price, colPrice, y + 13, { align: 'right' });
+        doc.text(price, colPrice - 4, y + 13, { align: 'right' });
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
         doc.text(amount, colAmount - 8, y + 13, { align: 'right' });
@@ -634,7 +635,7 @@ function generateInvoicePDF() {
     y += 16;
 
     // ===== TOTALS =====
-    var totLabelX = mr - 150;
+    var totLabelX = mr - 170;
     var totValX = mr - 8;
 
     doc.setFontSize(9.5);
@@ -684,7 +685,6 @@ function generateInvoicePDF() {
     // ==========================================
     // PAYMENT ADVICE SLIP
     // ==========================================
-    // Dashed cut line with scissors
     doc.setDrawColor(160, 170, 180);
     doc.setLineWidth(0.4);
     doc.setLineDashPattern([6, 4], 0);
@@ -695,7 +695,7 @@ function generateInvoicePDF() {
     doc.text('\u2702', ml - 2, y - 3);
     y += 14;
 
-    // PAYMENT ADVICE header with subtle background
+    // PAYMENT ADVICE header
     doc.setFillColor(248, 250, 252);
     doc.roundedRect(ml, y - 4, mr - ml, 28, 4, 4, 'F');
     doc.setFont('helvetica', 'bold');
@@ -707,6 +707,7 @@ function generateInvoicePDF() {
     // Two-column layout
     var stubLeft = ml + 10;
     var stubRight = w / 2 + 20;
+    var stubRightVal = stubRight + 80;
     var slY = y;
 
     // Left: Company info
@@ -714,11 +715,11 @@ function generateInvoicePDF() {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(148, 163, 184);
     doc.text('PAY TO', stubLeft, slY);
-    slY += 12;
+    slY += 14;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
-    if (company) { doc.text(company, stubLeft, slY); slY += 12; }
+    if (company) { doc.text(company.substring(0, 38), stubLeft, slY); slY += 12; }
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
@@ -730,26 +731,33 @@ function generateInvoicePDF() {
     }
     if (compPhone) { doc.text('Tel: ' + compPhone, stubLeft, slY); slY += 11; }
 
-    // Right: Invoice details
+    // Right: Invoice details — fixed alignment
     var srY = y;
-    var srLabels = ['Customer', 'Invoice Number', 'Amount Due', 'Due Date', 'Amount Enclosed'];
-    var srValues = [contact.substring(0, 38), number, total, dueDate];
-    srLabels.forEach(function(label, i) {
+    var srPairs = [
+        ['Customer', contact.substring(0, 38)],
+        ['Invoice Number', number],
+        ['Amount Due', total],
+        ['Due Date', dueDate]
+    ];
+    srPairs.forEach(function(pair) {
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(label, stubRight, srY);
-        if (i < 4) {
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(100, 116, 139);
-            doc.text(srValues[i], stubRight + 80, srY);
-        } else {
-            doc.setDrawColor(180, 190, 200);
-            doc.setLineWidth(0.3);
-            doc.line(stubRight + 80, srY + 3, stubRight + 180, srY + 3);
-        }
+        doc.text(pair[0], stubRight, srY);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        doc.text(pair[1] || '-', stubRightVal, srY);
         srY += 16;
     });
+    // Amount Enclosed line with underline
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('Amount Enclosed', stubRight, srY);
+    doc.setDrawColor(180, 190, 200);
+    doc.setLineWidth(0.3);
+    doc.line(stubRightVal, srY + 3, stubRightVal + 100, srY + 3);
+    srY += 16;
 
     // Footer
     var footY = Math.max(slY, srY) + 16;
