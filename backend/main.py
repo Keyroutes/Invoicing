@@ -907,30 +907,29 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
             disc_val = li.disc or 0
             if disc_val > 0:
                 amount *= (1 - disc_val / 100)
+            disc_html = f'<span style="display:inline-block;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;">{disc_val:g}% off</span>' if disc_val > 0 else ''
             rows += f'''
-                <tr>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;font-weight:600;">{li.name or '-'}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#64748b;max-width:200px;word-wrap:break-word;">{li.description or ''}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">{int(li.qty)}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">&pound;{li.price:.2f}</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;">{disc_val:g}%</td>
-                    <td style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:14px;color:#333;text-align:right;font-weight:600;">&pound;{amount:.2f}</td>
-                </tr>'''
+                <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;">
+                  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                    <div style="font-size:15px;font-weight:700;color:#1e293b;">{li.name or 'Item'}</div>
+                    <div style="font-size:16px;font-weight:800;color:#0f172a;">&pound;{amount:.2f}</div>
+                  </div>
+                  {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;word-wrap:break-word;">{li.description}</div>' if li.description else ''}
+                  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+                    <span style="font-size:12px;color:#94a3b8;">Qty: <strong style="color:#475569;">{int(li.qty)}</strong></span>
+                    <span style="font-size:12px;color:#94a3b8;">Price: <strong style="color:#475569;">&pound;{li.price:.2f}</strong></span>
+                    {f'<span style="font-size:12px;color:#94a3b8;">Discount: {disc_html}</span>' if disc_val > 0 else ''}
+                  </div>
+                </div>'''
 
         line_items_html = f'''
-            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
-                <thead>
-                    <tr style="background-color:#f8fafc;">
-                        <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Item</th>
-                        <th style="padding:10px 16px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Description</th>
-                        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Qty</th>
-                        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Price</th>
-                        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Disc</th>
-                        <th style="padding:10px 16px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;border-bottom:2px solid #e2e8f0;">Amount</th>
-                    </tr>
-                </thead>
-                <tbody>{rows}</tbody>
-            </table>'''
+            <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+              <div style="background-color:#f8fafc;padding:10px 20px;border-bottom:2px solid #e2e8f0;display:flex;justify-content:space-between;">
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Item</span>
+                <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Amount</span>
+              </div>
+              {rows}
+            </div>'''
 
     body = f"""Hello {inv.to_contact},
 
@@ -944,7 +943,8 @@ Line Items:
 """
     for li in inv.line_items:
         item_label = f"{li.name} - {li.description}" if li.name else li.description
-        body += f"  - {item_label} x{int(li.qty)} @ \u00a3{li.price:.2f}\n"
+        disc_text = f" (Disc: {li.disc}%)" if li.disc else ""
+        body += f"  - {item_label} x{int(li.qty)} @ \u00a3{li.price:.2f}{disc_text}\n"
     body += f"""
 Total Amount Due: \u00a3{inv.due:.2f}
 
