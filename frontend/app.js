@@ -1848,7 +1848,6 @@ function renderDepartments(depts) {
                 '</div>'
             );
         });
-    } catch (e) { console.error('Depts error:', e); }
 }
 
 function searchDepts() {
