@@ -606,8 +606,11 @@
                             <span class="status-pill" id="emp-detail-status">-</span>
                         </div>
                         <div class="invoices-actions">
-                            <button class="btn btn-outline" onclick="resetEmpPassword()">Reset Password</button>
-                            <button class="btn btn-outline" id="emp-offboard-btn" onclick="startOffboarding()" style="color:var(--danger-color);border-color:var(--danger-color);">Offboard</button>
+                            <button class="btn btn-primary" id="emp-edit-btn" onclick="toggleEmpEdit()">Edit</button>
+                            <button class="btn btn-outline" id="emp-save-btn" onclick="saveEmpEdit()" style="display:none;">Save</button>
+                            <button class="btn btn-outline" id="emp-cancel-edit-btn" onclick="cancelEmpEdit()" style="display:none;">Cancel</button>
+                            <button class="btn btn-outline" onclick="showResetPasswordModal()">Reset Password</button>
+                            <button class="btn btn-outline" id="emp-offboard-btn" onclick="startOffboarding()" style="color:var(--warning-color);border-color:var(--warning-color);">Offboard</button>
                             <button class="btn btn-outline" id="emp-delete-btn" onclick="deleteCurrentEmployee()" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>
                         </div>
                     </div>
@@ -619,16 +622,16 @@
                                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:0.9rem;">
                                         <div><span style="color:var(--text-secondary);">Employee ID:</span> <span id="emp-detail-eid">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Email:</span> <span id="emp-detail-email">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Phone:</span> <span id="emp-detail-phone">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Job Title:</span> <span id="emp-detail-title">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Department:</span> <span id="emp-detail-dept">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Manager:</span> <span id="emp-detail-mgr">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Type:</span> <span id="emp-detail-type">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Pay Frequency:</span> <span id="emp-detail-payfreq">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Salary:</span> <span id="emp-detail-salary">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Start Date:</span> <span id="emp-detail-start">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Tax Rate:</span> <span id="emp-detail-taxrate">-</span></div>
-                                        <div><span style="color:var(--text-secondary);">Emergency Contact:</span> <span id="emp-detail-emergency">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Phone:</span> <input type="tel" id="emp-detail-phone" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="phone"><span id="emp-detail-phone-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Job Title:</span> <input type="text" id="emp-detail-title" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="job_title"><span id="emp-detail-title-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Department:</span> <select id="emp-detail-dept" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="department_id"><option value="">None</option></select><span id="emp-detail-dept-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Manager:</span> <select id="emp-detail-mgr" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="reports_to"><option value="">None</option></select><span id="emp-detail-mgr-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Type:</span> <select id="emp-detail-type" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="employment_type"><option value="full_time">Full Time</option><option value="part_time">Part Time</option><option value="contract">Contract</option><option value="casual">Casual</option></select><span id="emp-detail-type-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Pay Frequency:</span> <select id="emp-detail-payfreq" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="pay_frequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option></select><span id="emp-detail-payfreq-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Salary:</span> <input type="number" id="emp-detail-salary" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="salary" step="0.01"><span id="emp-detail-salary-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Start Date:</span> <input type="date" id="emp-detail-start" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="start_date"><span id="emp-detail-start-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Tax Rate:</span> <input type="number" id="emp-detail-taxrate" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="tax_rate" step="0.01"><span id="emp-detail-taxrate-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Emergency Contact:</span> <input type="text" id="emp-detail-emergency" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="emergency_contact"><span id="emp-detail-emergency-ro">-</span></div>
                                     </div>
                                 </div>
                             </div>
@@ -769,6 +772,7 @@
                             <p class="subtitle">Manage payslips and employee payments</p>
                         </div>
                         <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="batchGeneratePayslips()">Batch Generate All Active</button>
                             <button class="btn btn-primary" onclick="showGeneratePayslipModalForNew()">+ Generate Payslip</button>
                         </div>
                     </div>
@@ -781,6 +785,9 @@
                     <div class="widget">
                         <div class="table-actions">
                             <span id="payslip-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
+                            <div style="display:flex;gap:8px;">
+                                <input type="text" id="payslip-search" placeholder="Search payslips..." class="search-input" onkeyup="searchPayslips()">
+                            </div>
                         </div>
                         <div class="table-responsive">
                             <table class="data-table">
@@ -824,6 +831,7 @@
                             <h1>Departments</h1>
                         </div>
                         <div class="invoices-actions">
+                            <input type="text" id="dept-search" placeholder="Search departments..." class="search-input" onkeyup="searchDepts()" style="width:200px;">
                             <button class="btn btn-primary" onclick="openDeptModal()">+ Add Department</button>
                         </div>
                     </div>
@@ -887,8 +895,9 @@
                             <div id="dept-detail-employees"></div>
                         </div>
                         <div class="modal-footer">
+                            <button class="btn btn-outline" onclick="deleteDepartment(currentDeptDetailId, document.getElementById('dept-detail-name').textContent)" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>
                             <button class="btn btn-outline" onclick="closeDeptDetail()">Close</button>
-                            <button id="dept-detail-edit-btn" class="btn btn-outline">Edit</button>
+                            <button id="dept-detail-edit-btn" class="btn btn-primary">Edit</button>
                         </div>
                     </div>
                 </div>
@@ -1293,9 +1302,10 @@
                             <button class="btn btn-outline btn-sm" onclick="showRecFormsList()">&larr; Back to Forms</button>
                             <h2 id="rec-sub-form-title" style="font-size:1.2rem;font-weight:700;"></h2>
                         </div>
-                        <div style="display:flex;gap:8px;margin-bottom:16px;">
+                        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
                             <button id="rec-view-table-btn" class="btn btn-primary btn-sm" onclick="switchRecView('table')">Table View</button>
                             <button id="rec-view-pipeline-btn" class="btn btn-outline btn-sm" onclick="switchRecView('pipeline')">Pipeline View</button>
+                            <input type="text" id="rec-sub-search" placeholder="Search candidates..." class="search-input" onkeyup="searchRecSubmissions()" style="margin-left:auto;width:200px;">
                         </div>
                         <div id="rec-table-view">
                             <div class="glass-widget">
@@ -1532,6 +1542,26 @@
                 <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
                     <button type="button" class="btn btn-outline" onclick="closeRecFormModal()">Cancel</button>
                     <button type="button" class="btn btn-primary" onclick="saveRecForm()">Save Form</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== RESET PASSWORD MODAL ========== -->
+    <div id="reset-password-modal" class="modal-overlay" style="display:none;">
+        <div class="modal" style="max-width:400px;width:95%;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:24px 24px 0;">
+                <h2 style="font-size:1.3rem;font-weight:700;">Reset Password</h2>
+                <button class="btn-icon" onclick="document.getElementById('reset-password-modal').style.display='none'" style="font-size:1.5rem;color:var(--text-secondary);">&times;</button>
+            </div>
+            <div style="padding:24px;">
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label style="font-size:0.85rem;font-weight:600;">New Password</label>
+                    <input type="password" id="reset-pass-input" class="form-control" placeholder="Enter new password" required>
+                </div>
+                <div style="display:flex;gap:12px;justify-content:flex-end;">
+                    <button class="btn btn-outline" onclick="document.getElementById('reset-password-modal').style.display='none'">Cancel</button>
+                    <button class="btn btn-primary" onclick="confirmResetPassword()">Update Password</button>
                 </div>
             </div>
         </div>

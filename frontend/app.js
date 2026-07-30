@@ -1498,16 +1498,20 @@ async function viewEmployee(empId) {
         document.getElementById('emp-detail-status').className = 'status-pill status-' + (emp.status || '').toLowerCase().replace(/\s+/g, '-');
         document.getElementById('emp-detail-eid').textContent = emp.employee_id || '-';
         document.getElementById('emp-detail-email').textContent = emp.email || '-';
-        document.getElementById('emp-detail-phone').textContent = emp.phone || '-';
-        document.getElementById('emp-detail-title').textContent = emp.job_title || '-';
-        document.getElementById('emp-detail-dept').textContent = emp.department_name || '-';
-        document.getElementById('emp-detail-mgr').textContent = emp.manager_name || '-';
-        document.getElementById('emp-detail-type').textContent = (emp.employment_type || '').replace('_', ' ');
-        document.getElementById('emp-detail-payfreq').textContent = emp.pay_frequency || '-';
-        document.getElementById('emp-detail-salary').textContent = emp.salary ? formatCurrency(emp.salary) : '-';
-        document.getElementById('emp-detail-start').textContent = emp.start_date || '-';
-        document.getElementById('emp-detail-taxrate').textContent = emp.tax_rate ? emp.tax_rate + '%' : '-';
-        document.getElementById('emp-detail-emergency').textContent = emp.emergency_contact ? emp.emergency_contact + (emp.emergency_phone ? ' (' + emp.emergency_phone + ')' : '') : '-';
+        var roMap = { 'phone': emp.phone, 'title': emp.job_title, 'dept': emp.department_name, 'mgr': emp.manager_name, 'type': (emp.employment_type || '').replace('_', ' '), 'payfreq': emp.pay_frequency || '-', 'salary': emp.salary ? formatCurrency(emp.salary) : '-', 'start': emp.start_date || '-', 'taxrate': emp.tax_rate ? emp.tax_rate + '%' : '-', 'emergency': emp.emergency_contact ? emp.emergency_contact + (emp.emergency_phone ? ' (' + emp.emergency_phone + ')' : '') : '-' };
+        Object.keys(roMap).forEach(function(k) {
+            var roEl = document.getElementById('emp-detail-' + k + '-ro');
+            if (roEl) roEl.textContent = roMap[k] || '-';
+        });
+        var inputMap = { 'phone': emp.phone || '', 'title': emp.job_title || '', 'salary': emp.salary || 0, 'start': emp.start_date || '', 'taxrate': emp.tax_rate || 0, 'emergency': emp.emergency_contact || '' };
+        Object.keys(inputMap).forEach(function(k) {
+            var inp = document.getElementById('emp-detail-' + k);
+            if (inp) inp.value = inputMap[k];
+        });
+        var typeEl = document.getElementById('emp-detail-type');
+        if (typeEl) typeEl.value = emp.employment_type || 'full_time';
+        var payfreqEl = document.getElementById('emp-detail-payfreq');
+        if (payfreqEl) payfreqEl.value = emp.pay_frequency || 'monthly';
 
         var offboardBtn = document.getElementById('emp-offboard-btn');
         if (offboardBtn) offboardBtn.style.display = (emp.status === 'active' || emp.status === 'onboarding') ? 'inline-flex' : 'none';
@@ -1664,6 +1668,117 @@ async function resetEmpPassword() {
 }
 window.resetEmpPassword = resetEmpPassword;
 
+// --- Employee Edit ---
+var _empEditOriginal = {};
+function toggleEmpEdit() {
+    var editBtn = document.getElementById('emp-edit-btn');
+    var saveBtn = document.getElementById('emp-save-btn');
+    var cancelBtn = document.getElementById('emp-cancel-edit-btn');
+    editBtn.style.display = 'none';
+    saveBtn.style.display = 'inline-flex';
+    cancelBtn.style.display = 'inline-flex';
+    _empEditOriginal = {};
+    var fields = ['phone', 'title', 'dept', 'mgr', 'type', 'payfreq', 'salary', 'start', 'taxrate', 'emergency'];
+    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
+    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
+    fields.forEach(function(f, i) {
+        var input = document.getElementById(inputIds[i]);
+        var ro = document.getElementById(roIds[i]);
+        if (input && ro) {
+            _empEditOriginal[f] = ro.textContent;
+            input.style.display = 'block';
+            ro.style.display = 'none';
+        }
+    });
+    loadEmpEditDropdowns();
+}
+window.toggleEmpEdit = toggleEmpEdit;
+
+async function loadEmpEditDropdowns() {
+    try {
+        var res = await fetch('/api/employees');
+        var emps = await res.json();
+        var deptRes = await fetch('/api/departments');
+        var depts = await deptRes.json();
+        var deptSel = document.getElementById('emp-detail-dept');
+        var mgrSel = document.getElementById('emp-detail-mgr');
+        if (deptSel) {
+            deptSel.innerHTML = '<option value="">None</option>';
+            depts.forEach(function(d) { deptSel.innerHTML += '<option value="' + d.id + '">' + esc(d.name) + '</option>'; });
+            var currentDept = document.getElementById('emp-detail-dept-ro').textContent;
+            deptSel.value = '';
+        }
+        if (mgrSel) {
+            mgrSel.innerHTML = '<option value="">None</option>';
+            emps.forEach(function(e) { mgrSel.innerHTML += '<option value="' + e.id + '">' + esc(e.first_name + ' ' + e.last_name) + '</option>'; });
+        }
+    } catch(e) {}
+}
+
+async function saveEmpEdit() {
+    if (!currentEmployeeId) return;
+    var payload = {
+        phone: document.getElementById('emp-detail-phone').value,
+        job_title: document.getElementById('emp-detail-title').value,
+        department_id: document.getElementById('emp-detail-dept').value ? parseInt(document.getElementById('emp-detail-dept').value) : null,
+        reports_to: document.getElementById('emp-detail-mgr').value ? parseInt(document.getElementById('emp-detail-mgr').value) : null,
+        employment_type: document.getElementById('emp-detail-type').value,
+        pay_frequency: document.getElementById('emp-detail-payfreq').value,
+        salary: parseFloat(document.getElementById('emp-detail-salary').value) || 0,
+        start_date: document.getElementById('emp-detail-start').value,
+        tax_rate: parseFloat(document.getElementById('emp-detail-taxrate').value) || 0,
+        emergency_contact: document.getElementById('emp-detail-emergency').value,
+    };
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) { showToast('Employee updated', 'success'); cancelEmpEdit(); viewEmployee(currentEmployeeId); }
+        else { showToast('Failed to update', 'error'); }
+    } catch(e) { showToast('Error', 'error'); }
+}
+window.saveEmpEdit = saveEmpEdit;
+
+function cancelEmpEdit() {
+    document.getElementById('emp-edit-btn').style.display = 'inline-flex';
+    document.getElementById('emp-save-btn').style.display = 'none';
+    document.getElementById('emp-cancel-edit-btn').style.display = 'none';
+    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
+    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
+    inputIds.forEach(function(id, i) {
+        var input = document.getElementById(id);
+        var ro = document.getElementById(roIds[i]);
+        if (input) input.style.display = 'none';
+        if (ro) ro.style.display = 'inline';
+    });
+}
+window.cancelEmpEdit = cancelEmpEdit;
+
+// --- Password Reset Modal ---
+function showResetPasswordModal() {
+    document.getElementById('reset-pass-input').value = '';
+    document.getElementById('reset-password-modal').style.display = 'flex';
+    document.getElementById('reset-pass-input').focus();
+}
+window.showResetPasswordModal = showResetPasswordModal;
+
+async function confirmResetPassword() {
+    if (!currentEmployeeId) return;
+    var pass = document.getElementById('reset-pass-input').value.trim();
+    if (!pass || pass.length < 4) { showToast('Password must be at least 4 characters', 'error'); return; }
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/reset-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pass })
+        });
+        var data = await res.json();
+        if (res.ok) { showToast('Password updated', 'success'); document.getElementById('reset-password-modal').style.display = 'none'; }
+        else { showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
+    } catch(e) { showToast('Error', 'error'); }
+}
+window.confirmResetPassword = confirmResetPassword;
+
 async function deleteCurrentEmployee() {
     if (!currentEmployeeId) return;
     if (!confirm('Delete this employee and all related data?')) return;
@@ -1691,41 +1806,60 @@ var editingDeptId = null;
 var selectedDeptColor = '#00f0ff';
 var selectedDeptIcon = 'building';
 
+var allDepartments = [];
 async function fetchDepartments() {
     try {
         var res = await fetch('/api/departments');
         if (!res.ok) throw new Error('Failed');
-        var depts = await res.json();
+        allDepartments = await res.json();
+        renderDepartments(allDepartments);
+    } catch (e) {
         var grid = document.getElementById('dept-cards-grid');
-        var empty = document.getElementById('dept-empty');
-        if (!grid) return;
-        grid.innerHTML = '';
-        if (depts.length === 0) {
-            if (empty) empty.style.display = 'block';
-            grid.style.display = 'none';
-            return;
-        }
-        if (empty) empty.style.display = 'none';
-        grid.style.display = 'grid';
-        depts.forEach(function(d) {
-            var iconObj = deptIcons.find(function(i) { return i.id === d.icon; }) || deptIcons[0];
-            var color = d.color || '#00f0ff';
-            grid.insertAdjacentHTML('beforeend',
-                '<div class="dept-card" onclick="openDeptDetail(' + d.id + ')" style="background:var(--surface-color);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:24px;cursor:pointer;transition:all 0.2s;border-top:3px solid ' + color + ';">' +
-                    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
-                        '<div style="width:44px;height:44px;border-radius:12px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;">' + iconObj.svg + '</div>' +
-                        '<div><div style="font-weight:600;font-size:1rem;">' + d.name + '</div>' +
-                        '<div style="font-size:0.78rem;color:var(--text-secondary);">' + (d.description || 'No description') + '</div></div>' +
-                    '</div>' +
-                    '<div style="display:flex;align-items:center;gap:8px;">' +
-                        '<div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:600;">' + (d.employee_count || 0) + '</div>' +
-                        '<div style="font-size:0.82rem;color:var(--text-secondary);">' + (d.employee_count === 1 ? 'employee' : 'employees') + '</div>' +
-                    '</div>' +
+        if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">Failed to load departments.</div>';
+    }
+}
+
+function renderDepartments(depts) {
+    var grid = document.getElementById('dept-cards-grid');
+    var empty = document.getElementById('dept-empty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (depts.length === 0) {
+        if (empty) empty.style.display = 'block';
+        grid.style.display = 'none';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    grid.style.display = 'grid';
+    depts.forEach(function(d) {
+        var iconObj = deptIcons.find(function(i) { return i.id === d.icon; }) || deptIcons[0];
+        var color = d.color || '#00f0ff';
+        grid.insertAdjacentHTML('beforeend',
+            '<div class="dept-card" onclick="openDeptDetail(' + d.id + ')" style="background:var(--surface-color);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:24px;cursor:pointer;transition:all 0.2s;border-top:3px solid ' + color + ';">' +
+                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+                    '<div style="width:44px;height:44px;border-radius:12px;background:' + color + '20;color:' + color + ';display:flex;align-items:center;justify-content:center;">' + iconObj.svg + '</div>' +
+                    '<div><div style="font-weight:600;font-size:1rem;">' + esc(d.name) + '</div>' +
+                    '<div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(d.description || 'No description') + '</div></div>' +
+                '</div>' +
+                '<div style="display:flex;align-items:center;gap:8px;">' +
+                    '<div style="width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:0.85rem;font-weight:600;">' + (d.employee_count || 0) + '</div>' +
+                    '<div style="font-size:0.82rem;color:var(--text-secondary);">' + (d.employee_count === 1 ? 'employee' : 'employees') + '</div>' +
+                '</div>' +
                 '</div>'
             );
         });
     } catch (e) { console.error('Depts error:', e); }
 }
+
+function searchDepts() {
+    var q = (document.getElementById('dept-search').value || '').toLowerCase();
+    var filtered = allDepartments.filter(function(d) {
+        if (!q) return true;
+        return (d.name || '').toLowerCase().includes(q) || (d.description || '').toLowerCase().includes(q);
+    });
+    renderDepartments(filtered);
+}
+window.searchDepts = searchDepts;
 
 function openDeptModal(dept) {
     editingDeptId = dept ? dept.id : null;
@@ -1797,7 +1931,9 @@ async function saveDept() {
 }
 window.saveDept = saveDept;
 
+var currentDeptDetailId = null;
 async function openDeptDetail(id) {
+    currentDeptDetailId = id;
     try {
         var res = await fetch('/api/departments/' + id);
         if (!res.ok) throw new Error('Failed');
@@ -2197,6 +2333,51 @@ async function fetchPayslips(statusFilter) {
         if (tbody) tbody.innerHTML = '<tr><td colspan="10" class="loading">Failed to load payslips.</td></tr>';
     }
 }
+
+function searchPayslips() {
+    var q = (document.getElementById('payslip-search').value || '').toLowerCase();
+    var filtered = allPayslips.filter(function(p) {
+        if (!q) return true;
+        return (p.number || '').toLowerCase().includes(q) || (p.employee_name || '').toLowerCase().includes(q) || (p.status || '').toLowerCase().includes(q);
+    });
+    renderPayslips(filtered);
+    var countEl = document.getElementById('payslip-count');
+    if (countEl) countEl.textContent = filtered.length + ' item' + (filtered.length !== 1 ? 's' : '');
+}
+window.searchPayslips = searchPayslips;
+
+async function batchGeneratePayslips() {
+    var today = new Date().toISOString().split('T')[0];
+    var periodStart = prompt('Period start date (YYYY-MM-DD):', today);
+    if (!periodStart) return;
+    var periodEnd = prompt('Period end date (YYYY-MM-DD):', today);
+    if (!periodEnd) return;
+    var payDate = prompt('Pay date (YYYY-MM-DD):', today);
+    if (!payDate) return;
+    if (!confirm('Generate payslips for ALL active employees for ' + periodStart + ' to ' + periodEnd + '?')) return;
+    showToast('Generating payslips...', 'info');
+    try {
+        var empRes = await fetch('/api/employees?status=active');
+        var emps = await empRes.json();
+        var created = 0, failed = 0;
+        for (var i = 0; i < emps.length; i++) {
+            var e = emps[i];
+            try {
+                var res = await fetch('/api/payslips', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        employee_id: e.id, period_start: periodStart, period_end: periodEnd, pay_date: payDate,
+                        basic_salary: e.salary || 0, tax_rate: e.tax_rate || 0,
+                    })
+                });
+                if (res.ok) created++; else failed++;
+            } catch(err) { failed++; }
+        }
+        showToast('Generated ' + created + ' payslips' + (failed ? ' (' + failed + ' failed)' : ''), created > 0 ? 'success' : 'error');
+        fetchPayslips(currentPsFilter);
+    } catch(e) { showToast('Batch generation failed', 'error'); }
+}
+window.batchGeneratePayslips = batchGeneratePayslips;
 
 function renderPayslips(payslips) {
     var tbody = document.getElementById('payslips-table-body');
@@ -3346,32 +3527,48 @@ function switchRecView(view) {
     else { tb.className = 'btn btn-outline btn-sm'; pb.className = 'btn btn-primary btn-sm'; loadRecPipeline(); }
 }
 
+var _allRecSubs = [];
 async function loadRecSubmissions() {
     try {
         var res = await fetch('/api/recruitment/forms/' + recFormsSubId + '/submissions');
         if (!res.ok) { showToast('Failed to load', 'error'); return; }
-        var subs = await res.json();
-        var tbody = document.getElementById('rec-subs-tbody');
-        if (!subs.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">No submissions yet</td></tr>'; return; }
-        tbody.innerHTML = subs.map(function(s) {
-            var d = new Date(s.created_at);
-            var stage = s.current_stage || 'Applied';
-            var stageIdx = recCurrentPipelineStages.indexOf(stage);
-            var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
-            var stageColor = stageColors[stageIdx >= 0 ? stageIdx % stageColors.length : 0];
-            return '<tr>' +
-                '<td>' + esc(s.candidate_name || '-') + '</td>' +
-                '<td>' + esc(s.candidate_email || '-') + '</td>' +
-                '<td>' + (s.file_name ? '<span style="font-size:0.85rem;">' + esc(s.file_name) + '</span>' : '<span style="color:var(--text-secondary)">—</span>') + '</td>' +
-                '<td><span style="padding:2px 10px;border-radius:12px;font-size:0.75rem;font-weight:600;background:' + stageColor + '20;color:' + stageColor + ';">' + esc(stage) + '</span></td>' +
-                '<td>' + d.toLocaleDateString() + '</td>' +
-                '<td style="text-align:right;white-space:nowrap;">' +
-                    '<button class="btn btn-outline btn-sm" onclick="showRecSubmissionDetail(' + s.id + ')" style="margin-right:4px;">View</button>' +
-                    '<button class="btn btn-outline btn-sm" onclick="showMoveStageMenu(' + s.id + ',\'' + esc(stage) + '\')" title="Move to next stage">&#8594;</button>' +
-                '</td></tr>';
-        }).join('');
+        _allRecSubs = await res.json();
+        renderRecSubs(_allRecSubs);
     } catch(e) { console.error(e); }
 }
+
+function renderRecSubs(subs) {
+    var tbody = document.getElementById('rec-subs-tbody');
+    if (!subs.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">No submissions found</td></tr>'; return; }
+    tbody.innerHTML = subs.map(function(s) {
+        var d = new Date(s.created_at);
+        var stage = s.current_stage || 'Applied';
+        var stageIdx = recCurrentPipelineStages.indexOf(stage);
+        var stageColors = ['#6366f1', '#f59e0b', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#ec4899', '#06b6d4'];
+        var stageColor = stageColors[stageIdx >= 0 ? stageIdx % stageColors.length : 0];
+        return '<tr>' +
+            '<td>' + esc(s.candidate_name || '-') + '</td>' +
+            '<td>' + esc(s.candidate_email || '-') + '</td>' +
+            '<td>' + (s.file_name ? '<span style="font-size:0.85rem;">' + esc(s.file_name) + '</span>' : '<span style="color:var(--text-secondary)">—</span>') + '</td>' +
+            '<td><span style="padding:2px 10px;border-radius:12px;font-size:0.75rem;font-weight:600;background:' + stageColor + '20;color:' + stageColor + ';">' + esc(stage) + '</span></td>' +
+            '<td>' + d.toLocaleDateString() + '</td>' +
+            '<td style="text-align:right;white-space:nowrap;">' +
+                '<button class="btn btn-outline btn-sm" onclick="showRecSubmissionDetail(' + s.id + ')" style="margin-right:4px;">View</button>' +
+                '<button class="btn btn-outline btn-sm" onclick="showMoveStageMenu(' + s.id + ',\'' + esc(stage) + '\',-1)" title="Move to previous stage">&#8592;</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="showMoveStageMenu(' + s.id + ',\'' + esc(stage) + '\',1)" title="Move to next stage">&#8594;</button>' +
+            '</td></tr>';
+    }).join('');
+}
+
+function searchRecSubmissions() {
+    var q = (document.getElementById('rec-sub-search').value || '').toLowerCase();
+    var filtered = _allRecSubs.filter(function(s) {
+        if (!q) return true;
+        return (s.candidate_name || '').toLowerCase().includes(q) || (s.candidate_email || '').toLowerCase().includes(q) || (s.current_stage || '').toLowerCase().includes(q);
+    });
+    renderRecSubs(filtered);
+}
+window.searchRecSubmissions = searchRecSubmissions;
 
 async function loadRecPipeline() {
     try {
@@ -3428,13 +3625,14 @@ async function moveCandidateStage(subId, newStage, stageOrder) {
     } catch(e) { showToast('Error', 'error'); }
 }
 
-function showMoveStageMenu(subId, currentStage) {
+function showMoveStageMenu(subId, currentStage, direction) {
     var idx = recCurrentPipelineStages.indexOf(currentStage);
-    if (idx < recCurrentPipelineStages.length - 1) {
-        var nextStage = recCurrentPipelineStages[idx + 1];
-        moveCandidateStage(subId, nextStage, idx + 1);
+    var targetIdx = idx + (direction || 1);
+    if (targetIdx >= 0 && targetIdx < recCurrentPipelineStages.length) {
+        var targetStage = recCurrentPipelineStages[targetIdx];
+        moveCandidateStage(subId, targetStage, targetIdx);
     } else {
-        showToast('Already at final stage', 'info');
+        showToast(direction < 0 ? 'Already at first stage' : 'Already at final stage', 'info');
     }
 }
 
@@ -3763,15 +3961,22 @@ async function aiScreenResume() {
         var jobTitle = form ? form.title : 'Position';
         var jobDesc = form ? (form.description || '') : '';
         var candidateName = 'Candidate';
+        var resumeText = '';
         var res2 = await fetch('/api/recruitment/forms/' + recFormsSubId + '/submissions', { credentials: 'same-origin' });
         if (res2.ok) {
             var subs = await res2.json();
             var sub = subs.find(function(s) { return s.id === recCurrentSubId; });
-            if (sub) candidateName = sub.candidate_name || 'Candidate';
+            if (sub) {
+                candidateName = sub.candidate_name || 'Candidate';
+                var answers = {};
+                try { answers = JSON.parse(sub.answers || '{}'); } catch(e) {}
+                resumeText = Object.entries(answers).map(function(e) { return e[0] + ': ' + e[1]; }).join('\n');
+                if (sub.file_name) resumeText += '\n\nResume file: ' + sub.file_name;
+            }
         }
         var res = await fetch('/api/ai/screen-resume', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ job_title: jobTitle, job_description: jobDesc, candidate_name: candidateName, resume_text: '' })
+            body: JSON.stringify({ job_title: jobTitle, job_description: jobDesc, candidate_name: candidateName, resume_text: resumeText })
         });
         var data = await res.json();
         if (el) {
