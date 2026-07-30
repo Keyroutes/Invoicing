@@ -3475,6 +3475,27 @@ def get_all_leave_requests(request: Request, db: Session = Depends(get_db)):
     return result
 
 
+@app.post("/api/leave/requests/{leave_id}/action")
+def action_leave_simple(leave_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.client_id == client_id).first()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    action = body.get("action", "")
+    leave.status = "approved" if action == "approve" else "rejected"
+    leave.approved_by = body.get("approved_by", "HR")
+    note = models.DBNotification(
+        client_id=client_id, employee_id=leave.employee_id,
+        title=f"Leave Request {leave.status.title()}", message=f"Your {leave.leave_type} leave request has been {leave.status}.",
+        type="success" if leave.status == "approved" else "warning",
+    )
+    db.add(note)
+    db.commit()
+    return {"message": f"Leave {leave.status}"}
+
+
 @app.get("/api/employees/{emp_id}/goals")
 def get_goals_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
     client_id = request.session.get('client_id')

@@ -1550,6 +1550,8 @@ async function viewEmployee(empId) {
         }
 
         showView('employee-detail-view');
+        loadEmpGoals(empId);
+        loadEmpDocs(empId);
     } catch (e) {
         showToast('Failed to load employee', 'error');
     }
@@ -2813,7 +2815,7 @@ function renderOrgNode(emp) {
 var origShowView = showView;
 showView = function(viewId) {
     origShowView(viewId);
-    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
+    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); }
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'onboarding-hub-view') loadOnboardingHub();
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
@@ -3534,3 +3536,179 @@ window.moveRecStageUp = moveRecStageUp;
 window.moveRecStageDown = moveRecStageDown;
 window.moveCandidateStage = moveCandidateStage;
 window.showMoveStageMenu = showMoveStageMenu;
+
+// ==================== LEAVE REQUESTS ====================
+var allLeaveRequests = [];
+var currentLeaveFilter = 'all';
+
+async function loadLeaveRequests() {
+    try {
+        var res = await fetch('/api/leave/requests', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        allLeaveRequests = await res.json();
+        renderLeaveRequests();
+    } catch (e) { console.error('loadLeaveRequests error:', e); }
+}
+
+function filterLeaveRequests(filter, btn) {
+    currentLeaveFilter = filter;
+    document.querySelectorAll('#leave-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    renderLeaveRequests();
+}
+
+function renderLeaveRequests() {
+    var tbody = document.getElementById('leave-requests-table-body');
+    if (!tbody) return;
+    var filtered = currentLeaveFilter === 'all' ? allLeaveRequests : allLeaveRequests.filter(function(l) { return l.status === currentLeaveFilter; });
+    tbody.innerHTML = '';
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No leave requests found.</td></tr>';
+        return;
+    }
+    filtered.forEach(function(l) {
+        var statusClass = l.status === 'approved' ? 'status-active' : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
+        var actions = l.status === 'pending'
+            ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
+            : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason) + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>');
+    });
+}
+
+async function actionLeave(id, action, empName) {
+    if (!confirm('Are you sure you want to ' + action + ' this leave request for ' + empName + '?')) return;
+    try {
+        var res = await fetch('/api/leave/requests/' + id + '/action', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ action: action })
+        });
+        if (res.ok) { showToast('Leave request ' + action + 'd', 'success'); loadLeaveRequests(); }
+        else { showToast('Failed to update leave', 'error'); }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+window.loadLeaveRequests = loadLeaveRequests;
+window.filterLeaveRequests = filterLeaveRequests;
+window.actionLeave = actionLeave;
+
+// ==================== EMPLOYEE GOALS ====================
+var currentEmpGoals = [];
+
+async function loadEmpGoals(empId) {
+    try {
+        var res = await fetch('/api/employees/' + empId + '/goals', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        currentEmpGoals = await res.json();
+        renderEmpGoals();
+    } catch (e) { console.error('loadEmpGoals error:', e); }
+}
+
+function renderEmpGoals() {
+    var el = document.getElementById('emp-goals-list');
+    if (!el) return;
+    if (currentEmpGoals.length === 0) { el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No goals assigned yet.</p>'; return; }
+    el.innerHTML = '';
+    currentEmpGoals.forEach(function(g) {
+        var progress = g.target_value > 0 ? Math.min(Math.round(g.current_value / g.target_value * 100), 100) : 0;
+        var pColor = g.priority === 'high' ? 'var(--danger-color)' : g.priority === 'low' ? 'var(--success-color)' : 'var(--warning-color)';
+        var sColor = g.status === 'completed' ? 'var(--success-color)' : 'var(--primary-color)';
+        el.insertAdjacentHTML('beforeend', '<div style="padding:12px 0;border-bottom:1px solid var(--border-color);"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="font-size:0.9rem;">' + esc(g.title) + '</strong><span style="font-size:0.75rem;color:' + sColor + ';">' + g.status.replace('_', ' ') + '</span></div><div style="height:5px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + progress + '%;background:' + sColor + ';border-radius:3px;"></div></div><div style="display:flex;justify-content:space-between;margin-top:4px;font-size:0.78rem;color:var(--text-secondary);"><span>' + g.current_value + ' / ' + g.target_value + ' ' + g.unit + '</span><span style="color:' + pColor + ';">' + g.priority + '</span></div></div>');
+    });
+}
+
+function showCreateGoalModal() {
+    document.getElementById('create-goal-modal').style.display = 'flex';
+    document.getElementById('goal-title').value = '';
+    document.getElementById('goal-desc').value = '';
+    document.getElementById('goal-target').value = '100';
+    document.getElementById('goal-unit').value = '%';
+    document.getElementById('goal-due').value = '';
+}
+
+async function createGoal() {
+    if (!currentEmployeeId) return showToast('No employee selected', 'error');
+    var title = document.getElementById('goal-title').value.trim();
+    if (!title) return showToast('Enter a goal title', 'error');
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/goals', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({
+                title: title, description: document.getElementById('goal-desc').value,
+                target_value: parseFloat(document.getElementById('goal-target').value) || 100,
+                unit: document.getElementById('goal-unit').value || '%',
+                category: document.getElementById('goal-category').value,
+                priority: document.getElementById('goal-priority').value,
+                due_date: document.getElementById('goal-due').value,
+            })
+        });
+        if (res.ok) { showToast('Goal created', 'success'); document.getElementById('create-goal-modal').style.display = 'none'; loadEmpGoals(currentEmployeeId); }
+        else { showToast('Failed to create goal', 'error'); }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+window.showCreateGoalModal = showCreateGoalModal;
+window.createGoal = createGoal;
+
+// ==================== EMPLOYEE DOCUMENTS ====================
+var currentEmpDocs = [];
+
+async function loadEmpDocs(empId) {
+    try {
+        var res = await fetch('/api/employees/' + empId + '/documents', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        currentEmpDocs = await res.json();
+        renderEmpDocs();
+    } catch (e) { console.error('loadEmpDocs error:', e); }
+}
+
+function renderEmpDocs() {
+    var el = document.getElementById('emp-documents-list');
+    if (!el) return;
+    if (currentEmpDocs.length === 0) { el.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No documents uploaded yet.</p>'; return; }
+    el.innerHTML = '';
+    currentEmpDocs.forEach(function(d) {
+        el.insertAdjacentHTML('beforeend', '<div style="padding:10px 0;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:500;font-size:0.9rem;">' + esc(d.title) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + d.doc_type + ' &bull; ' + d.file_name + ' &bull; ' + d.created_at + '</div></div></div>');
+    });
+}
+
+function showUploadDocModal() {
+    document.getElementById('upload-doc-modal').style.display = 'flex';
+    document.getElementById('doc-title').value = '';
+    document.getElementById('doc-file').value = '';
+    document.getElementById('doc-file-info').textContent = '';
+}
+
+function previewDocFile() {
+    var file = document.getElementById('doc-file').files[0];
+    if (file) document.getElementById('doc-file-info').textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+}
+
+async function uploadDocument() {
+    if (!currentEmployeeId) return showToast('No employee selected', 'error');
+    var title = document.getElementById('doc-title').value.trim();
+    if (!title) return showToast('Enter a document title', 'error');
+    var fileInput = document.getElementById('doc-file');
+    if (!fileInput.files[0]) return showToast('Select a file', 'error');
+    var file = fileInput.files[0];
+    if (file.size > 10 * 1024 * 1024) return showToast('File too large (max 10MB)', 'error');
+    try {
+        var base64 = await new Promise(function(resolve) {
+            var reader = new FileReader();
+            reader.onload = function(e) { resolve(e.target.result.split(',')[1]); };
+            reader.readAsDataURL(file);
+        });
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/documents', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({
+                title: title, doc_type: document.getElementById('doc-type').value,
+                file_name: file.name, file_type: file.type, file_data: base64,
+            })
+        });
+        if (res.ok) { showToast('Document uploaded', 'success'); document.getElementById('upload-doc-modal').style.display = 'none'; loadEmpDocs(currentEmployeeId); }
+        else { showToast('Upload failed', 'error'); }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+window.showUploadDocModal = showUploadDocModal;
+window.previewDocFile = previewDocFile;
+window.uploadDocument = uploadDocument;
