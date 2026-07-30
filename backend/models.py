@@ -376,3 +376,72 @@ class DBFormSubmission(Base):
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     form = relationship("DBRecruitmentForm")
+
+
+class DBEmployeeGoal(Base):
+    __tablename__ = "employee_goals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    target_value = Column(Float, default=100.0)
+    current_value = Column(Float, default=0.0)
+    unit = Column(String, default="%")
+    category = Column(String, default="performance")
+    priority = Column(String, default="medium")
+    start_date = Column(String, default="")
+    due_date = Column(String, default="")
+    status = Column(String, default="in_progress")
+    created_by = Column(String, default="HR")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    employee = relationship("DBEmployee")
+
+
+class DBNotification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    message = Column(String, default="")
+    type = Column(String, default="info")
+    is_read = Column(Boolean, default=False)
+    link = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBLeaveRequest(Base):
+    __tablename__ = "leave_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    leave_type = Column(String, default="annual")
+    start_date = Column(String, nullable=False)
+    end_date = Column(String, nullable=False)
+    days = Column(Float, default=0.0)
+    reason = Column(String, default="")
+    status = Column(String, default="pending")
+    approved_by = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    employee = relationship("DBEmployee")
+
+
+class DBDocument(Base):
+    __tablename__ = "employee_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    doc_type = Column(String, default="other")
+    file_name = Column(String, default="")
+    file_type = Column(String, default="")
+    file_data = Column(Text, default="")
+    uploaded_by = Column(String, default="HR")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

@@ -3184,6 +3184,349 @@ def submit_application(token: str, body: FormSubmissionCreate, db: Session = Dep
     return {"message": "Application submitted successfully"}
 
 
+@app.get("/api/employee/goals")
+def get_employee_goals(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    goals = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.employee_id == emp_id).order_by(models.DBEmployeeGoal.created_at.desc()).all()
+    return [{"id": g.id, "title": g.title, "description": g.description, "target_value": g.target_value, "current_value": g.current_value, "unit": g.unit, "category": g.category, "priority": g.priority, "start_date": g.start_date, "due_date": g.due_date, "status": g.status, "created_by": g.created_by} for g in goals]
+
+
+@app.get("/api/employee/notifications")
+def get_employee_notifications(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    notes = db.query(models.DBNotification).filter(models.DBNotification.employee_id == emp_id).order_by(models.DBNotification.created_at.desc()).limit(50).all()
+    unread = db.query(models.DBNotification).filter(models.DBNotification.employee_id == emp_id, models.DBNotification.is_read == False).count()
+    return {"notifications": [{"id": n.id, "title": n.title, "message": n.message, "type": n.type, "is_read": n.is_read, "link": n.link, "created_at": n.created_at} for n in notes], "unread_count": unread}
+
+
+@app.patch("/api/employee/notifications/{note_id}/read")
+def mark_notification_read(note_id: int, request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    note = db.query(models.DBNotification).filter(models.DBNotification.id == note_id, models.DBNotification.employee_id == emp_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    note.is_read = True
+    db.commit()
+    return {"message": "Marked as read"}
+
+
+@app.post("/api/employee/notifications/read-all")
+def mark_all_notifications_read(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    db.query(models.DBNotification).filter(models.DBNotification.employee_id == emp_id, models.DBNotification.is_read == False).update({"is_read": True})
+    db.commit()
+    return {"message": "All notifications marked as read"}
+
+
+@app.get("/api/employee/leave")
+def get_employee_leave(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    approved = sum(l.days for l in leaves if l.status == "approved" and l.leave_type == "annual")
+    sick_taken = sum(l.days for l in leaves if l.status == "approved" and l.leave_type == "sick")
+    return {
+        "requests": [{"id": l.id, "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date, "days": l.days, "reason": l.reason, "status": l.status, "approved_by": l.approved_by, "created_at": l.created_at} for l in leaves],
+        "balance": {"annual_total": 25, "annual_taken": approved, "sick_total": 10, "sick_taken": sick_taken}
+    }
+
+
+@app.post("/api/employee/leave")
+def request_leave(request: Request, body: dict, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    leave = models.DBLeaveRequest(
+        client_id=emp.client_id, employee_id=emp_id,
+        leave_type=body.get("leave_type", "annual"),
+        start_date=body.get("start_date", ""),
+        end_date=body.get("end_date", ""),
+        days=body.get("days", 0),
+        reason=body.get("reason", ""),
+    )
+    db.add(leave)
+    note = models.DBNotification(
+        client_id=emp.client_id, employee_id=emp_id,
+        title="Leave Request Submitted", message=f"Your {leave.leave_type} leave request for {leave.days} day(s) has been submitted.",
+        type="info",
+    )
+    db.add(note)
+    db.commit()
+    return {"message": "Leave request submitted"}
+
+
+@app.get("/api/employee/documents")
+def get_employee_documents(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    docs = db.query(models.DBDocument).filter(models.DBDocument.employee_id == emp_id).order_by(models.DBDocument.created_at.desc()).all()
+    return [{"id": d.id, "title": d.title, "doc_type": d.doc_type, "file_name": d.file_name, "uploaded_by": d.uploaded_by, "created_at": d.created_at} for d in docs]
+
+
+@app.get("/api/employee/documents/{doc_id}/download")
+def download_document(doc_id: int, request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    doc = db.query(models.DBDocument).filter(models.DBDocument.id == doc_id, models.DBDocument.employee_id == emp_id).first()
+    if not doc or not doc.file_data:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"file_name": doc.file_name, "file_type": doc.file_type, "file_data": doc.file_data}
+
+
+@app.get("/api/employee/profile")
+def get_employee_profile(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == emp.department_id).first() if emp.department_id else None
+    manager = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp.reports_to).first() if emp.reports_to else None
+    team = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == emp.department_id, models.DBEmployee.status == "active", models.DBEmployee.id != emp_id).all() if emp.department_id else []
+    goals = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.employee_id == emp_id).all()
+    goal_progress = 0
+    if goals:
+        goal_progress = round(sum(min(g.current_value / g.target_value * 100, 100) for g in goals) / len(goals), 1)
+    return {
+        "full_name": f"{emp.first_name} {emp.last_name}",
+        "first_name": emp.first_name,
+        "last_name": emp.last_name,
+        "email": emp.email,
+        "phone": emp.phone,
+        "address": emp.address,
+        "job_title": emp.job_title,
+        "role": emp.role,
+        "employment_type": emp.employment_type,
+        "department": dept.name if dept else "",
+        "department_id": emp.department_id,
+        "manager": f"{manager.first_name} {manager.last_name}" if manager else "",
+        "start_date": emp.start_date,
+        "work_location": emp.work_location,
+        "emergency_contact": emp.emergency_contact,
+        "emergency_phone": emp.emergency_phone,
+        "employee_id_code": emp.employee_id,
+        "goals_count": len(goals),
+        "goal_progress": goal_progress,
+        "team": [{"id": t.id, "name": f"{t.first_name} {t.last_name}", "job_title": t.job_title, "email": t.email} for t in team],
+    }
+
+
+@app.get("/api/employee/analytics")
+def get_employee_analytics(request: Request, days: int = 30, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    from datetime import timedelta
+    start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp_id,
+        models.DBAttendance.date >= start,
+    ).order_by(models.DBAttendance.date.asc()).all()
+    daily = []
+    for r in records:
+        daily.append({"date": r.date, "hours": r.total_hours or 0, "break": r.break_minutes or 0, "status": r.status, "check_type": r.check_type})
+    total_hours = sum(d["hours"] for d in daily)
+    days_present = len([d for d in daily if d["hours"] > 0])
+    avg_hours = round(total_hours / max(days_present, 1), 1)
+    late_days = 0
+    for r in records:
+        if r.clock_in:
+            try:
+                ci = datetime.strptime(r.clock_in, "%H:%M:%S")
+                if ci.hour > 9 or (ci.hour == 9 and ci.minute > 15):
+                    late_days += 1
+            except: pass
+    return {"daily": daily, "total_hours": round(total_hours, 1), "days_present": days_present, "avg_hours": avg_hours, "late_days": late_days, "period_days": days}
+
+
+@app.get("/api/employee/team-presence")
+def get_team_presence(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp or not emp.department_id:
+        return []
+    today = datetime.now().strftime("%Y-%m-%d")
+    team = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == emp.department_id, models.DBEmployee.status == "active").all()
+    result = []
+    for t in team:
+        att = db.query(models.DBAttendance).filter(models.DBAttendance.employee_id == t.id, models.DBAttendance.date == today).first()
+        is_online = att and att.clock_in and not att.clock_out
+        result.append({
+            "id": t.id, "name": f"{t.first_name} {t.last_name}", "job_title": t.job_title,
+            "is_online": is_online, "clock_in": att.clock_in if att else "",
+            "is_on_break": att.is_on_break if att else False,
+        })
+    return result
+
+
+@app.get("/api/employee/weekly-chart")
+def get_weekly_chart(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    from datetime import timedelta
+    today = datetime.now()
+    start = (today - timedelta(days=today.weekday())).strftime("%Y-%m-%d")
+    week_days = []
+    for i in range(7):
+        d = (today - timedelta(days=today.weekday() - i)).strftime("%Y-%m-%d")
+        att = db.query(models.DBAttendance).filter(models.DBAttendance.employee_id == emp_id, models.DBAttendance.date == d).first()
+        week_days.append({"date": d, "day": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i], "hours": att.total_hours if att else 0, "is_today": d == today.strftime("%Y-%m-%d")})
+    return week_days
+
+
+@app.post("/api/employee/goals/{goal_id}/update")
+def update_goal_progress(goal_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    goal = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.id == goal_id, models.DBEmployeeGoal.employee_id == emp_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    goal.current_value = body.get("current_value", goal.current_value)
+    if goal.current_value >= goal.target_value:
+        goal.status = "completed"
+    db.commit()
+    return {"message": "Goal updated"}
+
+
+# HR-side: Create goal for employee
+@app.post("/api/employees/{emp_id}/goals")
+def create_employee_goal(emp_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    goal = models.DBEmployeeGoal(
+        client_id=client_id, employee_id=emp_id,
+        title=body.get("title", ""), description=body.get("description", ""),
+        target_value=body.get("target_value", 100), current_value=body.get("current_value", 0),
+        unit=body.get("unit", "%"), category=body.get("category", "performance"),
+        priority=body.get("priority", "medium"), start_date=body.get("start_date", ""),
+        due_date=body.get("due_date", ""), created_by="HR",
+    )
+    db.add(goal)
+    note = models.DBNotification(
+        client_id=client_id, employee_id=emp_id,
+        title="New Goal Assigned", message=f"HR has assigned you a new goal: {goal.title}",
+        type="info",
+    )
+    db.add(note)
+    db.commit()
+    return {"message": "Goal created", "id": goal.id}
+
+
+@app.post("/api/employees/{emp_id}/leave/{leave_id}/action")
+def action_leave(emp_id: int, leave_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.employee_id == emp_id).first()
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    action = body.get("action", "")
+    leave.status = "approved" if action == "approve" else "rejected"
+    leave.approved_by = body.get("approved_by", "HR")
+    note = models.DBNotification(
+        client_id=client_id, employee_id=emp_id,
+        title=f"Leave Request {leave.status.title()}", message=f"Your {leave.leave_type} leave request has been {leave.status}.",
+        type="success" if leave.status == "approved" else "warning",
+    )
+    db.add(note)
+    db.commit()
+    return {"message": f"Leave {leave.status}"}
+
+
+@app.get("/api/leave/requests")
+def get_all_leave_requests(request: Request, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.client_id == client_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    result = []
+    for l in leaves:
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == l.employee_id).first()
+        result.append({
+            "id": l.id, "employee_id": l.employee_id,
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date,
+            "days": l.days, "reason": l.reason, "status": l.status,
+            "approved_by": l.approved_by, "created_at": l.created_at,
+        })
+    return result
+
+
+@app.get("/api/employees/{emp_id}/goals")
+def get_goals_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    goals = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.employee_id == emp_id, models.DBEmployeeGoal.client_id == client_id).order_by(models.DBEmployeeGoal.created_at.desc()).all()
+    return [{"id": g.id, "title": g.title, "description": g.description, "target_value": g.target_value, "current_value": g.current_value, "unit": g.unit, "category": g.category, "priority": g.priority, "start_date": g.start_date, "due_date": g.due_date, "status": g.status, "created_by": g.created_by} for g in goals]
+
+
+@app.get("/api/employees/{emp_id}/documents")
+def get_documents_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    docs = db.query(models.DBDocument).filter(models.DBDocument.employee_id == emp_id, models.DBDocument.client_id == client_id).order_by(models.DBDocument.created_at.desc()).all()
+    return [{"id": d.id, "title": d.title, "doc_type": d.doc_type, "file_name": d.file_name, "uploaded_by": d.uploaded_by, "created_at": d.created_at} for d in docs]
+
+
+@app.get("/api/employees/{emp_id}/leave")
+def get_leave_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id, models.DBLeaveRequest.client_id == client_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    return [{"id": l.id, "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date, "days": l.days, "reason": l.reason, "status": l.status, "approved_by": l.approved_by, "created_at": l.created_at} for l in leaves]
+
+
+@app.post("/api/employees/{emp_id}/documents")
+def upload_document(emp_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
+    client_id = request.session.get('client_id')
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    doc = models.DBDocument(
+        client_id=client_id, employee_id=emp_id,
+        title=body.get("title", ""), doc_type=body.get("doc_type", "other"),
+        file_name=body.get("file_name", ""), file_type=body.get("file_type", ""),
+        file_data=body.get("file_data", ""), uploaded_by="HR",
+    )
+    db.add(doc)
+    note = models.DBNotification(
+        client_id=client_id, employee_id=emp_id,
+        title="New Document Uploaded", message=f"HR has uploaded a document: {doc.title}",
+        type="info",
+    )
+    db.add(note)
+    db.commit()
+    return {"message": "Document uploaded", "id": doc.id}
+
+
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 if os.path.exists(frontend_path):
