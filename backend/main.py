@@ -3548,6 +3548,228 @@ def upload_document(emp_id: int, request: Request, body: dict, db: Session = Dep
     return {"message": "Document uploaded", "id": doc.id}
 
 
+# ============================================================================
+# AI ENDPOINTS (Groq / Llama 3.3)
+# ============================================================================
+
+from llm import llm_chat, llm_json
+
+
+@app.post("/api/ai/screen-resume")
+def screen_resume(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("job_title"):
+        raise HTTPException(status_code=400, detail="job_title required")
+    job_title = body["job_title"]
+    job_description = body.get("job_description", "")
+    resume_text = body.get("resume_text", "")
+    candidate_name = body.get("candidate_name", "Candidate")
+    if not resume_text:
+        return {"score": 0, "summary": "No resume text provided to analyze.", "strengths": [], "weaknesses": [], "recommendation": "Cannot screen without resume content."}
+    messages = [
+        {"role": "system", "content": "You are an expert HR recruiter. Analyze the resume against the job requirements and return JSON with: score (0-100), summary (1 sentence), strengths (list of up to 5), weaknesses (list of up to 5), recommendation (Hire/Interview/Reject with 1 sentence reason). Return ONLY valid JSON."},
+        {"role": "user", "content": f"Job Title: {job_title}\nJob Description: {job_description}\n\nCandidate: {candidate_name}\nResume:\n{resume_text[:4000]}"}
+    ]
+    result = llm_json(messages)
+    if not result:
+        return {"score": 0, "summary": "AI service unavailable.", "strengths": [], "weaknesses": [], "recommendation": "Unable to screen at this time."}
+    return {
+        "score": result.get("score", 0),
+        "summary": result.get("summary", ""),
+        "strengths": result.get("strengths", []),
+        "weaknesses": result.get("weaknesses", []),
+        "recommendation": result.get("recommendation", ""),
+    }
+
+
+@app.post("/api/ai/generate-onboarding")
+def generate_onboarding_checklist(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("job_title"):
+        raise HTTPException(status_code=400, detail="job_title required")
+    job_title = body["job_title"]
+    department = body.get("department", "")
+    seniority = body.get("seniority", "mid-level")
+    messages = [
+        {"role": "system", "content": "You are an HR onboarding specialist. Generate a custom onboarding checklist for a new hire. Return JSON with: items (list of objects with title, category, description, due_days from start). Categories: Legal, IT, HR, Social, Compliance, Training. Include 8-15 items. Return ONLY valid JSON."},
+        {"role": "user", "content": f"Job Title: {job_title}\nDepartment: {department}\nSeniority: {seniority}"}
+    ]
+    result = llm_json(messages)
+    if not result:
+        return {"items": [
+            {"title": "Sign employment contract", "category": "Legal", "description": "Review and sign employment agreement", "due_days": 1},
+            {"title": "Provide government-issued ID", "category": "Legal", "description": "Submit ID for verification", "due_days": 1},
+            {"title": "Submit bank details for payroll", "category": "Finance", "description": "Provide banking information", "due_days": 3},
+            {"title": "IT equipment setup", "category": "IT", "description": "Laptop, email, system access", "due_days": 1},
+            {"title": "Company policy acknowledgment", "category": "Compliance", "description": "Read and acknowledge policies", "due_days": 7},
+        ]}
+    return {"items": result.get("items", [])}
+
+
+@app.post("/api/ai/personalize-email")
+def personalize_invoice_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("client_name"):
+        raise HTTPException(status_code=400, detail="client_name required")
+    client_name = body["client_name"]
+    invoice_number = body.get("invoice_number", "")
+    total = body.get("total", 0)
+    due_date = body.get("due_date", "")
+    is_first_time = body.get("is_first_time", False)
+    tone = body.get("tone", "professional")
+    messages = [
+        {"role": "system", "content": f"You are a professional accounts receivable email writer. Write a short, {tone} invoice email. Include: greeting, invoice reference, amount, due date, payment link mention, and closing. Keep it under 100 words. Return ONLY the email body text, no subject line."},
+        {"role": "user", "content": f"Client: {client_name}\nInvoice: {invoice_number}\nAmount: £{total}\nDue: {due_date}\nFirst time client: {is_first_time}"}
+    ]
+    result = llm_chat(messages)
+    if not result:
+        return {"subject": f"Invoice {invoice_number}", "body": f"Dear {client_name},\n\nPlease find invoice {invoice_number} for £{total}, due {due_date}.\n\nKind regards,\n{client.company_name or 'Accounts Team'}"}
+    subject = f"Invoice {invoice_number}" if invoice_number else "Invoice"
+    lines = result.strip().split("\n")
+    for line in lines:
+        if line.lower().startswith("subject:"):
+            subject = line.split(":", 1)[1].strip()
+            result = result.replace(line, "").strip()
+            break
+    return {"subject": subject, "body": result}
+
+
+@app.post("/api/ai/generate-followup")
+def generate_followup_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body or not body.get("client_name"):
+        raise HTTPException(status_code=400, detail="client_name required")
+    client_name = body["client_name"]
+    invoice_number = body.get("invoice_number", "")
+    total = body.get("total", 0)
+    days_overdue = body.get("days_overdue", 0)
+    tone = body.get("tone", "polite")
+    messages = [
+        {"role": "system", "content": f"You are an accounts receivable specialist. Write a {tone} payment follow-up email for an overdue invoice. Be concise, professional, and clear about the amount owed and urgency. Keep under 80 words. Return ONLY the email body text."},
+        {"role": "user", "content": f"Client: {client_name}\nInvoice: {invoice_number}\nAmount: £{total}\nDays overdue: {days_overdue}"}
+    ]
+    result = llm_chat(messages)
+    if not result:
+        return {"subject": f"Payment Reminder - {invoice_number}", "body": f"Dear {client_name},\n\nThis is a friendly reminder that invoice {invoice_number} for £{total} is now {days_overdue} days overdue.\n\nPlease arrange payment at your earliest convenience.\n\nKind regards,\n{client.company_name or 'Accounts Team'}"}
+    subject = f"Payment Reminder - {invoice_number}" if invoice_number else "Payment Reminder"
+    return {"subject": subject, "body": result}
+
+
+@app.get("/api/ai/payroll-anomalies")
+def detect_payroll_anomalies(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    payslips = db.query(models.DBPayslip).filter(
+        models.DBPayslip.client_id == client.id
+    ).order_by(models.DBPayslip.employee_id, models.DBPayslip.period_start.desc()).all()
+    by_emp = {}
+    for p in payslips:
+        if p.employee_id not in by_emp:
+            by_emp[p.employee_id] = []
+        by_emp[p.employee_id].append(p)
+    anomalies = []
+    for emp_id, ps_list in by_emp.items():
+        if len(ps_list) < 2:
+            continue
+        latest = ps_list[0]
+        prev = ps_list[1]
+        if prev.net_pay and prev.net_pay > 0 and latest.net_pay:
+            pct_change = abs(latest.net_pay - prev.net_pay) / prev.net_pay * 100
+            if pct_change > 20:
+                emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+                emp_name = f"{emp.first_name} {emp.last_name}" if emp else f"Employee #{emp_id}"
+                direction = "increased" if latest.net_pay > prev.net_pay else "decreased"
+                anomalies.append({
+                    "employee_id": emp_id, "employee_name": emp_name,
+                    "latest_net": round(float(latest.net_pay), 2),
+                    "previous_net": round(float(prev.net_pay), 2),
+                    "change_pct": round(pct_change, 1), "direction": direction,
+                    "latest_period": latest.period_start or "",
+                })
+    anomalies.sort(key=lambda x: x["change_pct"], reverse=True)
+    return {"anomalies": anomalies, "total_checked": len(by_emp)}
+
+
+@app.get("/api/ai/attendance-alerts")
+def detect_attendance_alerts(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    from datetime import timedelta
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date >= thirty_days_ago,
+    ).all()
+    by_emp = {}
+    for r in records:
+        if r.employee_id not in by_emp:
+            by_emp[r.employee_id] = []
+        by_emp[r.employee_id].append(r)
+    alerts = []
+    for emp_id, recs in by_emp.items():
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+        if not emp:
+            continue
+        emp_name = f"{emp.first_name} {emp.last_name}"
+        late_count = 0
+        absent_days = 0
+        long_breaks = 0
+        no_clockout = 0
+        total_hours = 0
+        for r in recs:
+            if r.clock_in and r.clock_in > "09:15:00":
+                late_count += 1
+            if r.status == "absent" or (not r.clock_in and not r.clock_out):
+                absent_days += 1
+            if r.break_minutes and r.break_minutes > 90:
+                long_breaks += 1
+            if r.clock_in and not r.clock_out:
+                no_clockout += 1
+            if r.total_hours:
+                total_hours += float(r.total_hours)
+        emp_alerts = []
+        if late_count >= 5:
+            emp_alerts.append({"type": "late", "message": f"Late {late_count} times in 30 days", "severity": "warning"})
+        if absent_days >= 5:
+            emp_alerts.append({"type": "absent", "message": f"{absent_days} absent days in 30 days", "severity": "critical"})
+        if long_breaks >= 3:
+            emp_alerts.append({"type": "break", "message": f"{long_breaks} extended breaks (>90 min)", "severity": "warning"})
+        if no_clockout >= 2:
+            emp_alerts.append({"type": "clockout", "message": f"{no_clockout} missed clock-outs", "severity": "warning"})
+        if recs and total_hours / len(recs) > 10:
+            emp_alerts.append({"type": "overtime", "message": f"Avg {round(total_hours/len(recs), 1)}h/day — burnout risk", "severity": "critical"})
+        if emp_alerts:
+            alerts.append({"employee_id": emp_id, "employee_name": emp_name, "department": emp.department_id, "alerts": emp_alerts, "total_hours_30d": round(total_hours, 1)})
+    alerts.sort(key=lambda x: len(x["alerts"]), reverse=True)
+    return {"alerts": alerts, "period": "30 days", "employees_checked": len(by_emp)}
+
+
+@app.post("/api/ai/summarize-attendance")
+def summarize_attendance(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    from datetime import timedelta
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    records = db.query(models.DBAttendance).filter(
+        models.DBAttendance.client_id == client.id,
+        models.DBAttendance.date >= thirty_days_ago,
+    ).all()
+    total_employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id, models.DBEmployee.status == "active"
+    ).count()
+    total_records = len(records)
+    present_days = sum(1 for r in records if r.status == "present")
+    avg_hours = sum(float(r.total_hours or 0) for r in records) / max(total_records, 1)
+    remote_count = sum(1 for r in records if r.check_type == "remote")
+    office_count = sum(1 for r in records if r.check_type == "office")
+    context = f"Period: last 30 days. Active employees: {total_employees}. Total attendance records: {total_records}. Present days: {present_days}. Avg hours/day: {round(avg_hours,1)}. Remote check-ins: {remote_count}. Office check-ins: {office_count}."
+    messages = [
+        {"role": "system", "content": "You are an HR analytics assistant. Summarize the attendance data in 2-3 bullet points. Be specific with numbers. Focus on actionable insights."},
+        {"role": "user", "content": context}
+    ]
+    result = llm_chat(messages)
+    if not result:
+        result = f"• {present_days} present days recorded across {total_employees} employees.\n• Average daily hours: {round(avg_hours, 1)}h.\n• Remote: {remote_count}, Office: {office_count}."
+    return {"summary": result, "stats": {"total_employees": total_employees, "total_records": total_records, "present_days": present_days, "avg_hours": round(avg_hours, 1), "remote": remote_count, "office": office_count}}
+
+
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 if os.path.exists(frontend_path):

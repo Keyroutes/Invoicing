@@ -1618,6 +1618,15 @@ async function submitNewEmployee() {
         var data = await res.json();
         if (res.ok) {
             showToast(data.message || 'Employee created', 'success');
+            if (window._aiOnboardingItems && window._aiOnboardingItems.length && data.id) {
+                try {
+                    await fetch('/api/employees/' + data.id + '/onboarding/bulk', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: window._aiOnboardingItems })
+                    });
+                } catch(e) {}
+                window._aiOnboardingItems = null;
+            }
             closeAddEmployeeModal();
             fetchEmployees(currentEmpFilter);
             loadHRStats();
@@ -2831,7 +2840,7 @@ showView = function(viewId) {
     if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); showPeopleTab('employees'); }
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'onboarding-hub-view') loadOnboardingHub();
-    if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
+    if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
     if (viewId === 'recruitment-view') loadRecruitmentForms();
@@ -3742,3 +3751,221 @@ async function uploadDocument() {
 window.showUploadDocModal = showUploadDocModal;
 window.previewDocFile = previewDocFile;
 window.uploadDocument = uploadDocument;
+
+// ==================== AI FEATURES ====================
+
+// --- AI: Resume Screening ---
+async function aiScreenResume() {
+    var el = document.getElementById('ai-screen-result');
+    if (el) el.innerHTML = '<div style="padding:16px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> AI is analyzing resume...</div>';
+    try {
+        var form = recFormsLookup[recFormsSubId];
+        var jobTitle = form ? form.title : 'Position';
+        var jobDesc = form ? (form.description || '') : '';
+        var candidateName = 'Candidate';
+        var res2 = await fetch('/api/recruitment/forms/' + recFormsSubId + '/submissions', { credentials: 'same-origin' });
+        if (res2.ok) {
+            var subs = await res2.json();
+            var sub = subs.find(function(s) { return s.id === recCurrentSubId; });
+            if (sub) candidateName = sub.candidate_name || 'Candidate';
+        }
+        var res = await fetch('/api/ai/screen-resume', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ job_title: jobTitle, job_description: jobDesc, candidate_name: candidateName, resume_text: '' })
+        });
+        var data = await res.json();
+        if (el) {
+            var scoreColor = data.score >= 70 ? 'var(--success-color)' : data.score >= 40 ? 'var(--warning-color)' : 'var(--danger-color)';
+            el.innerHTML = '<div style="padding:16px;">' +
+                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+                    '<div style="width:48px;height:48px;border-radius:50%;background:' + scoreColor + '20;display:flex;align-items:center;justify-content:center;font-size:1.1rem;font-weight:700;color:' + scoreColor + ';">' + data.score + '</div>' +
+                    '<div><div style="font-weight:600;">AI Score: ' + data.score + '/100</div><div style="font-size:0.85rem;color:var(--text-secondary);">' + esc(data.recommendation || '') + '</div></div>' +
+                '</div>' +
+                (data.summary ? '<div style="margin-bottom:12px;font-size:0.9rem;">' + esc(data.summary) + '</div>' : '') +
+                (data.strengths && data.strengths.length ? '<div style="margin-bottom:8px;"><strong style="font-size:0.8rem;color:var(--success-color);">STRENGTHS</strong><ul style="margin:4px 0 0 16px;font-size:0.85rem;">' + data.strengths.map(function(s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>' : '') +
+                (data.weaknesses && data.weaknesses.length ? '<div style="margin-bottom:8px;"><strong style="font-size:0.8rem;color:var(--danger-color);">WEAKNESSES</strong><ul style="margin:4px 0 0 16px;font-size:0.85rem;">' + data.weaknesses.map(function(s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>' : '') +
+                '<button class="btn btn-outline btn-sm" onclick="this.parentElement.remove()" style="margin-top:8px;">Dismiss</button>' +
+            '</div>';
+        }
+    } catch(e) {
+        if (el) el.innerHTML = '<div style="padding:16px;color:var(--danger-color);">AI screening unavailable. Check GROQ_API_KEY.</div>';
+    }
+}
+window.aiScreenResume = aiScreenResume;
+
+// --- AI: Onboarding Generator ---
+async function aiGenerateOnboarding() {
+    var title = document.getElementById('emp-job-title').value.trim();
+    var deptEl = document.getElementById('emp-department');
+    var dept = deptEl.options[deptEl.selectedIndex] ? deptEl.options[deptEl.selectedIndex].text : '';
+    if (!title) return showToast('Enter a job title first', 'error');
+    var btn = document.getElementById('ai-onboard-btn');
+    if (btn) { btn.textContent = 'Generating...'; btn.disabled = true; }
+    try {
+        var res = await fetch('/api/ai/generate-onboarding', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ job_title: title, department: dept === 'None' ? '' : dept })
+        });
+        var data = await res.json();
+        if (data.items && data.items.length) {
+            showToast('Generated ' + data.items.length + ' onboarding items', 'success');
+            window._aiOnboardingItems = data.items;
+            var preview = document.getElementById('ai-onboard-preview');
+            if (preview) {
+                preview.innerHTML = '<div style="margin-top:12px;"><strong style="font-size:0.85rem;color:var(--primary-color);">AI-Generated Checklist (' + data.items.length + ' items):</strong>' +
+                    data.items.map(function(item) {
+                        return '<div style="padding:6px 0;border-bottom:1px solid var(--border-color);font-size:0.85rem;"><span style="color:var(--primary-color);font-weight:600;">' + esc(item.category || 'General') + ':</span> ' + esc(item.title) + (item.description ? ' <span style="color:var(--text-secondary);">— ' + esc(item.description) + '</span>' : '') + '</div>';
+                    }).join('') + '</div>';
+                preview.style.display = 'block';
+            }
+        } else {
+            showToast('AI could not generate checklist', 'error');
+        }
+    } catch(e) { showToast('AI unavailable', 'error'); }
+    if (btn) { btn.textContent = 'AI Generate Checklist'; btn.disabled = false; }
+}
+window.aiGenerateOnboarding = aiGenerateOnboarding;
+
+// --- AI: Invoice Email Personalization ---
+async function aiPersonalizeEmail(invoiceNumber, clientName, total, dueDate) {
+    var el = document.getElementById('ai-email-preview');
+    if (el) el.innerHTML = '<div style="padding:12px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> AI generating personalized email...</div>';
+    try {
+        var res = await fetch('/api/ai/personalize-email', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ client_name: clientName, invoice_number: invoiceNumber, total: total, due_date: dueDate, is_first_time: false, tone: 'professional' })
+        });
+        var data = await res.json();
+        if (el) {
+            el.innerHTML = '<div style="padding:12px;">' +
+                '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Subject: ' + esc(data.subject || '') + '</div>' +
+                '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-size:0.85rem;white-space:pre-wrap;">' + esc(data.body || '') + '</div>' +
+                '<div style="display:flex;gap:8px;margin-top:8px;">' +
+                    '<button class="btn btn-primary btn-sm" onclick="useAiEmail(\'' + esc(data.subject || '') + '\')">Use This Email</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="aiPersonalizeEmail(\'' + invoiceNumber + '\',\'' + esc(clientName) + '\',' + total + ',\'' + dueDate + '\')">Regenerate</button>' +
+                '</div></div>';
+            el.style.display = 'block';
+        }
+    } catch(e) {
+        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">AI unavailable.</div>';
+    }
+}
+window.aiPersonalizeEmail = aiPersonalizeEmail;
+
+function useAiEmail(subject, body) {
+    var subjEl = document.getElementById('invoice-email-subject');
+    var bodyEl = document.getElementById('invoice-email-body');
+    if (subjEl) subjEl.value = subject;
+    if (bodyEl) bodyEl.value = body;
+    showToast('Email populated', 'success');
+}
+
+// --- AI: Overdue Follow-up ---
+async function aiGenerateFollowup(invoiceNumber, clientName, total, daysOverdue) {
+    var el = document.getElementById('ai-followup-result');
+    if (el) el.innerHTML = '<div style="padding:12px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> AI generating follow-up...</div>';
+    try {
+        var res = await fetch('/api/ai/generate-followup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ client_name: clientName, invoice_number: invoiceNumber, total: total, days_overdue: daysOverdue, tone: 'polite' })
+        });
+        var data = await res.json();
+        if (el) {
+            el.innerHTML = '<div style="padding:12px;">' +
+                '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Subject: ' + esc(data.subject || '') + '</div>' +
+                '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-size:0.85rem;white-space:pre-wrap;">' + esc(data.body || '') + '</div>' +
+                '<button class="btn btn-outline btn-sm" onclick="this.parentElement.remove()" style="margin-top:8px;">Dismiss</button>' +
+            '</div>';
+            el.style.display = 'block';
+        }
+    } catch(e) {
+        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">AI unavailable.</div>';
+    }
+}
+window.aiGenerateFollowup = aiGenerateFollowup;
+
+// --- AI: Payroll Anomalies ---
+async function loadPayrollAnomalies() {
+    var el = document.getElementById('payroll-anomalies');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:16px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> Checking payroll data...</div>';
+    try {
+        var res = await fetch('/api/ai/payroll-anomalies', { credentials: 'same-origin' });
+        var data = await res.json();
+        if (!data.anomalies || !data.anomalies.length) {
+            el.innerHTML = '<div style="padding:16px;color:var(--success-color);"><i class="bi bi-check-circle"></i> No payroll anomalies detected across ' + data.total_checked + ' employees.</div>';
+            return;
+        }
+        el.innerHTML = '<div style="padding:16px;">' +
+            '<div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">Found ' + data.anomalies.length + ' anomal' + (data.anomalies.length === 1 ? 'y' : 'ies') + ' across ' + data.total_checked + ' employees:</div>' +
+            data.anomalies.map(function(a) {
+                var color = a.direction === 'increased' ? 'var(--success-color)' : 'var(--danger-color)';
+                return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);">' +
+                    '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0;"></div>' +
+                    '<div style="flex:1;"><strong>' + esc(a.employee_name) + '</strong><br><span style="font-size:0.8rem;color:var(--text-secondary);">£' + a.previous_net.toFixed(2) + ' → £' + a.latest_net.toFixed(2) + ' (' + a.change_pct + '% ' + a.direction + ')</span></div>' +
+                    '<span class="status-pill" style="background:' + color + '20;color:' + color + ';">' + a.change_pct + '%</span>' +
+                '</div>';
+            }).join('') + '</div>';
+    } catch(e) { el.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to check anomalies.</div>'; }
+}
+window.loadPayrollAnomalies = loadPayrollAnomalies;
+
+// --- AI: Attendance Alerts ---
+async function loadAttendanceAlerts() {
+    var el = document.getElementById('attendance-alerts');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:16px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> Analyzing attendance patterns...</div>';
+    try {
+        var res = await fetch('/api/ai/attendance-alerts', { credentials: 'same-origin' });
+        var data = await res.json();
+        if (!data.alerts || !data.alerts.length) {
+            el.innerHTML = '<div style="padding:16px;color:var(--success-color);"><i class="bi bi-check-circle"></i> No attendance alerts. All ' + data.employees_checked + ' employees look good over the last 30 days.</div>';
+            return;
+        }
+        el.innerHTML = '<div style="padding:16px;">' +
+            '<div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:12px;">' + data.alerts.length + ' employee' + (data.alerts.length === 1 ? '' : 's') + ' with alerts (' + data.employees_checked + ' checked):</div>' +
+            data.alerts.map(function(a) {
+                return '<div style="padding:10px 0;border-bottom:1px solid var(--border-color);">' +
+                    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><strong>' + esc(a.employee_name) + '</strong><span style="font-size:0.78rem;color:var(--text-secondary);">' + a.total_hours_30d + 'h total</span></div>' +
+                    a.alerts.map(function(al) {
+                        var sevColor = al.severity === 'critical' ? 'var(--danger-color)' : 'var(--warning-color)';
+                        return '<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:0.85rem;"><span style="width:6px;height:6px;border-radius:50%;background:' + sevColor + ';"></span>' + esc(al.message) + '</div>';
+                    }).join('') + '</div>';
+            }).join('') + '</div>';
+    } catch(e) { el.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to load attendance alerts.</div>'; }
+}
+window.loadAttendanceAlerts = loadAttendanceAlerts;
+
+// --- AI: Attendance Summary ---
+async function loadAttendanceSummary() {
+    var el = document.getElementById('ai-attendance-summary');
+    if (!el) return;
+    el.innerHTML = '<div style="padding:12px;color:var(--text-secondary);"><i class="bi bi-hourglass-split"></i> Generating AI summary...</div>';
+    try {
+        var res = await fetch('/api/ai/summarize-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: '{}' });
+        var data = await res.json();
+        el.innerHTML = '<div style="padding:12px;font-size:0.9rem;white-space:pre-wrap;">' + esc(data.summary || 'No summary available.') + '</div>';
+    } catch(e) { el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">AI summary unavailable.</div>'; }
+}
+window.loadAttendanceSummary = loadAttendanceSummary;
+
+// --- Invoice AI helpers ---
+function aiGenerateInvEmail() {
+    var contact = document.getElementById('view-inv-contact').textContent || '';
+    var number = document.getElementById('view-inv-number-val').textContent || '';
+    var total = document.getElementById('view-inv-due-val').textContent || '0';
+    var dueDate = document.getElementById('view-inv-due-date').textContent || '';
+    aiPersonalizeEmail(number, contact, parseFloat(total) || 0, dueDate);
+}
+
+function aiGenerateInvFollowup() {
+    var contact = document.getElementById('view-inv-contact').textContent || '';
+    var number = document.getElementById('view-inv-number-val').textContent || '';
+    var total = document.getElementById('view-inv-due-val').textContent || '0';
+    var days = parseInt(document.getElementById('ai-followup-days').value) || 14;
+    aiGenerateFollowup(number, contact, parseFloat(total) || 0, days);
+}
+
+window.aiGenerateInvEmail = aiGenerateInvEmail;
+window.aiGenerateInvFollowup = aiGenerateInvFollowup;
+window.useAiEmail = useAiEmail;

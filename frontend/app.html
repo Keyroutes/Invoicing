@@ -336,6 +336,28 @@
                             </div>
                         </div>
                     </div>
+                    <div style="margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                        <div class="glass-widget">
+                            <div class="widget-header"><h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Personalized Email</h3></div>
+                            <div class="widget-content">
+                                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">Generate a personalized invoice email using AI.</p>
+                                <button class="btn btn-primary btn-sm" onclick="aiGenerateInvEmail()">Generate Email</button>
+                                <div id="ai-email-preview" style="display:none;margin-top:12px;"></div>
+                            </div>
+                        </div>
+                        <div class="glass-widget">
+                            <div class="widget-header"><h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Payment Follow-up</h3></div>
+                            <div class="widget-content">
+                                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">Generate a follow-up email for overdue invoices.</p>
+                                <div style="display:flex;gap:8px;align-items:center;">
+                                    <input type="number" id="ai-followup-days" class="form-control" style="width:80px;" value="14" placeholder="Days">
+                                    <span style="font-size:0.85rem;color:var(--text-secondary);">days overdue</span>
+                                    <button class="btn btn-outline btn-sm" onclick="aiGenerateInvFollowup()">Generate</button>
+                                </div>
+                                <div id="ai-followup-result" style="margin-top:12px;"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ========== BILLS ========== -->
@@ -780,6 +802,17 @@
                             </table>
                         </div>
                     </div>
+                    <div style="margin-top:24px;">
+                        <div class="glass-widget">
+                            <div class="widget-header">
+                                <h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Payroll Anomalies</h3>
+                                <button class="btn btn-outline btn-sm" onclick="loadPayrollAnomalies()">Check Now</button>
+                            </div>
+                            <div class="widget-content" id="payroll-anomalies">
+                                <p style="font-size:0.85rem;color:var(--text-secondary);">AI checks for payslips that differ >20% from the previous period.</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ========== DEPARTMENTS ========== -->
@@ -1062,6 +1095,26 @@
                                 <div id="att-employee-buttons" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
                             </div>
                         </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+                            <div class="glass-widget">
+                                <div class="widget-header">
+                                    <h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Attendance Alerts</h3>
+                                    <button class="btn btn-outline btn-sm" onclick="loadAttendanceAlerts()">Scan</button>
+                                </div>
+                                <div class="widget-content" id="attendance-alerts">
+                                    <p style="font-size:0.85rem;color:var(--text-secondary);">AI detects lateness patterns, extended breaks, missed clock-outs, and burnout risk.</p>
+                                </div>
+                            </div>
+                            <div class="glass-widget">
+                                <div class="widget-header">
+                                    <h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Summary</h3>
+                                    <button class="btn btn-outline btn-sm" onclick="loadAttendanceSummary()">Generate</button>
+                                </div>
+                                <div class="widget-content" id="ai-attendance-summary">
+                                    <p style="font-size:0.85rem;color:var(--text-secondary);">AI-generated natural language summary of the last 30 days attendance data.</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- HISTORY TAB -->
@@ -1314,6 +1367,13 @@
                                         <button class="btn btn-outline btn-sm" onclick="downloadRecResume()">Download</button>
                                     </div>
                                 </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>AI Screening</h3></div>
+                                    <div class="widget-content" id="ai-screen-result">
+                                        <p style="font-size:0.85rem;color:var(--text-secondary);">Click below to score this candidate against the job requirements.</p>
+                                        <button class="btn btn-primary btn-sm" onclick="aiScreenResume()" style="margin-top:8px;">AI Screen Candidate</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1369,6 +1429,15 @@
                         <div class="form-group"><label>Start Date</label><input type="date" id="emp-start-date" class="form-control"></div>
                         <div class="form-group"><label>Emergency Contact</label><input type="text" id="emp-emergency-contact" class="form-control" placeholder="Contact name"></div>
                         <div class="form-group"><label>Emergency Phone</label><input type="tel" id="emp-emergency-phone" class="form-control" placeholder="Contact phone"></div>
+                    </div>
+                    <div style="margin-top:16px;padding:12px;background:rgba(67,97,238,0.06);border:1px solid rgba(67,97,238,0.15);border-radius:8px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <i class="bi bi-magic" style="color:var(--primary-color);"></i>
+                            <strong style="font-size:0.85rem;">AI Onboarding</strong>
+                        </div>
+                        <p style="font-size:0.8rem;color:var(--text-secondary);margin:0 0 8px;">Generate a custom onboarding checklist based on the job title and department.</p>
+                        <button type="button" id="ai-onboard-btn" class="btn btn-outline btn-sm" onclick="aiGenerateOnboarding()">AI Generate Checklist</button>
+                        <div id="ai-onboard-preview"></div>
                     </div>
                     <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
                         <button type="button" class="btn btn-outline" onclick="closeAddEmployeeModal()">Cancel</button>
