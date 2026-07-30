@@ -32,6 +32,8 @@
                     <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')">Reports</a>
                     <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')">Contacts</a>
                     <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')">People</a>
+                    <a href="#" class="nav-item" id="nav-leave" onclick="event.preventDefault();showView('leave-view')">Leave</a>
+                    <a href="#" class="nav-item" id="nav-goals" onclick="event.preventDefault();showView('goals-view')">Goals</a>
                     <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')">Onboarding</a>
                     <a href="#" class="nav-item" id="nav-recruitment" onclick="event.preventDefault();showView('recruitment-view')">Recruitment</a>
                     <a href="#" class="nav-item" id="nav-payroll" onclick="event.preventDefault();showView('payroll-view')">Payroll</a>
@@ -819,6 +821,56 @@
                                 <p style="font-size:0.85rem;color:var(--text-secondary);">AI checks for payslips that differ >20% from the previous period.</p>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ========== LEAVE MANAGEMENT ========== -->
+                <div id="leave-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div>
+                            <h1>Leave Management</h1>
+                            <p class="subtitle">Review and manage employee leave applications</p>
+                        </div>
+                    </div>
+                    <div class="invoices-tabs" id="leave-view-tabs">
+                        <button class="tab active" onclick="filterLeaveView('all', this)">All</button>
+                        <button class="tab" onclick="filterLeaveView('pending', this)">Pending</button>
+                        <button class="tab" onclick="filterLeaveView('approved', this)">Approved</button>
+                        <button class="tab" onclick="filterLeaveView('rejected', this)">Rejected</button>
+                    </div>
+                    <div class="widget">
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Type</th>
+                                        <th>Start Date</th>
+                                        <th>End Date</th>
+                                        <th>Days</th>
+                                        <th>Reason</th>
+                                        <th>Status</th>
+                                        <th class="text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="leave-view-table-body">
+                                    <tr><td colspan="8" class="loading">Loading leave requests...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== GOALS ========== -->
+                <div id="goals-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div>
+                            <h1>Employee Goals</h1>
+                            <p class="subtitle">Track and manage goals across your team</p>
+                        </div>
+                    </div>
+                    <div id="goals-view-content">
+                        <div id="goals-view-list"></div>
                     </div>
                 </div>
 

@@ -50,6 +50,8 @@ function showView(viewId) {
         'employee-detail-view': 'nav-people',
         'departments-view': 'nav-people',
         'attendance-view': 'nav-people',
+        'leave-view': 'nav-leave',
+        'goals-view': 'nav-goals',
         'onboarding-hub-view': 'nav-onboarding',
         'recruitment-view': 'nav-recruitment',
         'payroll-view': 'nav-payroll',
@@ -3018,6 +3020,8 @@ var origShowView = showView;
 showView = function(viewId) {
     origShowView(viewId);
     if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); showPeopleTab('employees'); }
+    if (viewId === 'leave-view') loadLeaveView();
+    if (viewId === 'goals-view') loadGoalsView();
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'onboarding-hub-view') loadOnboardingHub();
     if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
@@ -3826,6 +3830,85 @@ async function actionLeave(id, action, empName) {
 window.loadLeaveRequests = loadLeaveRequests;
 window.filterLeaveRequests = filterLeaveRequests;
 window.actionLeave = actionLeave;
+
+// --- Dedicated Leave View ---
+var _leaveViewFilter = 'all';
+async function loadLeaveView() {
+    try {
+        var res = await fetch('/api/leave/requests', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        window._allLeaveViewData = await res.json();
+        renderLeaveView();
+    } catch(e) {}
+}
+function renderLeaveView() {
+    var data = window._allLeaveViewData || [];
+    var filtered = _leaveViewFilter === 'all' ? data : data.filter(function(l) { return l.status === _leaveViewFilter; });
+    var tbody = document.getElementById('leave-view-table-body');
+    if (!tbody) return;
+    if (filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No leave requests found.</td></tr>'; return; }
+    tbody.innerHTML = filtered.map(function(l) {
+        var statusClass = l.status === 'approved' ? 'status-active' : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
+        var actions = l.status === 'pending'
+            ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
+            : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
+        return '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>';
+    }).join('');
+}
+function filterLeaveView(filter, btn) {
+    _leaveViewFilter = filter;
+    document.querySelectorAll('#leave-view-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    renderLeaveView();
+}
+window.loadLeaveView = loadLeaveView;
+window.filterLeaveView = filterLeaveView;
+
+// --- Dedicated Goals View ---
+async function loadGoalsView() {
+    var container = document.getElementById('goals-view-list');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">Loading goals...</div>';
+    try {
+        var empRes = await fetch('/api/employees?status=active');
+        var emps = await empRes.json();
+        var allGoals = [];
+        for (var i = 0; i < emps.length; i++) {
+            try {
+                var gRes = await fetch('/api/employees/' + emps[i].id + '/goals');
+                if (gRes.ok) {
+                    var goals = await gRes.json();
+                    goals.forEach(function(g) { g.employee_name = emps[i].first_name + ' ' + emps[i].last_name; g.employee_id = emps[i].id; });
+                    allGoals = allGoals.concat(goals);
+                }
+            } catch(e) {}
+        }
+        if (allGoals.length === 0) {
+            container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Go to People > click an employee > Goals to add goals.</div></div>';
+            return;
+        }
+        container.innerHTML = '<div class="glass-widget"><div class="widget-content" style="padding:0;">' +
+            '<table class="data-table"><thead><tr><th>Employee</th><th>Goal</th><th>Progress</th><th>Category</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
+            allGoals.map(function(g) {
+                var progress = g.target_value > 0 ? Math.min(Math.round(g.current_value / g.target_value * 100), 100) : 0;
+                var pColor = g.priority === 'high' ? 'var(--danger-color)' : g.priority === 'low' ? 'var(--success-color)' : 'var(--warning-color)';
+                var sColor = g.status === 'completed' ? 'var(--success-color)' : 'var(--primary-color)';
+                return '<tr style="cursor:pointer;" onclick="viewEmployee(' + g.employee_id + ')">' +
+                    '<td><strong>' + esc(g.employee_name) + '</strong></td>' +
+                    '<td>' + esc(g.title) + '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(g.description || '') + '</span></td>' +
+                    '<td><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + progress + '%;background:' + sColor + ';"></div></div><span style="font-size:0.8rem;white-space:nowrap;">' + progress + '%</span></div></td>' +
+                    '<td><span style="font-size:0.8rem;">' + esc(g.category || '-') + '</span></td>' +
+                    '<td><span style="font-size:0.8rem;color:' + pColor + ';">' + esc(g.priority || '-') + '</span></td>' +
+                    '<td><span style="font-size:0.8rem;">' + (g.due_date || '-') + '</span></td>' +
+                    '<td><span class="status-pill" style="color:' + sColor + ';">' + (g.status || 'in_progress') + '</span></td>' +
+                '</tr>';
+            }).join('') +
+            '</tbody></table></div></div>';
+    } catch(e) {
+        container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger-color);">Failed to load goals.</div>';
+    }
+}
+window.loadGoalsView = loadGoalsView;
 
 // ==================== EMPLOYEE GOALS ====================
 var currentEmpGoals = [];
