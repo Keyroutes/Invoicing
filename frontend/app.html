@@ -514,7 +514,9 @@
                         <button class="tab" onclick="filterEmployees('onboarding', this)">Onboarding</button>
                         <button class="tab" onclick="filterEmployees('offboarding', this)">Offboarding</button>
                         <button class="tab" onclick="filterEmployees('terminated', this)">Terminated</button>
+                        <button class="tab" onclick="showPeopleTab('leave')">Leave</button>
                     </div>
+                    <div id="people-employees-panel">
                     <div class="widget">
                         <div class="table-actions">
                             <span id="employee-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
@@ -538,6 +540,34 @@
                                 </thead>
                                 <tbody id="employees-table-body"></tbody>
                             </table>
+                        </div>
+                    </div>
+                    </div>
+                    <div id="people-leave-panel" style="display:none;">
+                        <div class="invoices-tabs" id="leave-tabs" style="margin-top:0;">
+                            <button class="tab active" onclick="filterLeaveRequests('all', this)">All</button>
+                            <button class="tab" onclick="filterLeaveRequests('pending', this)">Pending</button>
+                            <button class="tab" onclick="filterLeaveRequests('approved', this)">Approved</button>
+                            <button class="tab" onclick="filterLeaveRequests('rejected', this)">Rejected</button>
+                        </div>
+                        <div class="widget">
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                        <tr>
+                                            <th>Employee</th>
+                                            <th>Type</th>
+                                            <th>Start Date</th>
+                                            <th>End Date</th>
+                                            <th>Days</th>
+                                            <th>Reason</th>
+                                            <th>Status</th>
+                                            <th class="text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="leave-requests-table-body"></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1231,44 +1261,10 @@
                                         <tbody id="rec-subs-tbody">
                                             <tr><td colspan="6" class="loading">Loading submissions...</td></tr>
                                         </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <!-- Leave Requests Section -->
-                    <div style="margin-top:24px;">
-                        <div class="invoices-header-area">
-                            <div>
-                                <h2>Leave Requests</h2>
-                                <p class="subtitle">Review and manage employee leave applications</p>
+                                    </table>
+                                </div>
                             </div>
                         </div>
-                        <div class="invoices-tabs" id="leave-tabs">
-                            <button class="tab active" onclick="filterLeaveRequests('all', this)">All</button>
-                            <button class="tab" onclick="filterLeaveRequests('pending', this)">Pending</button>
-                            <button class="tab" onclick="filterLeaveRequests('approved', this)">Approved</button>
-                            <button class="tab" onclick="filterLeaveRequests('rejected', this)">Rejected</button>
-                        </div>
-                        <div class="widget">
-                            <div class="table-responsive">
-                                <table class="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Employee</th>
-                                            <th>Type</th>
-                                            <th>Start Date</th>
-                                            <th>End Date</th>
-                                            <th>Days</th>
-                                            <th>Reason</th>
-                                            <th>Status</th>
-                                            <th class="text-right">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="leave-requests-table-body"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
                         <div id="rec-pipeline-view" style="display:none;">
                             <div id="rec-pipeline-board" style="display:flex;gap:16px;overflow-x:auto;padding-bottom:16px;"></div>
                         </div>

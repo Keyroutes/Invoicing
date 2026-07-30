@@ -1420,7 +1420,7 @@ async function loadHRStats() {
         if (!res.ok) return;
         var s = await res.json();
         var el = function(id) { return document.getElementById(id); };
-        if (el('hr-total')) el('hr-total').textContent = s.total || 0;
+        if (el('hr-total')) el('hr-total').textContent = s.total_employees || 0;
         if (el('hr-active')) el('hr-active').textContent = s.active || 0;
         if (el('hr-onboarding')) el('hr-onboarding').textContent = s.onboarding || 0;
         if (el('hr-offboarding')) el('hr-offboarding').textContent = s.offboarding || 0;
@@ -2764,37 +2764,28 @@ async function loadOrgChart() {
             container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:60px;">No employees to display. Add employees first.</div>';
             return;
         }
-        // Render by department groups
-        var departments = data.departments || {};
         var roots = data.roots || [];
-        // Root nodes first
+        var departments = data.departments || {};
         if (roots.length > 0) {
             var rootSection = document.createElement('div');
             rootSection.style.textAlign = 'center';
             rootSection.style.marginBottom = '40px';
             rootSection.innerHTML = '<h3 style="font-size:0.85rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">Leadership</h3>';
-            var rootNodes = document.createElement('div');
-            rootNodes.className = 'org-children';
-            rootNodes.style.position = 'relative';
-            roots.forEach(function(r) {
-                rootNodes.innerHTML += renderOrgNode(r);
-            });
-            rootSection.appendChild(rootNodes);
+            var tree = document.createElement('div');
+            tree.className = 'org-tree';
+            roots.forEach(function(r) { tree.appendChild(renderOrgTreeNode(r)); });
+            rootSection.appendChild(tree);
             container.appendChild(rootSection);
         }
-        // Department groups
         for (var deptName in departments) {
             var deptSection = document.createElement('div');
             deptSection.style.textAlign = 'center';
             deptSection.style.marginBottom = '40px';
-            deptSection.innerHTML = '<h3 style="font-size:0.85rem;color:var(--primary-color);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">' + deptName + '</h3>';
-            var deptNodes = document.createElement('div');
-            deptNodes.className = 'org-children';
-            deptNodes.style.position = 'relative';
-            departments[deptName].forEach(function(e) {
-                deptNodes.innerHTML += renderOrgNode(e);
-            });
-            deptSection.appendChild(deptNodes);
+            deptSection.innerHTML = '<h3 style="font-size:0.85rem;color:var(--primary-color);text-transform:uppercase;letter-spacing:1px;margin-bottom:20px;">' + esc(deptName) + '</h3>';
+            var tree = document.createElement('div');
+            tree.className = 'org-tree';
+            departments[deptName].forEach(function(e) { tree.appendChild(renderOrgTreeNode(e)); });
+            deptSection.appendChild(tree);
             container.appendChild(deptSection);
         }
     } catch (e) {
@@ -2803,19 +2794,41 @@ async function loadOrgChart() {
     }
 }
 
-function renderOrgNode(emp) {
-    return '<div class="org-node" onclick="viewEmployee(' + emp.id + ')">' +
-        '<div class="org-name">' + emp.name + '</div>' +
-        '<div class="org-title">' + (emp.job_title || '-') + '</div>' +
-        (emp.department ? '<div class="org-dept">' + emp.department + '</div>' : '') +
-        '</div>';
+function renderOrgTreeNode(emp) {
+    var hasChildren = emp.children && emp.children.length > 0;
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;position:relative;';
+    var node = document.createElement('div');
+    node.className = 'org-node';
+    node.style.cssText = 'cursor:pointer;padding:14px 20px;border-radius:12px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);text-align:center;min-width:160px;transition:all 0.2s;';
+    node.onmouseover = function() { this.style.borderColor = 'var(--primary-color)'; this.style.transform = 'translateY(-2px)'; };
+    node.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.1)'; this.style.transform = 'none'; };
+    node.setAttribute('onclick', 'viewEmployee(' + emp.id + ')');
+    node.innerHTML = '<div class="org-name" style="font-weight:700;font-size:0.9rem;">' + esc(emp.name) + '</div>' +
+        '<div class="org-title" style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">' + esc(emp.job_title || '-') + '</div>' +
+        (emp.department ? '<div class="org-dept" style="font-size:0.72rem;color:var(--primary-color);margin-top:4px;">' + esc(emp.department) + '</div>' : '');
+    wrapper.appendChild(node);
+    if (hasChildren) {
+        var line = document.createElement('div');
+        line.style.cssText = 'width:2px;height:20px;background:rgba(255,255,255,0.15);margin:0 auto;';
+        wrapper.appendChild(line);
+        var childrenRow = document.createElement('div');
+        childrenRow.style.cssText = 'display:flex;gap:20px;justify-content:center;position:relative;';
+        childrenRow.style.paddingTop = '10px';
+        childrenRow.style.borderTop = '2px solid rgba(255,255,255,0.1)';
+        emp.children.forEach(function(child) {
+            childrenRow.appendChild(renderOrgTreeNode(child));
+        });
+        wrapper.appendChild(childrenRow);
+    }
+    return wrapper;
 }
 
 // --- View Switcher HR hooks ---
 var origShowView = showView;
 showView = function(viewId) {
     origShowView(viewId);
-    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); }
+    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); showPeopleTab('employees'); }
     if (viewId === 'departments-view') fetchDepartments();
     if (viewId === 'onboarding-hub-view') loadOnboardingHub();
     if (viewId === 'payroll-view') fetchPayslips(currentPsFilter);
@@ -2824,6 +2837,23 @@ showView = function(viewId) {
     if (viewId === 'recruitment-view') loadRecruitmentForms();
 };
 window.showView = showView;
+
+function showPeopleTab(tab) {
+    var empPanel = document.getElementById('people-employees-panel');
+    var leavePanel = document.getElementById('people-leave-panel');
+    var tabs = document.querySelectorAll('#employee-tabs .tab');
+    tabs.forEach(function(t, i) { t.className = 'tab'; });
+    if (tab === 'leave') {
+        if (empPanel) empPanel.style.display = 'none';
+        if (leavePanel) leavePanel.style.display = 'block';
+        if (tabs[5]) tabs[5].className = 'tab active';
+    } else {
+        if (empPanel) empPanel.style.display = 'block';
+        if (leavePanel) leavePanel.style.display = 'none';
+        if (tabs[0]) tabs[0].className = 'tab active';
+    }
+}
+window.showPeopleTab = showPeopleTab;
 
 // --- Attendance Sub-Tabs ---
 function switchAttTab(tab) {

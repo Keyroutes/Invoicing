@@ -1543,8 +1543,8 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
     if existing:
         raise HTTPException(status_code=400, detail="Employee with this email already exists")
 
-    emp_count = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).count()
-    emp_number = f"EMP-{emp_count + 1:04d}" if not body.employee_id else body.employee_id
+    max_num = db.query(sqlfunc.coalesce(sqlfunc.max(models.DBEmployee.id), 0)).filter(models.DBEmployee.client_id == client.id).scalar()
+    emp_number = f"EMP-{max_num + 1:04d}" if not body.employee_id else body.employee_id
 
     emp = models.DBEmployee(
         client_id=client.id, employee_id=emp_number,
