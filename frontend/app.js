@@ -261,7 +261,7 @@ function showSearchResults(results, q) {
     if (results.length === 0) {
         dropdown.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);font-size:0.85rem;">No results for "' + esc(q) + '"</div>';
     } else {
-        var types = { invoice: 'Invoices', contact: 'Contacts', employee: 'People', payslip: 'Payroll' };
+        var types = { invoice: 'Invoices', contact: 'Contacts', employee: 'Employees', payslip: 'Payroll' };
         var icons = { invoice: '&#128196;', contact: '&#128100;', employee: '&#128101;', payslip: '&#128176;' };
         var grouped = {};
         results.forEach(function(r) {
@@ -3019,7 +3019,7 @@ function renderOrgTreeNode(emp) {
 var origShowView = showView;
 showView = function(viewId) {
     origShowView(viewId);
-    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); loadLeaveRequests(); showPeopleTab('employees'); }
+    if (viewId === 'employees-view') { fetchEmployees(currentEmpFilter); loadHRStats(); }
     if (viewId === 'leave-view') loadLeaveView();
     if (viewId === 'goals-view') loadGoalsView();
     if (viewId === 'departments-view') fetchDepartments();
@@ -3032,19 +3032,7 @@ showView = function(viewId) {
 window.showView = showView;
 
 function showPeopleTab(tab) {
-    var empPanel = document.getElementById('people-employees-panel');
-    var leavePanel = document.getElementById('people-leave-panel');
-    var tabs = document.querySelectorAll('#employee-tabs .tab');
-    tabs.forEach(function(t, i) { t.className = 'tab'; });
-    if (tab === 'leave') {
-        if (empPanel) empPanel.style.display = 'none';
-        if (leavePanel) leavePanel.style.display = 'block';
-        if (tabs[5]) tabs[5].className = 'tab active';
-    } else {
-        if (empPanel) empPanel.style.display = 'block';
-        if (leavePanel) leavePanel.style.display = 'none';
-        if (tabs[0]) tabs[0].className = 'tab active';
-    }
+    // Leave tab removed — now a standalone view
 }
 window.showPeopleTab = showPeopleTab;
 
@@ -3884,7 +3872,7 @@ async function loadGoalsView() {
             } catch(e) {}
         }
         if (allGoals.length === 0) {
-            container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Go to People > click an employee > Goals to add goals.</div></div>';
+            container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Go to Employees > click an employee > Goals to add goals.</div></div>';
             return;
         }
         container.innerHTML = '<div class="glass-widget"><div class="widget-content" style="padding:0;">' +

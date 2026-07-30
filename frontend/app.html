@@ -31,7 +31,7 @@
                     <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')">Bills</a>
                     <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')">Reports</a>
                     <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')">Contacts</a>
-                    <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')">People</a>
+                    <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')">Employees</a>
                     <a href="#" class="nav-item" id="nav-leave" onclick="event.preventDefault();showView('leave-view')">Leave</a>
                     <a href="#" class="nav-item" id="nav-goals" onclick="event.preventDefault();showView('goals-view')">Goals</a>
                     <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')">Onboarding</a>
@@ -501,8 +501,8 @@
                 <div id="employees-view" class="view-section dashboard" style="display:none;">
                     <div class="invoices-header-area">
                         <div>
-                            <h1>People</h1>
-                            <p class="subtitle">Manage your team members and departments</p>
+                            <h1>Employees</h1>
+                            <p class="subtitle">Manage your team members</p>
                         </div>
                         <div class="invoices-actions">
                             <button class="btn btn-outline" onclick="showView('departments-view')">Departments</button>
@@ -538,9 +538,7 @@
                         <button class="tab" onclick="filterEmployees('onboarding', this)">Onboarding</button>
                         <button class="tab" onclick="filterEmployees('offboarding', this)">Offboarding</button>
                         <button class="tab" onclick="filterEmployees('terminated', this)">Terminated</button>
-                        <button class="tab" onclick="showPeopleTab('leave')">Leave</button>
                     </div>
-                    <div id="people-employees-panel">
                     <div class="widget">
                         <div class="table-actions">
                             <span id="employee-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
@@ -566,34 +564,6 @@
                             </table>
                         </div>
                     </div>
-                    </div>
-                    <div id="people-leave-panel" style="display:none;">
-                        <div class="invoices-tabs" id="leave-tabs" style="margin-top:0;">
-                            <button class="tab active" onclick="filterLeaveRequests('all', this)">All</button>
-                            <button class="tab" onclick="filterLeaveRequests('pending', this)">Pending</button>
-                            <button class="tab" onclick="filterLeaveRequests('approved', this)">Approved</button>
-                            <button class="tab" onclick="filterLeaveRequests('rejected', this)">Rejected</button>
-                        </div>
-                        <div class="widget">
-                            <div class="table-responsive">
-                                <table class="table">
-                                    <thead>
-                                        <tr>
-                                            <th>Employee</th>
-                                            <th>Type</th>
-                                            <th>Start Date</th>
-                                            <th>End Date</th>
-                                            <th>Days</th>
-                                            <th>Reason</th>
-                                            <th>Status</th>
-                                            <th class="text-right">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="leave-requests-table-body"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- (Add Employee modal moved outside layout) -->
@@ -602,7 +572,7 @@
                 <div id="employee-detail-view" class="view-section dashboard" style="display:none;">
                     <div class="invoices-header-area">
                         <div style="display:flex;gap:8px;align-items:center;">
-                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">People</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">Employees</span>
                             <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
                             <h1 id="emp-detail-name">Employee</h1>
                             <span class="status-pill" id="emp-detail-status">-</span>
@@ -878,7 +848,7 @@
                 <div id="departments-view" class="view-section dashboard" style="display:none;">
                     <div class="invoices-header-area">
                         <div style="display:flex;gap:8px;align-items:center;">
-                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">People</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">Employees</span>
                             <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
                             <h1>Departments</h1>
                         </div>
@@ -1102,7 +1072,7 @@
                 <div id="attendance-view" class="view-section dashboard" style="display:none;">
                     <div class="invoices-header-area">
                         <div style="display:flex;gap:8px;align-items:center;">
-                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">People</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('employees-view')">Employees</span>
                             <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
                             <h1>Attendance</h1>
                         </div>
