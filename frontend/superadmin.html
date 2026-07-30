@@ -406,6 +406,7 @@
     </div>
 
     <script>
+        function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
         var allClients = [];
 
         async function checkAuth() {
@@ -448,12 +449,12 @@
             }
             tbody.innerHTML = clients.map(function(c) {
                 return '<tr>' +
-                    '<td><div class="client-name">' + (c.company_name || c.contact_name || 'Unnamed') + '</div><div class="client-email">' + c.email + '</div></td>' +
+                    '<td><div class="client-name">' + esc(c.company_name || c.contact_name || 'Unnamed') + '</div><div class="client-email">' + esc(c.email) + '</div></td>' +
                     '<td><span class="status-badge ' + (c.is_active ? 'status-active' : 'status-disabled') + '">' + (c.is_active ? 'Active' : 'Disabled') + '</span></td>' +
                     '<td><span class="status-badge ' + (c.is_onboarded ? 'status-onboarded' : 'status-pending') + '">' + (c.is_onboarded ? 'Complete' : 'Pending') + '</span></td>' +
-                    '<td>' + c.invoice_count + '</td>' +
-                    '<td>£' + (c.outstanding || 0).toLocaleString() + '</td>' +
-                    '<td style="color:#64748b;font-size:0.8rem;">' + (c.created_at || '').substring(0, 10) + '<br><span style="font-size:0.7rem;">Login #' + (c.login_count || 0) + '</span></td>' +
+                    '<td>' + esc(c.invoice_count) + '</td>' +
+                    '<td>£' + esc((c.outstanding || 0).toLocaleString()) + '</td>' +
+                    '<td style="color:#64748b;font-size:0.8rem;">' + esc((c.created_at || '').substring(0, 10)) + '<br><span style="font-size:0.7rem;">Login #' + esc(c.login_count || 0) + '</span></td>' +
                     '<td>' +
                         '<button class="action-btn" onclick="viewClient(' + c.id + ')">View</button>' +
                         '<button class="action-btn toggle" onclick="toggleClient(' + c.id + ')">' + (c.is_active ? 'Disable' : 'Enable') + '</button>' +
@@ -480,18 +481,18 @@
                 var client = await res.json();
                 document.getElementById('modal-client-name').textContent = client.company_name || client.contact_name || 'Client';
                 document.getElementById('modal-details').innerHTML =
-                    '<div class="detail-item"><label>Email</label><span>' + client.email + '</span></div>' +
-                    '<div class="detail-item"><label>Phone</label><span>' + (client.phone_number || '-') + '</span></div>' +
-                    '<div class="detail-item"><label>Address</label><span>' + (client.address || '-') + '</span></div>' +
-                    '<div class="detail-item"><label>ABN</label><span>' + (client.abn || '-') + '</span></div>' +
-                    '<div class="detail-item"><label>Industry</label><span>' + (client.industry || '-') + '</span></div>' +
-                    '<div class="detail-item"><label>Joined</label><span>' + client.created_at + '</span></div>' +
+                    '<div class="detail-item"><label>Email</label><span>' + esc(client.email) + '</span></div>' +
+                    '<div class="detail-item"><label>Phone</label><span>' + esc(client.phone_number || '-') + '</span></div>' +
+                    '<div class="detail-item"><label>Address</label><span>' + esc(client.address || '-') + '</span></div>' +
+                    '<div class="detail-item"><label>ABN</label><span>' + esc(client.abn || '-') + '</span></div>' +
+                    '<div class="detail-item"><label>Industry</label><span>' + esc(client.industry || '-') + '</span></div>' +
+                    '<div class="detail-item"><label>Joined</label><span>' + esc(client.created_at) + '</span></div>' +
                     '<div class="detail-item"><label>Status</label><span>' + (client.is_active ? 'Active' : 'Disabled') + '</span></div>' +
                     '<div class="detail-item"><label>Onboarded</label><span>' + (client.is_onboarded ? 'Yes' : 'No') + '</span></div>';
                 var invHtml = '';
                 if (client.invoices && client.invoices.length > 0) {
                     client.invoices.forEach(function(inv) {
-                        invHtml += '<tr><td>' + inv.number + '</td><td><span class="status-badge status-' + inv.status.toLowerCase().replace(/\s+/g, '-') + '">' + inv.status + '</span></td><td>£' + (inv.due || 0).toFixed(2) + '</td><td>' + (inv.date || '') + '</td></tr>';
+                        invHtml += '<tr><td>' + esc(inv.number) + '</td><td><span class="status-badge status-' + esc(inv.status.toLowerCase().replace(/\s+/g, '-')) + '">' + esc(inv.status) + '</span></td><td>£' + (inv.due || 0).toFixed(2) + '</td><td>' + esc(inv.date || '') + '</td></tr>';
                     });
                 } else {
                     invHtml = '<tr><td colspan="4" style="text-align:center;color:#475569;padding:20px;">No invoices yet</td></tr>';
@@ -561,12 +562,12 @@
                     '<span style="background:rgba(66,133,244,0.2);color:#4285f4;padding:2px 8px;border-radius:4px;font-size:0.75rem;">Google</span>' :
                     '<span style="background:rgba(148,163,184,0.2);color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:0.75rem;">Password</span>';
                 return '<tr>' +
-                    '<td style="font-weight:500;">' + l.email + '</td>' +
-                    '<td style="color:#64748b;">' + l.user_type + '</td>' +
+                    '<td style="font-weight:500;">' + esc(l.email) + '</td>' +
+                    '<td style="color:#64748b;">' + esc(l.user_type) + '</td>' +
                     '<td>' + methodBadge + '</td>' +
-                    '<td style="color:#64748b;font-family:monospace;font-size:0.8rem;">' + (l.ip_address || '-') + '</td>' +
-                    '<td><span style="color:' + statusColor + ';font-weight:600;">' + l.status + '</span></td>' +
-                    '<td style="color:#64748b;font-size:0.8rem;">' + (l.created_at || '') + '</td>' +
+                    '<td style="color:#64748b;font-family:monospace;font-size:0.8rem;">' + esc(l.ip_address || '-') + '</td>' +
+                    '<td><span style="color:' + statusColor + ';font-weight:600;">' + esc(l.status) + '</span></td>' +
+                    '<td style="color:#64748b;font-size:0.8rem;">' + esc(l.created_at || '') + '</td>' +
                 '</tr>';
             }).join('');
         }
