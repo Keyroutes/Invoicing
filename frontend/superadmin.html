@@ -326,7 +326,7 @@
             </div>
             <div class="stat-card danger">
                 <div class="stat-label">Outstanding</div>
-                <div class="stat-value" id="stat-outstanding">$0</div>
+                <div class="stat-value" id="stat-outstanding">\u00A30</div>
             </div>
         </div>
         <div class="stats-grid" style="margin-top:16px;">
@@ -426,7 +426,7 @@
                 document.getElementById('stat-total').textContent = data.total_clients;
                 document.getElementById('stat-active').textContent = data.active_clients;
                 document.getElementById('stat-invoices').textContent = data.total_invoices;
-                document.getElementById('stat-outstanding').textContent = '$' + data.total_outstanding.toLocaleString();
+                document.getElementById('stat-outstanding').textContent = '\u00A3' + data.total_outstanding.toLocaleString();
             } catch (e) { console.error(e); }
         }
 
@@ -452,7 +452,7 @@
                     '<td><span class="status-badge ' + (c.is_active ? 'status-active' : 'status-disabled') + '">' + (c.is_active ? 'Active' : 'Disabled') + '</span></td>' +
                     '<td><span class="status-badge ' + (c.is_onboarded ? 'status-onboarded' : 'status-pending') + '">' + (c.is_onboarded ? 'Complete' : 'Pending') + '</span></td>' +
                     '<td>' + c.invoice_count + '</td>' +
-                    '<td>$' + (c.outstanding || 0).toLocaleString() + '</td>' +
+                    '<td>\u00A3' + (c.outstanding || 0).toLocaleString() + '</td>' +
                     '<td style="color:#64748b;font-size:0.8rem;">' + (c.created_at || '').substring(0, 10) + '<br><span style="font-size:0.7rem;">Login #' + (c.login_count || 0) + '</span></td>' +
                     '<td>' +
                         '<button class="action-btn" onclick="viewClient(' + c.id + ')">View</button>' +
@@ -491,7 +491,7 @@
                 var invHtml = '';
                 if (client.invoices && client.invoices.length > 0) {
                     client.invoices.forEach(function(inv) {
-                        invHtml += '<tr><td>' + inv.number + '</td><td><span class="status-badge status-' + inv.status.toLowerCase().replace(/\s+/g, '-') + '">' + inv.status + '</span></td><td>$' + (inv.due || 0).toFixed(2) + '</td><td>' + (inv.date || '') + '</td></tr>';
+                        invHtml += '<tr><td>' + inv.number + '</td><td><span class="status-badge status-' + inv.status.toLowerCase().replace(/\s+/g, '-') + '">' + inv.status + '</span></td><td>\u00A3' + (inv.due || 0).toFixed(2) + '</td><td>' + (inv.date || '') + '</td></tr>';
                     });
                 } else {
                     invHtml = '<tr><td colspan="4" style="text-align:center;color:#475569;padding:20px;">No invoices yet</td></tr>';

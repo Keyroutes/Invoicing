@@ -91,7 +91,7 @@
       <i class="bi bi-calendar3"></i> History
     </div>
     <div class="nav-tab-item" data-tab="overtime" onclick="switchTab('overtime')">
-      <i class="bi bi-clock-history"></i> Overtime
+      <i class="bi bi-speedometer2"></i> Overtime
     </div>
     <div class="nav-tab-item" data-tab="payslips" onclick="switchTab('payslips')">
       <i class="bi bi-receipt"></i> Payslips
@@ -232,9 +232,11 @@
             .then(function(r) { return r.json(); }).then(function(d) { currentLocation.label = d.display_name || ''; });
           document.getElementById('locStatus').innerHTML = '<i class="bi bi-check-circle"></i> Location ready';
         },
-        function() { document.getElementById('locStatus').innerHTML = '<i class="bi bi-exclamation-circle"></i> Location unavailable'; },
+        function() { document.getElementById('locStatus').innerHTML = '<i class="bi bi-exclamation-circle"></i> Location access denied. Clock in without location.'; },
         { enableHighAccuracy: true }
       );
+    } else {
+      document.getElementById('locStatus').innerHTML = '<i class="bi bi-info-circle"></i> Geolocation not supported';
     }
 
     function switchTab(tab) {
@@ -288,7 +290,8 @@
         updateClockUI();
         updateElapsed(data.elapsed_hours || 0);
         document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
-        document.getElementById('todayHours').textContent = (data.total_hours > 0 ? data.total_hours : 0) + 'h';
+        var th = data.total_hours > 0 ? data.total_hours : 0;
+        document.getElementById('todayHours').textContent = Math.floor(th) + 'h ' + Math.round((th - Math.floor(th)) * 60) + 'm';
         if (isClockedIn && !isOnBreak) startElapsedTimer();
       } catch (e) { console.error('loadTodayAttendance error:', e); }
     }
@@ -439,7 +442,7 @@
               '<td>' + new Date(r.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</td>' +
               '<td>' + (r.clock_in || '-') + '</td>' +
               '<td>' + (r.clock_out || '-') + '</td>' +
-              '<td><strong>' + hours + 'h</strong></td>' +
+              '<td><strong>' + Math.floor(hours) + 'h ' + Math.round((hours - Math.floor(hours)) * 60) + 'm</strong></td>' +
               '<td style="color:var(--warning);">' + brk + '</td>' +
               '<td><span class="badge-type ' + ctClass + '">' + ct + '</span></td>' +
               '<td><span class="badge bg-' + (r.status === 'completed' ? 'success' : 'primary') + '">' + r.status + '</span></td>' +
@@ -473,7 +476,7 @@
             payslipList.innerHTML += '<div class="payslip-card">' +
               '<div><div style="font-weight:600;">' + p.number + '</div>' +
               '<div style="color:#64748b; font-size:0.85rem;">' + p.period_start + ' to ' + p.period_end + '</div></div>' +
-              '<div style="text-align:right;"><div style="font-weight:700; color:#1e293b;">$' + parseFloat(p.net_pay || 0).toLocaleString() + '</div>' +
+              '<div style="text-align:right;"><div style="font-weight:700; color:#1e293b;">\u00A3' + parseFloat(p.net_pay || 0).toLocaleString() + '</div>' +
               '<span class="badge bg-' + (p.status === 'paid' ? 'success' : p.status === 'sent' ? 'primary' : 'secondary') + '">' + p.status + '</span></div>' +
             '</div>';
           }

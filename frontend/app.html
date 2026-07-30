@@ -69,15 +69,15 @@
                     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
-                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-invoiced">$0.00</div>
+                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-invoiced">\u00A30.00</div>
                         </section>
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Revenue Collected</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="dash-total-revenue">$0.00</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="dash-total-revenue">\u00A30.00</div>
                         </section>
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Outstanding</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="dash-invoices-owed">$0.00</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="dash-invoices-owed">\u00A30.00</div>
                         </section>
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoices</div>
@@ -249,7 +249,7 @@
                                 <div style="display:flex;justify-content:flex-end;">
                                     <div style="width:350px;font-size:0.95rem;">
                                         <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span id="summary-subtotal">0.00</span></div>
-                                        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--text-primary);margin-bottom:8px;"><span>Total VAT</span><span id="summary-vat">0.00</span></div>
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);margin-bottom:8px;"><span>Total VAT</span><span id="summary-vat">0.00</span></div>
                                         <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;"><span>Total</span><span id="summary-total">0.00</span></div>
                                     </div>
                                 </div>
@@ -291,7 +291,7 @@
                                     <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="view-inv-number-val">-</div>
                                     <div style="margin-top:8px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Issue Date:</span> <span id="view-inv-issue-date">-</span></div>
                                     <div style="margin-top:4px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Due Date:</span> <span id="view-inv-due-date">-</span></div>
-                                    <div style="margin-top:8px;font-size:1.1rem;font-weight:600;color:var(--warning-color);">Amount Due: $<span id="view-inv-due-val">0.00</span></div>
+                                    <div style="margin-top:8px;font-size:1.1rem;font-weight:600;color:var(--warning-color);">Amount Due: \u00A3<span id="view-inv-due-val">0.00</span></div>
                                 </div>
                             </div>
                             <div id="view-inv-company-details" style="display:none;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-md);margin-bottom:24px;font-size:0.9rem;color:var(--text-secondary);">
@@ -330,7 +330,7 @@
                             <div style="display:flex;justify-content:flex-end;">
                                 <div style="width:350px;font-size:0.95rem;">
                                     <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span id="view-summary-subtotal">0.00</span></div>
-                                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--text-primary);margin-bottom:8px;"><span>VAT (20%)</span><span id="view-summary-vat">0.00</span></div>
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);margin-bottom:8px;"><span>VAT (20%)</span><span id="view-summary-vat">0.00</span></div>
                                     <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;"><span>Total</span><span id="view-summary-total">0.00</span></div>
                                 </div>
                             </div>
@@ -599,7 +599,7 @@
                                 <div class="widget-content">
                                     <div style="text-align:center;padding:8px 0;">
                                         <div style="color:var(--text-secondary);font-size:0.82rem;">Total Paid</div>
-                                        <div style="font-size:1.3rem;font-weight:700;color:var(--success-color);" id="emp-total-paid">$0.00</div>
+                                        <div style="font-size:1.3rem;font-weight:700;color:var(--success-color);" id="emp-total-paid">\u00A30.00</div>
                                     </div>
                                     <div style="text-align:center;padding:8px 0;border-top:1px solid var(--border-color);margin-top:8px;">
                                         <div style="color:var(--text-secondary);font-size:0.82rem;">Payslips</div>
@@ -649,7 +649,7 @@
                                     <div style="margin-top:8px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Employee:</span> <span id="ps-detail-emp-name">-</span></div>
                                     <div style="margin-top:4px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Period:</span> <span id="ps-detail-period">-</span></div>
                                     <div style="margin-top:4px;font-size:0.9rem;"><span style="color:var(--text-secondary);">Pay Date:</span> <span id="ps-detail-pay-date">-</span></div>
-                                    <div style="margin-top:8px;font-size:1.1rem;font-weight:600;color:var(--success-color);">Net Pay: $<span id="ps-detail-net">0.00</span></div>
+                                    <div style="margin-top:8px;font-size:1.1rem;font-weight:600;color:var(--success-color);">Net Pay: \u00A3<span id="ps-detail-net">0.00</span></div>
                                 </div>
                             </div>
                             <div id="ps-open-tracking" style="display:none;padding:12px 16px;background:rgba(0,240,255,0.05);border:1px solid rgba(0,240,255,0.15);border-radius:var(--radius-md);margin-bottom:24px;align-items:center;gap:24px;">
@@ -680,7 +680,7 @@
                             </div>
                             <div style="margin-top:24px;padding:20px;background:linear-gradient(135deg,rgba(0,240,255,0.1),rgba(112,255,255,0.05));border-radius:var(--radius-md);text-align:right;">
                                 <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:4px;">NET PAY</div>
-                                <div style="font-size:2rem;font-weight:700;color:var(--primary-color);" id="ps-detail-net-big">$0.00</div>
+                                <div style="font-size:2rem;font-weight:700;color:var(--primary-color);" id="ps-detail-net-big">\u00A30.00</div>
                             </div>
                             <div id="ps-detail-notes" style="margin-top:24px;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-md);font-size:0.9rem;color:var(--text-secondary);display:none;">
                                 <strong>Notes:</strong> <span id="ps-detail-notes-text"></span>
@@ -1312,14 +1312,14 @@
                     <div id="ps-preview" style="background:rgba(67,97,238,0.06);border:1px solid rgba(67,97,238,0.15);border-radius:12px;padding:16px;margin-top:16px;display:none;">
                         <div style="font-weight:600;font-size:0.9rem;margin-bottom:12px;color:var(--primary-color);">Live Preview</div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem;">
-                            <div>Basic Salary: <strong id="prev-basic">$0</strong></div>
-                            <div>Overtime Pay: <strong id="prev-ot">$0</strong></div>
-                            <div>Bonus: <strong id="prev-bonus">$0</strong></div>
-                            <div>Allowances: <strong id="prev-allow">$0</strong></div>
-                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;">Gross Pay: <strong id="prev-gross" style="color:var(--primary-color);">$0</strong></div>
-                            <div>Tax: <strong id="prev-tax" style="color:var(--danger-color);">$0</strong></div>
-                            <div>Deductions: <strong id="prev-ded" style="color:var(--danger-color);">$0</strong></div>
-                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;font-size:1.1rem;">Net Pay: <strong id="prev-net" style="color:var(--success-color);">$0</strong></div>
+                            <div>Basic Salary: <strong id="prev-basic">\u00A30</strong></div>
+                            <div>Overtime Pay: <strong id="prev-ot">\u00A30</strong></div>
+                            <div>Bonus: <strong id="prev-bonus">\u00A30</strong></div>
+                            <div>Allowances: <strong id="prev-allow">\u00A30</strong></div>
+                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;">Gross Pay: <strong id="prev-gross" style="color:var(--primary-color);">\u00A30</strong></div>
+                            <div>Tax: <strong id="prev-tax" style="color:var(--danger-color);">\u00A30</strong></div>
+                            <div>Deductions: <strong id="prev-ded" style="color:var(--danger-color);">\u00A30</strong></div>
+                            <div style="grid-column:span 2;border-top:1px solid rgba(67,97,238,0.15);padding-top:8px;font-size:1.1rem;">Net Pay: <strong id="prev-net" style="color:var(--success-color);">\u00A30</strong></div>
                         </div>
                         <div id="prev-attendance" style="margin-top:12px;font-size:0.8rem;color:var(--text-secondary);"></div>
                     </div>

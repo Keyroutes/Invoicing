@@ -566,22 +566,23 @@ function generateInvoicePDF() {
 
     // ===== LINE ITEMS TABLE =====
     // Page: w=612, h=792, ml=50, mr=562, usable=512
-    // Right-aligned cols: Qty(396) Price(460) Disc(498) Amount(556)
-    // Gaps: Qty↔Price=10pt, Price↔Disc=10pt, Disc↔Amount=6pt
+    // Conservative layout: desc stays LEAGUES away from qty
     var COL = {
-        itemL: ml,        itemR: ml + 80,
-        descL: ml + 86,
-        qtyR:  mr - 160,  // text right at 396
-        priceR: mr - 96,  // text right at 460
-        discR: mr - 64,   // text right at 498
-        amountR: mr       // text right at 556 (mr-6)
+        itemL: ml,        itemR: ml + 74,
+        descL: ml + 80,
+        qtyR:  mr - 140,
+        priceR: mr - 88,
+        discR: mr - 40,
+        amountR: mr - 4
     };
-    var descMaxW = COL.qtyR - 12 - COL.descL; // ~254pt
+    var descRightEdge = COL.qtyR - 30;
+    var descMaxW = descRightEdge - COL.descL - 4;
 
     function clipText(text, maxW) {
         var t = text || '-';
-        while (t.length > 0 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
-        return t || '-';
+        doc.setFont('helvetica', 'normal');
+        while (t.length > 1 && doc.getTextWidth(t) > maxW) t = t.slice(0, -1);
+        return t;
     }
 
     function drawTableHeader(doc, yPos) {
@@ -634,7 +635,26 @@ function generateInvoicePDF() {
         doc.setFont('helvetica', 'normal');
 
         var nameLines = doc.splitTextToSize(row.name || '-', nameMaxW);
-        var descLines = doc.splitTextToSize(row.desc || '-', descMaxW);
+        var rawDesc = doc.splitTextToSize(row.desc || '-', descMaxW);
+        var descLines = [];
+        rawDesc.forEach(function(line) {
+            if (doc.getTextWidth(line) <= descMaxW) { descLines.push(line); return; }
+            var words = line.split(/(\s+)/);
+            var cur = '';
+            words.forEach(function(w) {
+                if (doc.getTextWidth(cur + w) <= descMaxW) { cur += w; return; }
+                if (cur) descLines.push(cur);
+                while (doc.getTextWidth(w) > descMaxW && w.length > 1) {
+                    var chunk = w.slice(0, -1);
+                    while (chunk.length > 1 && doc.getTextWidth(chunk) > descMaxW) chunk = chunk.slice(0, -1);
+                    descLines.push(chunk);
+                    w = w.slice(chunk.length);
+                }
+                cur = w;
+            });
+            if (cur) descLines.push(cur);
+        });
+
         var maxLines = Math.max(nameLines.length, descLines.length);
         var rowH = Math.max(22, maxLines * 12 + 10);
 
@@ -655,13 +675,11 @@ function generateInvoicePDF() {
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        var nameC = nameLines.map(function(l) { return clipText(l, nameMaxW); });
-        doc.text(nameC, COL.itemL + 4, y + 14);
+        doc.text(nameLines, COL.itemL + 4, y + 14);
 
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 116, 139);
-        var descC = descLines.map(function(l) { return clipText(l, descMaxW); });
-        doc.text(descC, COL.descL + 4, y + 14);
+        doc.text(descLines, COL.descL + 4, y + 14);
 
         doc.text(row.qty, COL.qtyR, y + 14, { align: 'right' });
         doc.text(row.price, COL.priceR, y + 14, { align: 'right' });
@@ -1333,7 +1351,7 @@ function setupContactAutocomplete() {
                         var div = document.createElement('div');
                         div.className = 'contact-autocomplete-item';
                         var initial = (c.name || '?')[0].toUpperCase();
-                        div.innerHTML = '<div class="ca-icon">' + initial + '</div><div><div class="ca-name">' + c.name + '</div>' + (c.email ? '<div class="ca-email">' + c.email + '</div>' : '') + '</div>';
+                        div.innerHTML = '<div class="ca-icon">' + initial + '</div><div><div class="ca-name">' + esc(c.name) + '</div>' + (c.email ? '<div class="ca-email">' + esc(c.email) + '</div>' : '') + '</div>';
                         div.addEventListener('click', function() {
                             input.value = c.name;
                             var emailEl = document.getElementById('inv-email');
@@ -1347,7 +1365,7 @@ function setupContactAutocomplete() {
                     if (val.length > 0) {
                         var newDiv = document.createElement('div');
                         newDiv.className = 'contact-autocomplete-new';
-                        newDiv.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create new contact: <strong>' + val + '</strong>';
+                        newDiv.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create new contact: <strong>' + esc(val) + '</strong>';
                         newDiv.addEventListener('click', function() {
                             input.value = val;
                             dropdown.classList.remove('show');
@@ -2226,7 +2244,7 @@ async function viewPayslip(psId) {
         document.getElementById('ps-detail-ret').textContent = (ps.retirement || 0).toFixed(2);
         document.getElementById('ps-detail-other').textContent = (ps.other_deductions || 0).toFixed(2);
         document.getElementById('ps-detail-dedtotal').textContent = (ps.total_deductions || 0).toFixed(2);
-        document.getElementById('ps-detail-net-big').textContent = '$' + (ps.net_pay || 0).toFixed(2);
+        document.getElementById('ps-detail-net-big').textContent = '\u00A3' + (ps.net_pay || 0).toFixed(2);
 
         var notesEl = document.getElementById('ps-detail-notes');
         if (ps.notes) { notesEl.style.display = 'block'; document.getElementById('ps-detail-notes-text').textContent = ps.notes; }
@@ -2328,14 +2346,14 @@ function recalcPayslip() {
     var tax = Math.round(gross * (taxRate / 100) * 100) / 100;
     var totalDed = tax + empDeductions + insurance + retirement + otherDed;
     var net = Math.round((gross - totalDed) * 100) / 100;
-    document.getElementById('prev-basic').textContent = '$' + basic.toLocaleString();
-    document.getElementById('prev-ot').textContent = '$' + otPay.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-bonus').textContent = '$' + bonus.toLocaleString();
-    document.getElementById('prev-allow').textContent = '$' + allowances.toLocaleString();
-    document.getElementById('prev-gross').textContent = '$' + gross.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-tax').textContent = '$' + tax.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-ded').textContent = '$' + (empDeductions + insurance + retirement + otherDed).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-net').textContent = '$' + net.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-basic').textContent = '\u00A3' + basic.toLocaleString();
+    document.getElementById('prev-ot').textContent = '\u00A3' + otPay.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-bonus').textContent = '\u00A3' + bonus.toLocaleString();
+    document.getElementById('prev-allow').textContent = '\u00A3' + allowances.toLocaleString();
+    document.getElementById('prev-gross').textContent = '\u00A3' + gross.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-tax').textContent = '\u00A3' + tax.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-ded').textContent = '\u00A3' + (empDeductions + insurance + retirement + otherDed).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-net').textContent = '\u00A3' + net.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('ps-preview').style.display = 'block';
     var attInfo = document.getElementById('prev-attendance');
     if (currentPayDetails && attInfo) {
@@ -2597,7 +2615,7 @@ function generatePayslipPDF() {
     doc.text('NET PAY', margin + 20, y + 22);
     doc.setFontSize(24);
     doc.setTextColor(16, 185, 129);
-    doc.text('$' + netPay, w - margin - 20, y + 30, { align: 'right' });
+    doc.text('\u00A3' + netPay, w - margin - 20, y + 30, { align: 'right' });
     y += 70;
 
     // === FOOTER ===
