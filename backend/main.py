@@ -1177,8 +1177,211 @@ def create_contact(request: Request, body: dict = None, db: Session = Depends(ge
     db.refresh(contact)
     return {"id": contact.id, "name": contact.name, "email": contact.email or "", "phone_number": contact.phone_number or ""}
 
-# --- Google OAuth ---
 
+@app.put("/api/contacts/{contact_id}")
+def update_contact(contact_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    contact = db.query(models.DBContact).filter(models.DBContact.id == contact_id, models.DBContact.client_id == client.id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    if body:
+        if "name" in body: contact.name = body["name"]
+        if "email" in body: contact.email = body["email"]
+        if "phone_number" in body: contact.phone_number = body["phone_number"]
+        db.commit()
+        db.refresh(contact)
+    return {"id": contact.id, "name": contact.name, "email": contact.email or "", "phone_number": contact.phone_number or ""}
+
+
+@app.delete("/api/contacts/{contact_id}")
+def delete_contact(contact_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    contact = db.query(models.DBContact).filter(models.DBContact.id == contact_id, models.DBContact.client_id == client.id).first()
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    db.delete(contact)
+    db.commit()
+    return {"ok": True}
+
+
+# --- Bills API ---
+
+@app.get("/api/bills")
+def list_bills(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    bills = db.query(models.DBBill).filter(models.DBBill.client_id == client.id).order_by(models.DBBill.id.desc()).all()
+    return [{"id": b.id, "number": b.number, "vendor_name": b.vendor_name, "vendor_email": b.vendor_email or "",
+             "issue_date": b.issue_date or "", "due_date": b.due_date or "", "amount": b.amount or 0.0,
+             "tax_amount": b.tax_amount or 0.0, "total": b.total or 0.0, "amount_paid": b.amount_paid or 0.0,
+             "status": b.status or "Draft", "category": b.category or "general", "reference": b.reference or "",
+             "notes": b.notes or ""} for b in bills]
+
+
+@app.post("/api/bills")
+def create_bill(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body:
+        raise HTTPException(status_code=400, detail="Bill data required")
+    existing = db.query(models.DBBill).filter(models.DBBill.number == body.get("number", ""), models.DBBill.client_id == client.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Bill number already exists")
+    bill = models.DBBill(
+        client_id=client.id,
+        number=body.get("number", ""),
+        vendor_name=body.get("vendor_name", ""),
+        vendor_email=body.get("vendor_email", ""),
+        issue_date=body.get("issue_date", ""),
+        due_date=body.get("due_date", ""),
+        amount=body.get("amount", 0.0),
+        tax_amount=body.get("tax_amount", 0.0),
+        total=body.get("total", 0.0),
+        status=body.get("status", "Draft"),
+        category=body.get("category", "general"),
+        reference=body.get("reference", ""),
+        notes=body.get("notes", ""),
+    )
+    db.add(bill)
+    db.commit()
+    db.refresh(bill)
+    return {"id": bill.id, "number": bill.number}
+
+
+@app.get("/api/bills/{bill_id}")
+def get_bill(bill_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    bill = db.query(models.DBBill).filter(models.DBBill.id == bill_id, models.DBBill.client_id == client.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    line_items = db.query(models.DBBillLineItem).filter(models.DBBillLineItem.bill_id == bill.id).all()
+    return {
+        "id": bill.id, "number": bill.number, "vendor_name": bill.vendor_name, "vendor_email": bill.vendor_email or "",
+        "issue_date": bill.issue_date or "", "due_date": bill.due_date or "", "amount": bill.amount or 0.0,
+        "tax_amount": bill.tax_amount or 0.0, "total": bill.total or 0.0, "amount_paid": bill.amount_paid or 0.0,
+        "status": bill.status or "Draft", "category": bill.category or "general", "reference": bill.reference or "",
+        "notes": bill.notes or "",
+        "line_items": [{"id": li.id, "description": li.description or "", "qty": li.qty or 1, "price": li.price or 0, "tax_rate": li.tax_rate or "20%"} for li in line_items]
+    }
+
+
+@app.put("/api/bills/{bill_id}")
+def update_bill(bill_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    bill = db.query(models.DBBill).filter(models.DBBill.id == bill_id, models.DBBill.client_id == client.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    if body:
+        for field in ["number", "vendor_name", "vendor_email", "issue_date", "due_date", "amount", "tax_amount", "total", "amount_paid", "status", "category", "reference", "notes"]:
+            if field in body:
+                setattr(bill, field, body[field])
+        db.commit()
+        db.refresh(bill)
+    return {"id": bill.id, "number": bill.number}
+
+
+@app.delete("/api/bills/{bill_id}")
+def delete_bill(bill_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    bill = db.query(models.DBBill).filter(models.DBBill.id == bill_id, models.DBBill.client_id == client.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    db.query(models.DBBillLineItem).filter(models.DBBillLineItem.bill_id == bill.id).delete()
+    db.delete(bill)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/api/bills/{bill_id}/pay")
+def mark_bill_paid(bill_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    bill = db.query(models.DBBill).filter(models.DBBill.id == bill_id, models.DBBill.client_id == client.id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    bill.amount_paid = bill.total or bill.amount or 0.0
+    bill.status = "Paid"
+    db.commit()
+    return {"ok": True, "status": "Paid"}
+
+
+@app.get("/api/next-bill-number")
+def next_bill_number(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    last = db.query(models.DBBill).filter(models.DBBill.client_id == client.id).order_by(models.DBBill.id.desc()).first()
+    if last and last.number:
+        try:
+            num = int(last.number.replace("BILL-", "").replace("BILL", ""))
+            return {"number": f"BILL-{num + 1:04d}"}
+        except (ValueError, TypeError):
+            pass
+    return {"number": "BILL-0001"}
+
+
+@app.get("/api/reports/profit-loss")
+def profit_loss_report(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
+    bills = db.query(models.DBBill).filter(models.DBBill.client_id == client.id).all()
+    monthly_revenue = {}
+    monthly_expenses = {}
+    for inv in invoices:
+        m = inv.issue_date[:7] if inv.issue_date and len(inv.issue_date) >= 7 else "Unknown"
+        monthly_revenue[m] = monthly_revenue.get(m, 0) + (inv.paid or 0)
+    for b in bills:
+        m = b.issue_date[:7] if b.issue_date and len(b.issue_date) >= 7 else "Unknown"
+        monthly_expenses[m] = monthly_expenses.get(m, 0) + (b.total or 0)
+    all_months = sorted(set(list(monthly_revenue.keys()) + list(monthly_expenses.keys())))
+    total_revenue = sum(monthly_revenue.values())
+    total_expenses = sum(monthly_expenses.values())
+    return {
+        "months": all_months,
+        "revenue": [monthly_revenue.get(m, 0) for m in all_months],
+        "expenses": [monthly_expenses.get(m, 0) for m in all_months],
+        "profit": [monthly_revenue.get(m, 0) - monthly_expenses.get(m, 0) for m in all_months],
+        "total_revenue": total_revenue,
+        "total_expenses": total_expenses,
+        "net_profit": total_revenue - total_expenses,
+    }
+
+
+@app.get("/api/reports/balance-sheet")
+def balance_sheet_report(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
+    bills = db.query(models.DBBill).filter(models.DBBill.client_id == client.id).all()
+    total_invoiced = sum(inv.paid or 0 for inv in invoices)
+    outstanding = sum(inv.due or 0 for inv in invoices if inv.status != "Paid")
+    total_billed = sum(b.total or 0 for b in bills)
+    bills_paid = sum(b.amount_paid or 0 for b in bills)
+    bills_unpaid = sum((b.total or 0) - (b.amount_paid or 0) for b in bills)
+    return {
+        "assets": {"cash_collected": total_invoiced, "accounts_receivable": outstanding},
+        "liabilities": {"accounts_payable": bills_unpaid},
+        "equity": {"retained_earnings": total_invoiced - bills_paid},
+        "total_assets": total_invoiced + outstanding,
+        "total_liabilities": bills_unpaid,
+        "total_equity": total_invoiced - bills_paid,
+    }
+
+
+@app.get("/api/reports/cash-summary")
+def cash_summary_report(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
+    bills = db.query(models.DBBill).filter(models.DBBill.client_id == client.id).all()
+    monthly_in = {}
+    monthly_out = {}
+    for inv in invoices:
+        m = inv.issue_date[:7] if inv.issue_date and len(inv.issue_date) >= 7 else "Unknown"
+        monthly_in[m] = monthly_in.get(m, 0) + (inv.paid or 0)
+    for b in bills:
+        m = b.issue_date[:7] if b.issue_date and len(b.issue_date) >= 7 else "Unknown"
+        monthly_out[m] = monthly_out.get(m, 0) + (b.amount_paid or 0)
+    all_months = sorted(set(list(monthly_in.keys()) + list(monthly_out.keys())))
+    return {
+        "months": all_months,
+        "money_in": [monthly_in.get(m, 0) for m in all_months],
+        "money_out": [monthly_out.get(m, 0) for m in all_months],
+        "net_cash": [monthly_in.get(m, 0) - monthly_out.get(m, 0) for m in all_months],
+    }
 @app.get("/api/auth/login")
 async def login(request: Request, role: str = "client"):
     request.session['oauth_role'] = role
@@ -2597,7 +2800,7 @@ def set_employee_password(emp_id: int, request: Request, body: dict = None, db: 
     return {"message": "Password set successfully"}
 
 @app.post("/api/employee/auth/login")
-def employee_login(body: dict = None, request: Request = None, db: Session = Depends(get_db)):
+def employee_login(request: Request, body: dict = None, db: Session = Depends(get_db)):
     if not body or not body.get("email") or not body.get("password"):
         raise HTTPException(status_code=400, detail="Email and password required")
     email = body["email"].strip().lower()
@@ -2606,7 +2809,7 @@ def employee_login(body: dict = None, request: Request = None, db: Session = Dep
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not emp.password_hash:
         raise HTTPException(status_code=401, detail="Password not set. Contact your administrator.")
-    if models.hash_password(body["password"]) != emp.password_hash:
+    if not models.verify_password(body["password"], emp.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if emp.status in ("terminated",):
         raise HTTPException(status_code=403, detail="Account deactivated")
@@ -3409,15 +3612,14 @@ def update_goal_progress(goal_id: int, request: Request, body: dict, db: Session
 
 # HR-side: Create goal for employee
 @app.post("/api/employees/{emp_id}/goals")
-def create_employee_goal(emp_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client_id).first()
+def create_employee_goal(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body: body = {}
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     goal = models.DBEmployeeGoal(
-        client_id=client_id, employee_id=emp_id,
+        client_id=client.id, employee_id=emp_id,
         title=body.get("title", ""), description=body.get("description", ""),
         target_value=body.get("target_value", 100), current_value=body.get("current_value", 0),
         unit=body.get("unit", "%"), category=body.get("category", "performance"),
@@ -3426,7 +3628,7 @@ def create_employee_goal(emp_id: int, request: Request, body: dict, db: Session 
     )
     db.add(goal)
     note = models.DBNotification(
-        client_id=client_id, employee_id=emp_id,
+        client_id=client.id, employee_id=emp_id,
         title="New Goal Assigned", message=f"HR has assigned you a new goal: {goal.title}",
         type="info",
     )
@@ -3435,33 +3637,45 @@ def create_employee_goal(emp_id: int, request: Request, body: dict, db: Session 
     return {"message": "Goal created", "id": goal.id}
 
 
-@app.post("/api/employees/{emp_id}/leave/{leave_id}/action")
-def action_leave(emp_id: int, leave_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.employee_id == emp_id).first()
-    if not leave:
-        raise HTTPException(status_code=404, detail="Leave request not found")
-    action = body.get("action", "")
-    leave.status = "approved" if action == "approve" else "rejected"
-    leave.approved_by = body.get("approved_by", "HR")
-    note = models.DBNotification(
-        client_id=client_id, employee_id=emp_id,
-        title=f"Leave Request {leave.status.title()}", message=f"Your {leave.leave_type} leave request has been {leave.status}.",
-        type="success" if leave.status == "approved" else "warning",
-    )
-    db.add(note)
+@app.post("/api/goals/assign-department")
+def assign_department_goal(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body: body = {}
+    dept_id = body.get("department_id")
+    if not dept_id:
+        raise HTTPException(status_code=400, detail="department_id required")
+    dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
+    if not dept:
+        raise HTTPException(status_code=404, detail="Department not found")
+    employees = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == dept_id, models.DBEmployee.client_id == client.id, models.DBEmployee.status == "active").all()
+    if not employees:
+        raise HTTPException(status_code=400, detail="No active employees in this department")
+    created = []
+    for emp in employees:
+        goal = models.DBEmployeeGoal(
+            client_id=client.id, employee_id=emp.id, department_id=dept_id,
+            title=body.get("title", ""), description=body.get("description", ""),
+            target_value=body.get("target_value", 100), current_value=0,
+            unit=body.get("unit", "%"), category=body.get("category", "performance"),
+            priority=body.get("priority", "medium"), start_date=body.get("start_date", ""),
+            due_date=body.get("due_date", ""), created_by="HR",
+        )
+        db.add(goal)
+        note = models.DBNotification(
+            client_id=client.id, employee_id=emp.id,
+            title="New Goal Assigned", message=f"HR has assigned you a new goal: {goal.title}",
+            type="info",
+        )
+        db.add(note)
+        created.append(emp.id)
     db.commit()
-    return {"message": f"Leave {leave.status}"}
+    return {"message": f"Goal assigned to {len(created)} employees in {dept.name}", "count": len(created), "department": dept.name}
 
 
 @app.get("/api/leave/requests")
 def get_all_leave_requests(request: Request, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.client_id == client_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    client = get_client_user(request, db)
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.client_id == client.id).order_by(models.DBLeaveRequest.created_at.desc()).all()
     result = []
     for l in leaves:
         emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == l.employee_id).first()
@@ -3476,18 +3690,17 @@ def get_all_leave_requests(request: Request, db: Session = Depends(get_db)):
 
 
 @app.post("/api/leave/requests/{leave_id}/action")
-def action_leave_simple(leave_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.client_id == client_id).first()
+def action_leave_simple(leave_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body: body = {}
+    leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.client_id == client.id).first()
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     action = body.get("action", "")
     leave.status = "approved" if action == "approve" else "rejected"
     leave.approved_by = body.get("approved_by", "HR")
     note = models.DBNotification(
-        client_id=client_id, employee_id=leave.employee_id,
+        client_id=client.id, employee_id=leave.employee_id,
         title=f"Leave Request {leave.status.title()}", message=f"Your {leave.leave_type} leave request has been {leave.status}.",
         type="success" if leave.status == "approved" else "warning",
     )
@@ -3498,48 +3711,41 @@ def action_leave_simple(leave_id: int, request: Request, body: dict, db: Session
 
 @app.get("/api/employees/{emp_id}/goals")
 def get_goals_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    goals = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.employee_id == emp_id, models.DBEmployeeGoal.client_id == client_id).order_by(models.DBEmployeeGoal.created_at.desc()).all()
-    return [{"id": g.id, "title": g.title, "description": g.description, "target_value": g.target_value, "current_value": g.current_value, "unit": g.unit, "category": g.category, "priority": g.priority, "start_date": g.start_date, "due_date": g.due_date, "status": g.status, "created_by": g.created_by} for g in goals]
+    client = get_client_user(request, db)
+    goals = db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.employee_id == emp_id, models.DBEmployeeGoal.client_id == client.id).order_by(models.DBEmployeeGoal.created_at.desc()).all()
+    return [{"id": g.id, "title": g.title, "description": g.description, "target_value": g.target_value, "current_value": g.current_value, "unit": g.unit, "category": g.category, "priority": g.priority, "start_date": g.start_date, "due_date": g.due_date, "status": g.status, "created_by": g.created_by, "department_id": g.department_id} for g in goals]
 
 
 @app.get("/api/employees/{emp_id}/documents")
 def get_documents_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    docs = db.query(models.DBDocument).filter(models.DBDocument.employee_id == emp_id, models.DBDocument.client_id == client_id).order_by(models.DBDocument.created_at.desc()).all()
+    client = get_client_user(request, db)
+    docs = db.query(models.DBDocument).filter(models.DBDocument.employee_id == emp_id, models.DBDocument.client_id == client.id).order_by(models.DBDocument.created_at.desc()).all()
     return [{"id": d.id, "title": d.title, "doc_type": d.doc_type, "file_name": d.file_name, "uploaded_by": d.uploaded_by, "created_at": d.created_at} for d in docs]
 
 
 @app.get("/api/employees/{emp_id}/leave")
 def get_leave_for_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id, models.DBLeaveRequest.client_id == client_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    client = get_client_user(request, db)
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id, models.DBLeaveRequest.client_id == client.id).order_by(models.DBLeaveRequest.created_at.desc()).all()
     return [{"id": l.id, "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date, "days": l.days, "reason": l.reason, "status": l.status, "approved_by": l.approved_by, "created_at": l.created_at} for l in leaves]
 
 
 @app.post("/api/employees/{emp_id}/documents")
-def upload_document(emp_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
-    client_id = request.session.get('client_id')
-    if not client_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client_id).first()
+def upload_document(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if not body: body = {}
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     doc = models.DBDocument(
-        client_id=client_id, employee_id=emp_id,
+        client_id=client.id, employee_id=emp_id,
         title=body.get("title", ""), doc_type=body.get("doc_type", "other"),
         file_name=body.get("file_name", ""), file_type=body.get("file_type", ""),
         file_data=body.get("file_data", ""), uploaded_by="HR",
     )
     db.add(doc)
     note = models.DBNotification(
-        client_id=client_id, employee_id=emp_id,
+        client_id=client.id, employee_id=emp_id,
         title="New Document Uploaded", message=f"HR has uploaded a document: {doc.title}",
         type="info",
     )

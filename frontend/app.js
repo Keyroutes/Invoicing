@@ -572,10 +572,10 @@ function generateInvoicePDF() {
     var COL = {
         itemL: ml,        itemR: ml + 74,
         descL: ml + 80,
-        qtyR:  mr - 140,
-        priceR: mr - 88,
-        discR: mr - 40,
-        amountR: mr - 4
+        qtyR:  mr - 160,
+        priceR: mr - 104,
+        discR: mr - 58,
+        amountR: mr - 6
     };
     var descRightEdge = COL.qtyR - 30;
     var descMaxW = descRightEdge - COL.descL - 4;
@@ -597,7 +597,7 @@ function generateInvoicePDF() {
         doc.text('Description', COL.descL + 4, yPos + 13);
         doc.text('Qty', COL.qtyR, yPos + 13, { align: 'right' });
         doc.text('Unit Price', COL.priceR, yPos + 13, { align: 'right' });
-        doc.text('Disc', COL.discR, yPos + 13, { align: 'right' });
+        doc.text('Disc Amount', COL.discR, yPos + 13, { align: 'right' });
         doc.text('Amount', COL.amountR - 6, yPos + 13, { align: 'right' });
         return yPos + 24;
     }
@@ -1412,10 +1412,8 @@ async function preloadSearchData() {
         allContacts = cRes || [];
         allEmployees = empRes || [];
         allPayslips = psRes || [];
-    } catch (e) {}
+    } catch (e) { console.error('Search data preload failed:', e); }
 }
-
-// --- HR Stats ---
 async function loadHRStats() {
     try {
         var res = await fetch('/api/hr/stats');
@@ -1630,7 +1628,7 @@ async function submitNewEmployee() {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ items: window._aiOnboardingItems })
                     });
-                } catch(e) {}
+                } catch(e) { console.error('Failed to save AI onboarding items:', e); }
                 window._aiOnboardingItems = null;
             }
             closeAddEmployeeModal();
@@ -1676,9 +1674,9 @@ function toggleEmpEdit() {
     var editBtn = document.getElementById('emp-edit-btn');
     var saveBtn = document.getElementById('emp-save-btn');
     var cancelBtn = document.getElementById('emp-cancel-edit-btn');
-    editBtn.style.display = 'none';
-    saveBtn.style.display = 'inline-flex';
-    cancelBtn.style.display = 'inline-flex';
+    if (editBtn) editBtn.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'inline-flex';
+    if (cancelBtn) cancelBtn.style.display = 'inline-flex';
     _empEditOriginal = {};
     var fields = ['phone', 'title', 'dept', 'mgr', 'type', 'payfreq', 'salary', 'start', 'taxrate', 'emergency'];
     var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
@@ -1714,7 +1712,7 @@ async function loadEmpEditDropdowns() {
             mgrSel.innerHTML = '<option value="">None</option>';
             emps.forEach(function(e) { mgrSel.innerHTML += '<option value="' + e.id + '">' + esc(e.first_name + ' ' + e.last_name) + '</option>'; });
         }
-    } catch(e) {}
+    } catch(e) { console.error('Failed to load edit dropdowns:', e); }
 }
 
 async function saveEmpEdit() {
@@ -1743,9 +1741,10 @@ async function saveEmpEdit() {
 window.saveEmpEdit = saveEmpEdit;
 
 function cancelEmpEdit() {
-    document.getElementById('emp-edit-btn').style.display = 'inline-flex';
-    document.getElementById('emp-save-btn').style.display = 'none';
-    document.getElementById('emp-cancel-edit-btn').style.display = 'none';
+    var el;
+    el = document.getElementById('emp-edit-btn'); if (el) el.style.display = 'inline-flex';
+    el = document.getElementById('emp-save-btn'); if (el) el.style.display = 'none';
+    el = document.getElementById('emp-cancel-edit-btn'); if (el) el.style.display = 'none';
     var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
     var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
     inputIds.forEach(function(id, i) {
@@ -3028,6 +3027,8 @@ showView = function(viewId) {
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
     if (viewId === 'recruitment-view') loadRecruitmentForms();
+    if (viewId === 'bills-view') loadBills();
+    if (viewId === 'contacts-view') loadContacts();
 };
 window.showView = showView;
 
@@ -3091,7 +3092,7 @@ async function loadLiveAttendance() {
         }).join('');
         var el = document.getElementById('att-working');
         if (el) el.textContent = working;
-    } catch (e) {}
+    } catch (e) { console.error('Live attendance load failed:', e); }
 }
 window.loadLiveAttendance = loadLiveAttendance;
 
@@ -3120,7 +3121,7 @@ async function loadAttendanceAnalytics() {
                 }).join('') +
             '</div>';
         }
-    } catch (e) {}
+    } catch (e) { console.error('Attendance analytics load failed:', e); }
 }
 
 // --- Attendance Settings ---
@@ -3140,7 +3141,7 @@ async function loadAttendanceSettings() {
         document.getElementById('set-max-ot').value = data.max_overtime_hours || 4;
         document.getElementById('set-allow-remote').checked = data.allow_remote !== false;
         document.getElementById('set-require-loc').checked = data.require_location !== false;
-    } catch (e) {}
+    } catch (e) { console.error('Attendance settings load failed:', e); }
 }
 
 async function saveAttendanceSettings() {
@@ -3209,7 +3210,7 @@ async function loadOvertimeLogs() {
         tbody.innerHTML = logs.map(function(l) {
             return '<tr><td><strong>' + l.employee_name + '</strong></td><td>' + l.date + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + (l.reason || '-') + '</td><td>' + (l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + l.status + '</span></td></tr>';
         }).join('');
-    } catch (e) {}
+    } catch (e) { console.error('Overtime logs load failed:', e); }
 }
 window.announceOvertime = announceOvertime;
 
@@ -3810,7 +3811,7 @@ async function actionLeave(id, action, empName) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: action })
         });
-        if (res.ok) { showToast('Leave request ' + action + 'd', 'success'); loadLeaveRequests(); }
+        if (res.ok) { showToast('Leave request ' + action + 'd', 'success'); loadLeaveView(); loadLeaveRequests(); }
         else { showToast('Failed to update leave', 'error'); }
     } catch (e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -3827,7 +3828,7 @@ async function loadLeaveView() {
         if (!res.ok) return;
         window._allLeaveViewData = await res.json();
         renderLeaveView();
-    } catch(e) {}
+    } catch(e) { console.error('Leave view load failed:', e); }
 }
 function renderLeaveView() {
     var data = window._allLeaveViewData || [];
@@ -3860,29 +3861,34 @@ async function loadGoalsView() {
     try {
         var empRes = await fetch('/api/employees?status=active');
         var emps = await empRes.json();
+        var deptRes = await fetch('/api/departments');
+        var depts = await deptRes.json();
+        var deptMap = {};
+        depts.forEach(function(d) { deptMap[d.id] = d.name; });
         var allGoals = [];
         for (var i = 0; i < emps.length; i++) {
             try {
                 var gRes = await fetch('/api/employees/' + emps[i].id + '/goals');
                 if (gRes.ok) {
                     var goals = await gRes.json();
-                    goals.forEach(function(g) { g.employee_name = emps[i].first_name + ' ' + emps[i].last_name; g.employee_id = emps[i].id; });
+                    goals.forEach(function(g) { g.employee_name = emps[i].first_name + ' ' + emps[i].last_name; g.employee_id = emps[i].id; g.department_name = deptMap[g.department_id] || (emps[i].department_id ? deptMap[emps[i].department_id] : '-'); });
                     allGoals = allGoals.concat(goals);
                 }
-            } catch(e) {}
+            } catch(e) { console.error('Failed to load goals for employee:', e); }
         }
         if (allGoals.length === 0) {
-            container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Go to Employees > click an employee > Goals to add goals.</div></div>';
+            container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Click "Assign Department Goal" to add goals.</div></div>';
             return;
         }
         container.innerHTML = '<div class="glass-widget"><div class="widget-content" style="padding:0;">' +
-            '<table class="data-table"><thead><tr><th>Employee</th><th>Goal</th><th>Progress</th><th>Category</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
+            '<table class="data-table"><thead><tr><th>Employee</th><th>Department</th><th>Goal</th><th>Progress</th><th>Category</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
             allGoals.map(function(g) {
                 var progress = g.target_value > 0 ? Math.min(Math.round(g.current_value / g.target_value * 100), 100) : 0;
                 var pColor = g.priority === 'high' ? 'var(--danger-color)' : g.priority === 'low' ? 'var(--success-color)' : 'var(--warning-color)';
                 var sColor = g.status === 'completed' ? 'var(--success-color)' : 'var(--primary-color)';
                 return '<tr style="cursor:pointer;" onclick="viewEmployee(' + g.employee_id + ')">' +
                     '<td><strong>' + esc(g.employee_name) + '</strong></td>' +
+                    '<td><span style="font-size:0.8rem;">' + esc(g.department_name || '-') + '</span></td>' +
                     '<td>' + esc(g.title) + '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(g.description || '') + '</span></td>' +
                     '<td><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + progress + '%;background:' + sColor + ';"></div></div><span style="font-size:0.8rem;white-space:nowrap;">' + progress + '%</span></div></td>' +
                     '<td><span style="font-size:0.8rem;">' + esc(g.category || '-') + '</span></td>' +
@@ -3897,6 +3903,77 @@ async function loadGoalsView() {
     }
 }
 window.loadGoalsView = loadGoalsView;
+
+// --- Department Goal Assignment ---
+async function openDeptGoalModal() {
+    var modal = document.getElementById('dept-goal-modal');
+    var select = document.getElementById('dept-goal-dept');
+    modal.style.display = 'flex';
+    select.innerHTML = '<option value="">Select department...</option>';
+    try {
+        var res = await fetch('/api/departments');
+        var depts = await res.json();
+        depts.forEach(function(d) {
+            select.innerHTML += '<option value="' + d.id + '">' + esc(d.name) + ' (' + d.employee_count + ' employees)</option>';
+        });
+    } catch(e) {
+        select.innerHTML += '<option value="">Failed to load departments</option>';
+    }
+    document.getElementById('dept-goal-info').style.display = 'none';
+}
+
+async function assignDeptGoal() {
+    var deptId = document.getElementById('dept-goal-dept').value;
+    var title = document.getElementById('dept-goal-title').value.trim();
+    if (!deptId || !title) {
+        alert('Please select a department and enter a title');
+        return;
+    }
+    var btn = document.querySelector('#dept-goal-modal .btn-primary');
+    btn.disabled = true;
+    btn.textContent = 'Assigning...';
+    var info = document.getElementById('dept-goal-info');
+    try {
+        var res = await fetch('/api/goals/assign-department', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                department_id: parseInt(deptId),
+                title: title,
+                description: document.getElementById('dept-goal-desc').value.trim(),
+                target_value: parseFloat(document.getElementById('dept-goal-target').value) || 100,
+                unit: document.getElementById('dept-goal-unit').value || '%',
+                category: document.getElementById('dept-goal-category').value,
+                priority: document.getElementById('dept-goal-priority').value,
+                due_date: document.getElementById('dept-goal-due').value || ''
+            })
+        });
+        var data = await res.json();
+        if (res.ok) {
+            info.style.display = 'block';
+            info.textContent = 'Goal assigned to ' + data.count + ' employee(s) in department!';
+            info.style.background = 'rgba(0,255,0,0.1)';
+            info.style.color = 'var(--success-color)';
+            setTimeout(function() {
+                document.getElementById('dept-goal-modal').style.display = 'none';
+                loadGoalsView();
+            }, 1500);
+        } else {
+            throw new Error(data.detail || 'Failed to assign goal');
+        }
+    } catch(e) {
+        info.style.display = 'block';
+        info.textContent = 'Error: ' + e.message;
+        info.style.background = 'rgba(255,0,0,0.1)';
+        info.style.color = 'var(--danger-color)';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Assign to All';
+    }
+}
+window.openDeptGoalModal = openDeptGoalModal;
+window.assignDeptGoal = assignDeptGoal;
 
 // ==================== EMPLOYEE GOALS ====================
 var currentEmpGoals = [];
@@ -4244,3 +4321,417 @@ function aiGenerateInvFollowup() {
 window.aiGenerateInvEmail = aiGenerateInvEmail;
 window.aiGenerateInvFollowup = aiGenerateInvFollowup;
 window.useAiEmail = useAiEmail;
+
+// ============================================================
+// BILLS MODULE
+// ============================================================
+var allBills = [];
+var currentBillFilter = '';
+
+async function loadBills() {
+    try {
+        var res = await fetch('/api/bills', { credentials: 'same-origin' });
+        if (!res.ok) { showToast('Failed to load bills', 'error'); return; }
+        allBills = await res.json();
+        renderBills(allBills);
+    } catch(e) { showToast('Failed to load bills', 'error'); }
+}
+window.loadBills = loadBills;
+
+function renderBills(bills) {
+    var tbody = document.getElementById('bills-table-body');
+    var countSpan = document.getElementById('bill-count');
+    if (countSpan) countSpan.textContent = bills.length + ' item' + (bills.length !== 1 ? 's' : '');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (bills.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No bills found.</td></tr>';
+        return;
+    }
+    bills.forEach(function(b) {
+        var statusClass = (b.status || '').toLowerCase().replace(/\s+/g, '-');
+        tbody.insertAdjacentHTML('beforeend',
+            '<tr>' +
+            '<td><strong>' + esc(b.number || '-') + '</strong></td>' +
+            '<td>' + esc(b.vendor_name || '-') + '</td>' +
+            '<td>' + (b.issue_date || '-') + '</td>' +
+            '<td>' + (b.due_date || '-') + '</td>' +
+            '<td class="text-right">' + formatCurrency(b.total || 0) + '</td>' +
+            '<td class="text-right">' + formatCurrency(b.amount_paid || 0) + '</td>' +
+            '<td><span class="status-pill status-' + statusClass + '">' + esc(b.status || 'Draft') + '</span></td>' +
+            '<td class="text-right">' +
+                '<button class="btn btn-outline btn-sm" onclick="editBill(' + b.id + ')" style="margin-right:4px;">Edit</button>' +
+                (b.status !== 'Paid' ? '<button class="btn btn-outline btn-sm" onclick="markBillPaid(' + b.id + ')" style="color:var(--success-color);border-color:var(--success-color);margin-right:4px;">Pay</button>' : '') +
+                '<button class="btn btn-outline btn-sm" onclick="deleteBill(' + b.id + ', \'' + esc(b.number) + '\')" style="color:var(--danger-color);border-color:var(--danger-color);">Del</button>' +
+            '</td></tr>'
+        );
+    });
+}
+
+function filterBills(status, btn) {
+    currentBillFilter = status;
+    document.querySelectorAll('#bills-view .invoices-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    var filtered = status === '' ? allBills : allBills.filter(function(b) {
+        if (status === 'Unpaid') return b.status !== 'Paid' && b.status !== 'Draft';
+        return (b.status || '').toLowerCase() === status.toLowerCase();
+    });
+    renderBills(filtered);
+}
+window.filterBills = filterBills;
+
+function searchBills() {
+    var q = (document.getElementById('bill-search').value || '').toLowerCase();
+    var filtered = allBills.filter(function(b) {
+        return (b.number || '').toLowerCase().indexOf(q) >= 0 || (b.vendor_name || '').toLowerCase().indexOf(q) >= 0 || (b.reference || '').toLowerCase().indexOf(q) >= 0;
+    });
+    renderBills(filtered);
+}
+window.searchBills = searchBills;
+
+async function showAddBillModal() {
+    document.getElementById('bill-edit-id').value = '';
+    document.getElementById('bill-modal-title').textContent = 'New Bill';
+    document.getElementById('bill-number').value = '';
+    document.getElementById('bill-vendor').value = '';
+    document.getElementById('bill-vendor-email').value = '';
+    document.getElementById('bill-category').value = 'general';
+    document.getElementById('bill-issue-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('bill-due-date').value = '';
+    document.getElementById('bill-amount').value = '0';
+    document.getElementById('bill-tax').value = '0';
+    document.getElementById('bill-total').value = '0';
+    document.getElementById('bill-reference').value = '';
+    document.getElementById('bill-notes').value = '';
+    try {
+        var res = await fetch('/api/next-bill-number', { credentials: 'same-origin' });
+        var data = await res.json();
+        document.getElementById('bill-number').value = data.number || 'BILL-0001';
+    } catch(e) {}
+    document.getElementById('add-bill-modal').style.display = 'flex';
+}
+window.showAddBillModal = showAddBillModal;
+
+function closeAddBillModal() {
+    document.getElementById('add-bill-modal').style.display = 'none';
+}
+window.closeAddBillModal = closeAddBillModal;
+
+function calcBillTotal() {
+    var amount = parseFloat(document.getElementById('bill-amount').value) || 0;
+    var tax = parseFloat(document.getElementById('bill-tax').value) || 0;
+    document.getElementById('bill-total').value = (amount + tax).toFixed(2);
+}
+window.calcBillTotal = calcBillTotal;
+
+async function saveBill() {
+    var editId = document.getElementById('bill-edit-id').value;
+    var payload = {
+        number: document.getElementById('bill-number').value.trim(),
+        vendor_name: document.getElementById('bill-vendor').value.trim(),
+        vendor_email: document.getElementById('bill-vendor-email').value.trim(),
+        category: document.getElementById('bill-category').value,
+        issue_date: document.getElementById('bill-issue-date').value,
+        due_date: document.getElementById('bill-due-date').value,
+        amount: parseFloat(document.getElementById('bill-amount').value) || 0,
+        tax_amount: parseFloat(document.getElementById('bill-tax').value) || 0,
+        total: parseFloat(document.getElementById('bill-total').value) || 0,
+        reference: document.getElementById('bill-reference').value.trim(),
+        notes: document.getElementById('bill-notes').value.trim(),
+        status: 'Draft'
+    };
+    if (!payload.number || !payload.vendor_name) { showToast('Bill number and vendor name required', 'error'); return; }
+    try {
+        var url = editId ? '/api/bills/' + editId : '/api/bills';
+        var method = editId ? 'PUT' : 'POST';
+        var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(payload) });
+        var data = await res.json();
+        if (res.ok) {
+            showToast(editId ? 'Bill updated' : 'Bill created', 'success');
+            closeAddBillModal();
+            loadBills();
+        } else {
+            showToast(data.detail || 'Failed to save bill', 'error');
+        }
+    } catch(e) { showToast('Failed to save bill', 'error'); }
+}
+window.saveBill = saveBill;
+
+async function editBill(id) {
+    try {
+        var res = await fetch('/api/bills/' + id, { credentials: 'same-origin' });
+        var b = await res.json();
+        document.getElementById('bill-edit-id').value = b.id;
+        document.getElementById('bill-modal-title').textContent = 'Edit Bill';
+        document.getElementById('bill-number').value = b.number || '';
+        document.getElementById('bill-vendor').value = b.vendor_name || '';
+        document.getElementById('bill-vendor-email').value = b.vendor_email || '';
+        document.getElementById('bill-category').value = b.category || 'general';
+        document.getElementById('bill-issue-date').value = b.issue_date || '';
+        document.getElementById('bill-due-date').value = b.due_date || '';
+        document.getElementById('bill-amount').value = b.amount || 0;
+        document.getElementById('bill-tax').value = b.tax_amount || 0;
+        document.getElementById('bill-total').value = b.total || 0;
+        document.getElementById('bill-reference').value = b.reference || '';
+        document.getElementById('bill-notes').value = b.notes || '';
+        document.getElementById('add-bill-modal').style.display = 'flex';
+    } catch(e) { showToast('Failed to load bill', 'error'); }
+}
+window.editBill = editBill;
+
+async function markBillPaid(id) {
+    if (!confirm('Mark this bill as paid?')) return;
+    try {
+        var res = await fetch('/api/bills/' + id + '/pay', { method: 'POST', credentials: 'same-origin' });
+        if (res.ok) { showToast('Bill marked as paid', 'success'); loadBills(); }
+        else showToast('Failed to mark paid', 'error');
+    } catch(e) { showToast('Failed to mark paid', 'error'); }
+}
+window.markBillPaid = markBillPaid;
+
+async function deleteBill(id, number) {
+    if (!confirm('Delete bill ' + number + '?')) return;
+    try {
+        var res = await fetch('/api/bills/' + id, { method: 'DELETE', credentials: 'same-origin' });
+        if (res.ok) { showToast('Bill deleted', 'success'); loadBills(); }
+        else showToast('Failed to delete bill', 'error');
+    } catch(e) { showToast('Failed to delete bill', 'error'); }
+}
+window.deleteBill = deleteBill;
+
+// ============================================================
+// CONTACTS MODULE
+// ============================================================
+var allContacts = typeof allContacts !== 'undefined' ? allContacts : [];
+
+async function loadContacts() {
+    try {
+        var res = await fetch('/api/contacts', { credentials: 'same-origin' });
+        if (!res.ok) { showToast('Failed to load contacts', 'error'); return; }
+        allContacts = await res.json();
+        renderContacts(allContacts);
+    } catch(e) { showToast('Failed to load contacts', 'error'); }
+}
+window.loadContacts = loadContacts;
+
+function renderContacts(contacts) {
+    var tbody = document.getElementById('contacts-table-body');
+    var countSpan = document.getElementById('contact-count');
+    if (countSpan) countSpan.textContent = contacts.length + ' item' + (contacts.length !== 1 ? 's' : '');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (contacts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-secondary);">No contacts found.</td></tr>';
+        return;
+    }
+    contacts.forEach(function(c) {
+        tbody.insertAdjacentHTML('beforeend',
+            '<tr>' +
+            '<td><strong>' + esc(c.name || '-') + '</strong></td>' +
+            '<td>' + esc(c.email || '-') + '</td>' +
+            '<td>' + esc(c.phone_number || c.phone || '-') + '</td>' +
+            '<td class="text-right">' +
+                '<button class="btn btn-outline btn-sm" onclick="editContact(' + c.id + ')" style="margin-right:4px;">Edit</button>' +
+                '<button class="btn btn-outline btn-sm" onclick="deleteContact(' + c.id + ', \'' + esc(c.name) + '\')" style="color:var(--danger-color);border-color:var(--danger-color);">Del</button>' +
+            '</td></tr>'
+        );
+    });
+}
+
+function searchContacts() {
+    var q = (document.getElementById('contact-search').value || '').toLowerCase();
+    var filtered = allContacts.filter(function(c) {
+        return (c.name || '').toLowerCase().indexOf(q) >= 0 || (c.email || '').toLowerCase().indexOf(q) >= 0 || ((c.phone_number || c.phone || '') || '').toLowerCase().indexOf(q) >= 0;
+    });
+    renderContacts(filtered);
+}
+window.searchContacts = searchContacts;
+
+function showAddContactModal() {
+    document.getElementById('contact-edit-id').value = '';
+    document.getElementById('contact-modal-title').textContent = 'New Contact';
+    document.getElementById('contact-name').value = '';
+    document.getElementById('contact-email').value = '';
+    document.getElementById('contact-phone').value = '';
+    document.getElementById('add-contact-modal').style.display = 'flex';
+}
+window.showAddContactModal = showAddContactModal;
+
+function closeAddContactModal() {
+    document.getElementById('add-contact-modal').style.display = 'none';
+}
+window.closeAddContactModal = closeAddContactModal;
+
+async function saveContact() {
+    var editId = document.getElementById('contact-edit-id').value;
+    var name = document.getElementById('contact-name').value.trim();
+    var email = document.getElementById('contact-email').value.trim();
+    var phone = document.getElementById('contact-phone').value.trim();
+    if (!name) { showToast('Contact name required', 'error'); return; }
+    try {
+        if (editId) {
+            var res = await fetch('/api/contacts/' + editId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ name: name, email: email, phone_number: phone }) });
+            if (res.ok) { showToast('Contact updated', 'success'); }
+            else { showToast('Failed to update contact', 'error'); return; }
+        } else {
+            var res = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ name: name, email: email, phone_number: phone }) });
+            if (res.ok) { showToast('Contact created', 'success'); }
+            else { showToast('Failed to create contact', 'error'); return; }
+        }
+        closeAddContactModal();
+        loadContacts();
+    } catch(e) { showToast('Failed to save contact', 'error'); }
+}
+window.saveContact = saveContact;
+
+async function editContact(id) {
+    var c = allContacts.find(function(x) { return x.id === id; });
+    if (!c) return;
+    document.getElementById('contact-edit-id').value = c.id;
+    document.getElementById('contact-modal-title').textContent = 'Edit Contact';
+    document.getElementById('contact-name').value = c.name || '';
+    document.getElementById('contact-email').value = c.email || '';
+    document.getElementById('contact-phone').value = c.phone_number || c.phone || '';
+    document.getElementById('add-contact-modal').style.display = 'flex';
+}
+window.editContact = editContact;
+
+async function deleteContact(id, name) {
+    if (!confirm('Delete contact "' + name + '"?')) return;
+    try {
+        var res = await fetch('/api/contacts/' + id, { method: 'DELETE', credentials: 'same-origin' });
+        if (res.ok) { showToast('Contact deleted', 'success'); loadContacts(); }
+        else showToast('Failed to delete contact', 'error');
+    } catch(e) { showToast('Failed to delete contact', 'error'); }
+}
+window.deleteContact = deleteContact;
+
+// ============================================================
+// REPORTS MODULE
+// ============================================================
+function showReportsTab(tab) {
+    ['reports-content', 'reports-pl-content', 'reports-bs-content', 'reports-cash-content'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+    ['rpt-pl-btn', 'rpt-bs-btn', 'rpt-cash-btn'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) { el.style.fontWeight = 'normal'; el.classList.remove('btn-primary'); el.classList.add('btn-outline'); }
+    });
+    if (tab === 'pl') {
+        var el = document.getElementById('reports-pl-content'); if (el) el.style.display = 'block';
+        var btn = document.getElementById('rpt-pl-btn'); if (btn) { btn.style.fontWeight = '700'; }
+    } else if (tab === 'bs') {
+        var el = document.getElementById('reports-bs-content'); if (el) el.style.display = 'block';
+        var btn = document.getElementById('rpt-bs-btn'); if (btn) { btn.style.fontWeight = '700'; }
+    } else if (tab === 'cash') {
+        var el = document.getElementById('reports-cash-content'); if (el) el.style.display = 'block';
+        var btn = document.getElementById('rpt-cash-btn'); if (btn) { btn.style.fontWeight = '700'; }
+    } else {
+        var el = document.getElementById('reports-content'); if (el) el.style.display = 'block';
+    }
+}
+
+async function loadProfitLoss() {
+    showReportsTab('pl');
+    var body = document.getElementById('pl-report-body');
+    var chart = document.getElementById('pl-chart');
+    if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading...</div>';
+    try {
+        var res = await fetch('/api/reports/profit-loss', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('Failed');
+        var data = await res.json();
+        if (body) {
+            body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Total Revenue</div><div style="font-size:1.5rem;font-weight:700;color:var(--success-color);">' + formatCurrency(data.total_revenue) + '</div></div>' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Total Expenses</div><div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);">' + formatCurrency(data.total_expenses) + '</div></div>' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Net Profit</div><div style="font-size:1.5rem;font-weight:700;color:' + (data.net_profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)') + ';">' + formatCurrency(data.net_profit) + '</div></div>' +
+                '</div>';
+        }
+        if (chart && data.months && data.months.length > 0) {
+            var maxVal = Math.max.apply(null, data.revenue.concat(data.expenses).concat([1]));
+            var html = '<div class="chart-bars" style="height:180px;">';
+            data.months.forEach(function(m, i) {
+                var hRev = (data.revenue[i] / maxVal) * 100;
+                var hExp = (data.expenses[i] / maxVal) * 100;
+                html += '<div class="chart-month"><div class="bar-group"><div class="bar in" style="height:' + hRev + '%;" title="Revenue: ' + formatCurrency(data.revenue[i]) + '"></div><div class="bar out" style="height:' + hExp + '%;" title="Expenses: ' + formatCurrency(data.expenses[i]) + '"></div></div><span class="month-label">' + m + '</span></div>';
+            });
+            html += '</div><div class="chart-legend"><div class="legend-item"><div class="legend-color in"></div><span>Revenue</span></div><div class="legend-item"><div class="legend-color out"></div><span>Expenses</span></div></div>';
+            chart.innerHTML = html;
+        } else if (chart) { chart.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">No data yet</div>'; }
+    } catch(e) { if (body) body.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to load P&L report</div>'; }
+}
+window.loadProfitLoss = loadProfitLoss;
+
+async function loadBalanceSheet() {
+    showReportsTab('bs');
+    var body = document.getElementById('bs-report-body');
+    if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading...</div>';
+    try {
+        var res = await fetch('/api/reports/balance-sheet', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('Failed');
+        var data = await res.json();
+        if (body) {
+            body.innerHTML =
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">' +
+                '<div>' +
+                    '<h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:16px;">Assets</h3>' +
+                    '<div style="display:flex;flex-direction:column;gap:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;"><span style="color:var(--text-secondary);">Cash Collected</span><span style="font-weight:600;">' + formatCurrency(data.assets.cash_collected) + '</span></div>' +
+                        '<div style="display:flex;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;"><span style="color:var(--text-secondary);">Accounts Receivable</span><span style="font-weight:600;">' + formatCurrency(data.assets.accounts_receivable) + '</span></div>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;padding:16px;margin-top:12px;border-top:2px solid var(--border-color);font-weight:700;"><span>Total Assets</span><span style="color:var(--primary-color);">' + formatCurrency(data.total_assets) + '</span></div>' +
+                '</div>' +
+                '<div>' +
+                    '<h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:16px;">Liabilities</h3>' +
+                    '<div style="display:flex;flex-direction:column;gap:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;"><span style="color:var(--text-secondary);">Accounts Payable</span><span style="font-weight:600;">' + formatCurrency(data.liabilities.accounts_payable) + '</span></div>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;padding:16px;margin-top:12px;border-top:2px solid var(--border-color);font-weight:700;"><span>Total Liabilities</span><span style="color:var(--warning-color);">' + formatCurrency(data.total_liabilities) + '</span></div>' +
+                '</div>' +
+                '<div>' +
+                    '<h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:16px;">Equity</h3>' +
+                    '<div style="display:flex;flex-direction:column;gap:12px;">' +
+                        '<div style="display:flex;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;"><span style="color:var(--text-secondary);">Retained Earnings</span><span style="font-weight:600;">' + formatCurrency(data.equity.retained_earnings) + '</span></div>' +
+                    '</div>' +
+                    '<div style="display:flex;justify-content:space-between;padding:16px;margin-top:12px;border-top:2px solid var(--border-color);font-weight:700;"><span>Total Equity</span><span style="color:var(--success-color);">' + formatCurrency(data.total_equity) + '</span></div>' +
+                '</div>' +
+                '</div>';
+        }
+    } catch(e) { if (body) body.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to load balance sheet</div>'; }
+}
+window.loadBalanceSheet = loadBalanceSheet;
+
+async function loadCashSummary() {
+    showReportsTab('cash');
+    var body = document.getElementById('cash-report-body');
+    var chart = document.getElementById('cash-chart');
+    if (body) body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading...</div>';
+    try {
+        var res = await fetch('/api/reports/cash-summary', { credentials: 'same-origin' });
+        if (!res.ok) throw new Error('Failed');
+        var data = await res.json();
+        var totalIn = 0, totalOut = 0;
+        data.money_in.forEach(function(v) { totalIn += v; });
+        data.money_out.forEach(function(v) { totalOut += v; });
+        if (body) {
+            body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Money In</div><div style="font-size:1.5rem;font-weight:700;color:var(--success-color);">' + formatCurrency(totalIn) + '</div></div>' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Money Out</div><div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);">' + formatCurrency(totalOut) + '</div></div>' +
+                '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Net Cash</div><div style="font-size:1.5rem;font-weight:700;color:' + ((totalIn - totalOut) >= 0 ? 'var(--success-color)' : 'var(--danger-color)') + ';">' + formatCurrency(totalIn - totalOut) + '</div></div>' +
+                '</div>';
+        }
+        if (chart && data.months && data.months.length > 0) {
+            var maxVal = Math.max.apply(null, data.money_in.concat(data.money_out).concat([1]));
+            var html = '<div class="chart-bars" style="height:180px;">';
+            data.months.forEach(function(m, i) {
+                var hIn = (data.money_in[i] / maxVal) * 100;
+                var hOut = (data.money_out[i] / maxVal) * 100;
+                html += '<div class="chart-month"><div class="bar-group"><div class="bar in" style="height:' + hIn + '%;" title="In: ' + formatCurrency(data.money_in[i]) + '"></div><div class="bar out" style="height:' + hOut + '%;" title="Out: ' + formatCurrency(data.money_out[i]) + '"></div></div><span class="month-label">' + m + '</span></div>';
+            });
+            html += '</div><div class="chart-legend"><div class="legend-item"><div class="legend-color in"></div><span>Money In</span></div><div class="legend-item"><div class="legend-color out"></div><span>Money Out</span></div></div>';
+            chart.innerHTML = html;
+        } else if (chart) { chart.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary);">No data yet</div>'; }
+    } catch(e) { if (body) body.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to load cash summary</div>'; }
+}
+window.loadCashSummary = loadCashSummary;

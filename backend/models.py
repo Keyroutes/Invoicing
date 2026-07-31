@@ -4,10 +4,22 @@ from database import Base
 from datetime import datetime
 import uuid
 import hashlib
+import os
 
 
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    salt = hashlib.sha256(os.urandom(32)).hexdigest().encode()
+    pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return salt.hex() + ':' + pwd_hash.hex()
+
+
+def verify_password(password: str, stored: str) -> bool:
+    if ':' not in stored:
+        return hashlib.sha256(password.encode()).hexdigest() == stored
+    salt_hex, pwd_hash_hex = stored.split(':')
+    salt = bytes.fromhex(salt_hex)
+    pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return pwd_hash.hex() == pwd_hash_hex
 
 
 class DBClient(Base):
@@ -32,6 +44,7 @@ class DBClient(Base):
 
     settings = relationship("DBSettings", back_populates="client")
     invoices = relationship("DBInvoice", back_populates="client")
+    bills = relationship("DBBill", back_populates="client")
     contacts = relationship("DBContact", back_populates="client")
     departments = relationship("DBDepartment", back_populates="client")
     employees = relationship("DBEmployee", back_populates="client")
@@ -384,6 +397,7 @@ class DBEmployeeGoal(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
     employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True, index=True)
     title = Column(String, nullable=False)
     description = Column(String, default="")
     target_value = Column(Float, default=100.0)
@@ -398,6 +412,7 @@ class DBEmployeeGoal(Base):
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     employee = relationship("DBEmployee")
+    department = relationship("DBDepartment")
 
 
 class DBNotification(Base):
@@ -445,3 +460,45 @@ class DBDocument(Base):
     file_data = Column(Text, default="")
     uploaded_by = Column(String, default="HR")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBBill(Base):
+    __tablename__ = "bills"
+    __table_args__ = (
+        UniqueConstraint('client_id', 'number', name='uq_client_bill_number'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    number = Column(String, index=True)
+    vendor_name = Column(String, default="")
+    vendor_email = Column(String, default="")
+    issue_date = Column(String)
+    due_date = Column(String)
+    amount = Column(Float, default=0.0)
+    tax_amount = Column(Float, default=0.0)
+    total = Column(Float, default=0.0)
+    amount_paid = Column(Float, default=0.0)
+    status = Column(String, default="Draft", index=True)
+    category = Column(String, default="general")
+    reference = Column(String, default="")
+    notes = Column(String, default="")
+
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    client = relationship("DBClient", back_populates="bills")
+
+    line_items = relationship("DBBillLineItem", back_populates="bill")
+
+
+class DBBillLineItem(Base):
+    __tablename__ = "bill_line_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bill_id = Column(Integer, ForeignKey("bills.id"), index=True)
+    description = Column(String, default="")
+    qty = Column(Float, default=1.0)
+    price = Column(Float, default=0.0)
+    tax_rate = Column(String, default="20%")
+
+    bill = relationship("DBBill", back_populates="line_items")

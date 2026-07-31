@@ -463,5 +463,58 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # employee_goals.department_id
+            try:
+                conn.execute(text("ALTER TABLE employee_goals ADD COLUMN IF NOT EXISTS department_id INTEGER"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_employee_goals_department_id ON employee_goals (department_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Bills tables
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bills (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        number VARCHAR,
+                        vendor_name VARCHAR DEFAULT '',
+                        vendor_email VARCHAR DEFAULT '',
+                        issue_date VARCHAR DEFAULT '',
+                        due_date VARCHAR DEFAULT '',
+                        amount DOUBLE PRECISION DEFAULT 0,
+                        tax_amount DOUBLE PRECISION DEFAULT 0,
+                        total DOUBLE PRECISION DEFAULT 0,
+                        amount_paid DOUBLE PRECISION DEFAULT 0,
+                        status VARCHAR DEFAULT 'Draft',
+                        category VARCHAR DEFAULT 'general',
+                        reference VARCHAR DEFAULT '',
+                        notes VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT '',
+                        UNIQUE(client_id, number)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bills_client_id ON bills (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bills_status ON bills (status)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bill_line_items (
+                        id SERIAL PRIMARY KEY,
+                        bill_id INTEGER REFERENCES bills(id),
+                        description VARCHAR DEFAULT '',
+                        qty DOUBLE PRECISION DEFAULT 1,
+                        price DOUBLE PRECISION DEFAULT 0,
+                        tax_rate VARCHAR DEFAULT '20%'
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bill_line_items_bill_id ON bill_line_items (bill_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Column check skipped: {e}")
