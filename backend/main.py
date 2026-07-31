@@ -4,8 +4,8 @@ import uuid
 import smtplib
 import ssl
 import json
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request
-from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, Response
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, Response, HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -4096,6 +4096,165 @@ def summarize_attendance(request: Request, body: dict = None, db: Session = Depe
         result = f"• {present_days} present days recorded across {total_employees} employees.\n• Average daily hours: {round(avg_hours, 1)}h.\n• Remote: {remote_count}, Office: {office_count}."
     return {"summary": result, "stats": {"total_employees": total_employees, "total_records": total_records, "present_days": present_days, "avg_hours": round(avg_hours, 1), "remote": remote_count, "office": office_count}}
 
+
+# ============================================================
+# VIDEO MEETINGS - WebRTC Signaling Server
+# ============================================================
+import asyncio
+from collections import defaultdict
+
+meeting_rooms = defaultdict(lambda: {
+    "participants": {},
+    "created_at": datetime.utcnow().isoformat()
+})
+
+class MeetingSignaling:
+    def __init__(self):
+        self.connections = defaultdict(list)
+
+    async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
+        await websocket.accept()
+        self.connections[room_id].append({
+            "ws": websocket,
+            "user_id": user_id
+        })
+        meeting_rooms[room_id]["participants"][user_id] = {
+            "joined_at": datetime.utcnow().isoformat()
+        }
+
+    def disconnect(self, room_id: str, user_id: str):
+        self.connections[room_id] = [
+            c for c in self.connections[room_id] if c["user_id"] != user_id
+        ]
+        if room_id in meeting_rooms:
+            meeting_rooms[room_id]["participants"].pop(user_id, None)
+            if not meeting_rooms[room_id]["participants"]:
+                del meeting_rooms[room_id]
+        if not self.connections[room_id]:
+            del self.connections[room_id]
+
+    async def broadcast(self, room_id: str, message: dict, exclude_user: str = None):
+        dead = []
+        for conn in self.connections.get(room_id, []):
+            if conn["user_id"] == exclude_user:
+                continue
+            try:
+                await conn["ws"].send_json(message)
+            except Exception:
+                dead.append(conn)
+        for d in dead:
+            self.connections[room_id].remove(d)
+
+    async def send_to(self, room_id: str, user_id: str, message: dict):
+        for conn in self.connections.get(room_id, []):
+            if conn["user_id"] == user_id:
+                try:
+                    await conn["ws"].send_json(message)
+                except Exception:
+                    pass
+                return
+
+    def get_participants(self, room_id: str):
+        return list(meeting_rooms.get(room_id, {}).get("participants", {}).keys())
+
+signaling = MeetingSignaling()
+
+@app.get("/meeting", response_class=HTMLResponse)
+async def meeting_page():
+    html_path = os.path.join(frontend_path, "meeting.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Meeting page not found</h1>", status_code=404)
+
+@app.websocket("/ws/meeting/{room_id}")
+async def meeting_websocket(websocket: WebSocket, room_id: str):
+    user_id = websocket.query_params.get("user_id", str(uuid.uuid4())[:8])
+    display_name = websocket.query_params.get("name", "Guest")
+
+    await signaling.connect(websocket, room_id, user_id)
+
+    participants = signaling.get_participants(room_id)
+    await signaling.send_to(room_id, user_id, {
+        "type": "welcome",
+        "user_id": user_id,
+        "participants": [p for p in participants if p != user_id]
+    })
+    await signaling.broadcast(room_id, {
+        "type": "user-joined",
+        "user_id": user_id,
+        "name": display_name,
+        "participants": participants
+    }, exclude_user=user_id)
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type", "")
+
+            if msg_type == "offer":
+                await signaling.send_to(room_id, data.get("target"), {
+                    "type": "offer",
+                    "offer": data.get("offer"),
+                    "from": user_id,
+                    "name": display_name
+                })
+            elif msg_type == "answer":
+                await signaling.send_to(room_id, data.get("target"), {
+                    "type": "answer",
+                    "answer": data.get("answer"),
+                    "from": user_id
+                })
+            elif msg_type == "ice-candidate":
+                await signaling.send_to(room_id, data.get("target"), {
+                    "type": "ice-candidate",
+                    "candidate": data.get("candidate"),
+                    "from": user_id
+                })
+            elif msg_type == "chat":
+                await signaling.broadcast(room_id, {
+                    "type": "chat",
+                    "from": user_id,
+                    "name": display_name,
+                    "message": data.get("message", "")
+                })
+            elif msg_type == "toggle-media":
+                await signaling.broadcast(room_id, {
+                    "type": "toggle-media",
+                    "user_id": user_id,
+                    "kind": data.get("kind"),
+                    "muted": data.get("muted")
+                }, exclude_user=user_id)
+            elif msg_type == "screen-share-started":
+                await signaling.broadcast(room_id, {
+                    "type": "screen-share-started",
+                    "user_id": user_id,
+                    "name": display_name
+                }, exclude_user=user_id)
+            elif msg_type == "screen-share-stopped":
+                await signaling.broadcast(room_id, {
+                    "type": "screen-share-stopped",
+                    "user_id": user_id
+                }, exclude_user=user_id)
+
+    except WebSocketDisconnect:
+        signaling.disconnect(room_id, user_id)
+        participants = signaling.get_participants(room_id)
+        await signaling.broadcast(room_id, {
+            "type": "user-left",
+            "user_id": user_id,
+            "name": display_name,
+            "participants": participants
+        })
+    except Exception:
+        signaling.disconnect(room_id, user_id)
+        participants = signaling.get_participants(room_id)
+        await signaling.broadcast(room_id, {
+            "type": "user-left",
+            "user_id": user_id,
+            "name": display_name,
+            "participants": participants
+        })
 
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
