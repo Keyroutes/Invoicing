@@ -4105,6 +4105,9 @@ from collections import defaultdict
 
 meeting_rooms = defaultdict(lambda: {
     "participants": {},
+    "host": None,
+    "waiting": {},
+    "locked": False,
     "created_at": datetime.utcnow().isoformat()
 })
 
@@ -4118,9 +4121,6 @@ class MeetingSignaling:
             "ws": websocket,
             "user_id": user_id
         })
-        meeting_rooms[room_id]["participants"][user_id] = {
-            "joined_at": datetime.utcnow().isoformat()
-        }
 
     def disconnect(self, room_id: str, user_id: str):
         self.connections[room_id] = [
@@ -4128,10 +4128,17 @@ class MeetingSignaling:
         ]
         if room_id in meeting_rooms:
             meeting_rooms[room_id]["participants"].pop(user_id, None)
+            meeting_rooms[room_id]["waiting"].pop(user_id, None)
             if not meeting_rooms[room_id]["participants"]:
                 del meeting_rooms[room_id]
+            elif meeting_rooms[room_id]["host"] == user_id:
+                # Reassign host to the next participant if possible
+                new_host = next(iter(meeting_rooms[room_id]["participants"].keys()), None)
+                meeting_rooms[room_id]["host"] = new_host
+                
         if not self.connections[room_id]:
-            del self.connections[room_id]
+            if room_id in self.connections:
+                del self.connections[room_id]
 
     async def broadcast(self, room_id: str, message: dict, exclude_user: str = None):
         dead = []
@@ -4143,7 +4150,8 @@ class MeetingSignaling:
             except Exception:
                 dead.append(conn)
         for d in dead:
-            self.connections[room_id].remove(d)
+            if d in self.connections.get(room_id, []):
+                self.connections[room_id].remove(d)
 
     async def send_to(self, room_id: str, user_id: str, message: dict):
         for conn in self.connections.get(room_id, []):
@@ -4173,26 +4181,103 @@ async def meeting_websocket(websocket: WebSocket, room_id: str):
     display_name = websocket.query_params.get("name", "Guest")
 
     await signaling.connect(websocket, room_id, user_id)
+    room = meeting_rooms[room_id]
 
-    participants = signaling.get_participants(room_id)
-    await signaling.send_to(room_id, user_id, {
-        "type": "welcome",
-        "user_id": user_id,
-        "participants": [p for p in participants if p != user_id]
-    })
-    await signaling.broadcast(room_id, {
-        "type": "user-joined",
-        "user_id": user_id,
-        "name": display_name,
-        "participants": participants
-    }, exclude_user=user_id)
+    # Host assignment logic
+    if not room.get("host"):
+        room["host"] = user_id
+    
+    is_host = room["host"] == user_id
+
+    # Waiting room logic
+    if room.get("locked") and not is_host:
+        room["waiting"][user_id] = {"name": display_name, "ws": websocket}
+        await signaling.send_to(room_id, user_id, {"type": "waiting"})
+        await signaling.send_to(room_id, room["host"], {
+            "type": "join-request",
+            "user_id": user_id,
+            "name": display_name
+        })
+        # Keep connection open but don't join yet
+    else:
+        # Join immediately
+        room["participants"][user_id] = {"joined_at": datetime.utcnow().isoformat(), "name": display_name}
+        participants = signaling.get_participants(room_id)
+        
+        await signaling.send_to(room_id, user_id, {
+            "type": "welcome",
+            "user_id": user_id,
+            "is_host": is_host,
+            "host_id": room["host"],
+            "participants": [p for p in participants if p != user_id]
+        })
+        
+        await signaling.broadcast(room_id, {
+            "type": "user-joined",
+            "user_id": user_id,
+            "name": display_name,
+            "participants": participants
+        }, exclude_user=user_id)
 
     try:
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type", "")
 
-            if msg_type == "offer":
+            # Host controls
+            if msg_type == "admit-user" and room["host"] == user_id:
+                target_id = data.get("target")
+                if target_id in room["waiting"]:
+                    del room["waiting"][target_id]
+                    room["participants"][target_id] = {"joined_at": datetime.utcnow().isoformat(), "name": data.get("name")}
+                    await signaling.send_to(room_id, target_id, {
+                        "type": "welcome",
+                        "user_id": target_id,
+                        "is_host": False,
+                        "host_id": room["host"],
+                        "participants": [p for p in signaling.get_participants(room_id) if p != target_id]
+                    })
+                    await signaling.broadcast(room_id, {
+                        "type": "user-joined",
+                        "user_id": target_id,
+                        "name": data.get("name"),
+                        "participants": signaling.get_participants(room_id)
+                    }, exclude_user=target_id)
+            
+            elif msg_type == "deny-user" and room["host"] == user_id:
+                target_id = data.get("target")
+                if target_id in room["waiting"]:
+                    del room["waiting"][target_id]
+                    await signaling.send_to(room_id, target_id, {"type": "denied"})
+            
+            elif msg_type == "mute-all" and room["host"] == user_id:
+                await signaling.broadcast(room_id, {"type": "force-mute"}, exclude_user=user_id)
+                
+            elif msg_type == "remove-user" and room["host"] == user_id:
+                await signaling.send_to(room_id, data.get("target"), {"type": "removed"})
+                
+            elif msg_type == "toggle-lock" and room["host"] == user_id:
+                room["locked"] = data.get("locked", False)
+                await signaling.broadcast(room_id, {"type": "room-locked", "locked": room["locked"]})
+
+            # Meeting Features
+            elif msg_type == "raise-hand":
+                await signaling.broadcast(room_id, {
+                    "type": "raise-hand",
+                    "user_id": user_id,
+                    "name": display_name
+                }, exclude_user=user_id)
+                
+            elif msg_type == "caption":
+                await signaling.broadcast(room_id, {
+                    "type": "caption",
+                    "user_id": user_id,
+                    "name": display_name,
+                    "text": data.get("text", "")
+                }, exclude_user=user_id)
+
+            # Standard WebRTC Signaling
+            elif msg_type == "offer":
                 await signaling.send_to(room_id, data.get("target"), {
                     "type": "offer",
                     "offer": data.get("offer"),
@@ -4239,14 +4324,17 @@ async def meeting_websocket(websocket: WebSocket, room_id: str):
 
     except WebSocketDisconnect:
         signaling.disconnect(room_id, user_id)
-        participants = signaling.get_participants(room_id)
-        await signaling.broadcast(room_id, {
-            "type": "user-left",
-            "user_id": user_id,
-            "name": display_name,
-            "participants": participants
-        })
-    except Exception:
+        if user_id in room.get("participants", {}):
+            participants = signaling.get_participants(room_id)
+            await signaling.broadcast(room_id, {
+                "type": "user-left",
+                "user_id": user_id,
+                "name": display_name,
+                "participants": participants,
+                "new_host": room.get("host")
+            })
+    except Exception as e:
+        logger.error(f"WebSocket Error: {e}")
         signaling.disconnect(room_id, user_id)
         participants = signaling.get_participants(room_id)
         await signaling.broadcast(room_id, {
