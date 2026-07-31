@@ -3876,11 +3876,36 @@ async function loadGoalsView() {
                 }
             } catch(e) { console.error('Failed to load goals for employee:', e); }
         }
-        if (allGoals.length === 0) {
+        var pendingGoals = [];
+        try {
+            var pgRes = await fetch('/api/goals/department-pending');
+            if (pgRes.ok) pendingGoals = await pgRes.json();
+        } catch(e) {}
+
+        var html = '';
+        if (pendingGoals.length > 0) {
+            html += '<div class="glass-widget mb-24"><div class="widget-header"><h3>Pending Department Goals</h3></div><div class="widget-content" style="padding:0;"><div style="padding:12px 16px;font-size:0.82rem;color:var(--text-secondary);background:rgba(252,211,77,0.08);border-bottom:1px solid var(--border-color);">These goals will be auto-assigned to employees when they join their department.</div>' +
+                '<table class="data-table"><thead><tr><th>Department</th><th>Goal</th><th>Target</th><th>Category</th><th>Priority</th><th>Due</th></tr></thead><tbody>' +
+                pendingGoals.map(function(g) {
+                    var pColor = g.priority === 'high' ? 'var(--danger-color)' : g.priority === 'low' ? 'var(--success-color)' : 'var(--warning-color)';
+                    return '<tr>' +
+                        '<td><strong>' + esc(g.department_name) + '</strong></td>' +
+                        '<td>' + esc(g.title) + '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(g.description || '') + '</span></td>' +
+                        '<td>' + g.target_value + ' ' + esc(g.unit || '%') + '</td>' +
+                        '<td><span style="font-size:0.8rem;">' + esc(g.category || '-') + '</span></td>' +
+                        '<td><span style="font-size:0.8rem;color:' + pColor + ';">' + esc(g.priority || '-') + '</span></td>' +
+                        '<td><span style="font-size:0.8rem;">' + (g.due_date || '-') + '</span></td>' +
+                    '</tr>';
+                }).join('') +
+                '</tbody></table></div></div>';
+        }
+
+        if (allGoals.length === 0 && pendingGoals.length === 0) {
             container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--text-secondary);"><div style="font-size:2rem;margin-bottom:12px;">&#127919;</div><div>No goals assigned yet. Click "Assign Department Goal" to add goals.</div></div>';
             return;
         }
-        container.innerHTML = '<div class="glass-widget"><div class="widget-content" style="padding:0;">' +
+        if (allGoals.length > 0) {
+            html += '<div class="glass-widget"><div class="widget-content" style="padding:0;">' +
             '<table class="data-table"><thead><tr><th>Employee</th><th>Department</th><th>Goal</th><th>Progress</th><th>Category</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
             allGoals.map(function(g) {
                 var progress = g.target_value > 0 ? Math.min(Math.round(g.current_value / g.target_value * 100), 100) : 0;
@@ -3898,6 +3923,8 @@ async function loadGoalsView() {
                 '</tr>';
             }).join('') +
             '</tbody></table></div></div>';
+        }
+        container.innerHTML = html;
     } catch(e) {
         container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--danger-color);">Failed to load goals.</div>';
     }
@@ -3952,13 +3979,19 @@ async function assignDeptGoal() {
         var data = await res.json();
         if (res.ok) {
             info.style.display = 'block';
-            info.textContent = 'Goal assigned to ' + data.count + ' employee(s) in department!';
-            info.style.background = 'rgba(0,255,0,0.1)';
-            info.style.color = 'var(--success-color)';
+            if (data.pending) {
+                info.textContent = 'Goal saved! It will be auto-assigned when employees join ' + data.department + '.';
+                info.style.background = 'rgba(252,211,77,0.1)';
+                info.style.color = 'var(--warning-color)';
+            } else {
+                info.textContent = 'Goal assigned to ' + data.count + ' employee(s) in department!';
+                info.style.background = 'rgba(0,255,0,0.1)';
+                info.style.color = 'var(--success-color)';
+            }
             setTimeout(function() {
                 document.getElementById('dept-goal-modal').style.display = 'none';
                 loadGoalsView();
-            }, 1500);
+            }, 2000);
         } else {
             throw new Error(data.detail || 'Failed to assign goal');
         }

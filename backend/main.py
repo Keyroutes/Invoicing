@@ -1787,6 +1787,30 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
             title=title, category=category, assigned_to=assignee,
         ))
 
+    if body.department_id:
+        pending_goals = db.query(models.DBDepartmentGoal).filter(
+            models.DBDepartmentGoal.department_id == body.department_id,
+            models.DBDepartmentGoal.client_id == client.id,
+            models.DBDepartmentGoal.is_assigned == False,
+        ).all()
+        for dg in pending_goals:
+            goal = models.DBEmployeeGoal(
+                client_id=client.id, employee_id=emp.id, department_id=body.department_id,
+                title=dg.title, description=dg.description,
+                target_value=dg.target_value, current_value=0,
+                unit=dg.unit, category=dg.category,
+                priority=dg.priority, start_date=dg.start_date,
+                due_date=dg.due_date, created_by="HR",
+            )
+            db.add(goal)
+            note = models.DBNotification(
+                client_id=client.id, employee_id=emp.id,
+                title="New Goal Assigned", message=f"HR has assigned you a department goal: {dg.title}",
+                type="info",
+            )
+            db.add(note)
+            dg.is_assigned = True
+
     db.commit()
     db.refresh(emp)
     return {
@@ -1844,10 +1868,35 @@ def update_employee(emp_id: int, request: Request, body: dict = None, db: Sessio
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    old_dept = emp.department_id
     if body:
         for key, val in body.items():
             if hasattr(emp, key) and key not in ("id", "client_id", "created_at", "password_hash"):
                 setattr(emp, key, val)
+    new_dept = emp.department_id
+    if new_dept and new_dept != old_dept:
+        pending_goals = db.query(models.DBDepartmentGoal).filter(
+            models.DBDepartmentGoal.department_id == new_dept,
+            models.DBDepartmentGoal.client_id == client.id,
+            models.DBDepartmentGoal.is_assigned == False,
+        ).all()
+        for dg in pending_goals:
+            goal = models.DBEmployeeGoal(
+                client_id=client.id, employee_id=emp.id, department_id=new_dept,
+                title=dg.title, description=dg.description,
+                target_value=dg.target_value, current_value=0,
+                unit=dg.unit, category=dg.category,
+                priority=dg.priority, start_date=dg.start_date,
+                due_date=dg.due_date, created_by="HR",
+            )
+            db.add(goal)
+            note = models.DBNotification(
+                client_id=client.id, employee_id=emp.id,
+                title="New Goal Assigned", message=f"HR has assigned you a department goal: {dg.title}",
+                type="info",
+            )
+            db.add(note)
+            dg.is_assigned = True
     db.commit()
     return {"message": "Employee updated"}
 
@@ -3648,8 +3697,6 @@ def assign_department_goal(request: Request, body: dict = None, db: Session = De
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
     employees = db.query(models.DBEmployee).filter(models.DBEmployee.department_id == dept_id, models.DBEmployee.client_id == client.id, models.DBEmployee.status == "active").all()
-    if not employees:
-        raise HTTPException(status_code=400, detail="No active employees in this department")
     created = []
     for emp in employees:
         goal = models.DBEmployeeGoal(
@@ -3668,8 +3715,40 @@ def assign_department_goal(request: Request, body: dict = None, db: Session = De
         )
         db.add(note)
         created.append(emp.id)
+    if not employees:
+        dept_goal = models.DBDepartmentGoal(
+            client_id=client.id, department_id=dept_id,
+            title=body.get("title", ""), description=body.get("description", ""),
+            target_value=body.get("target_value", 100),
+            unit=body.get("unit", "%"), category=body.get("category", "performance"),
+            priority=body.get("priority", "medium"), start_date=body.get("start_date", ""),
+            due_date=body.get("due_date", ""), created_by="HR",
+        )
+        db.add(dept_goal)
+        db.commit()
+        return {"message": f"Goal saved for {dept.name}. It will be assigned to employees when they join.", "count": 0, "department": dept.name, "pending": True}
     db.commit()
     return {"message": f"Goal assigned to {len(created)} employees in {dept.name}", "count": len(created), "department": dept.name}
+
+
+@app.get("/api/goals/department-pending")
+def get_pending_department_goals(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    goals = db.query(models.DBDepartmentGoal).filter(
+        models.DBDepartmentGoal.client_id == client.id,
+        models.DBDepartmentGoal.is_assigned == False,
+    ).all()
+    result = []
+    for g in goals:
+        dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == g.department_id).first()
+        result.append({
+            "id": g.id, "department_id": g.department_id, "department_name": dept.name if dept else "",
+            "title": g.title, "description": g.description,
+            "target_value": g.target_value, "unit": g.unit,
+            "category": g.category, "priority": g.priority,
+            "due_date": g.due_date, "created_at": g.created_at,
+        })
+    return result
 
 
 @app.get("/api/leave/requests")

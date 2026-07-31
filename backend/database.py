@@ -516,5 +516,31 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Department goals table
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS department_goals (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        department_id INTEGER REFERENCES departments(id),
+                        title VARCHAR NOT NULL,
+                        description VARCHAR DEFAULT '',
+                        target_value DOUBLE PRECISION DEFAULT 100,
+                        unit VARCHAR DEFAULT '%',
+                        category VARCHAR DEFAULT 'performance',
+                        priority VARCHAR DEFAULT 'medium',
+                        start_date VARCHAR DEFAULT '',
+                        due_date VARCHAR DEFAULT '',
+                        created_by VARCHAR DEFAULT 'HR',
+                        is_assigned BOOLEAN DEFAULT FALSE,
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_department_goals_client_id ON department_goals (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_department_goals_department_id ON department_goals (department_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Column check skipped: {e}")

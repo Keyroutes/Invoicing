@@ -415,6 +415,27 @@ class DBEmployeeGoal(Base):
     department = relationship("DBDepartment")
 
 
+class DBDepartmentGoal(Base):
+    __tablename__ = "department_goals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    target_value = Column(Float, default=100.0)
+    unit = Column(String, default="%")
+    category = Column(String, default="performance")
+    priority = Column(String, default="medium")
+    start_date = Column(String, default="")
+    due_date = Column(String, default="")
+    created_by = Column(String, default="HR")
+    is_assigned = Column(Boolean, default=False)
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    department = relationship("DBDepartment")
+
+
 class DBNotification(Base):
     __tablename__ = "notifications"
 
