@@ -4642,7 +4642,7 @@ async function loadProfitLoss() {
         if (!res.ok) throw new Error('Failed');
         var data = await res.json();
         if (body) {
-            body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">' +
+            body.innerHTML = '<div class="grid-3 mb-24">' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Total Revenue</div><div style="font-size:1.5rem;font-weight:700;color:var(--success-color);">' + formatCurrency(data.total_revenue) + '</div></div>' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Total Expenses</div><div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);">' + formatCurrency(data.total_expenses) + '</div></div>' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Net Profit</div><div style="font-size:1.5rem;font-weight:700;color:' + (data.net_profit >= 0 ? 'var(--success-color)' : 'var(--danger-color)') + ';">' + formatCurrency(data.net_profit) + '</div></div>' +
@@ -4673,7 +4673,7 @@ async function loadBalanceSheet() {
         var data = await res.json();
         if (body) {
             body.innerHTML =
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px;">' +
+                '<div class="grid-3 gap-24">' +
                 '<div>' +
                     '<h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;margin-bottom:16px;">Assets</h3>' +
                     '<div style="display:flex;flex-direction:column;gap:12px;">' +
@@ -4715,7 +4715,7 @@ async function loadCashSummary() {
         data.money_in.forEach(function(v) { totalIn += v; });
         data.money_out.forEach(function(v) { totalOut += v; });
         if (body) {
-            body.innerHTML = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">' +
+            body.innerHTML = '<div class="grid-3 mb-24">' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Money In</div><div style="font-size:1.5rem;font-weight:700;color:var(--success-color);">' + formatCurrency(totalIn) + '</div></div>' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Money Out</div><div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);">' + formatCurrency(totalOut) + '</div></div>' +
                 '<div style="text-align:center;padding:20px;"><div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Net Cash</div><div style="font-size:1.5rem;font-weight:700;color:' + ((totalIn - totalOut) >= 0 ? 'var(--success-color)' : 'var(--danger-color)') + ';">' + formatCurrency(totalIn - totalOut) + '</div></div>' +

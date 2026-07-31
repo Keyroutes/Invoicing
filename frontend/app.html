@@ -68,7 +68,7 @@
                         <h1>Welcome back!</h1>
                         <p class="subtitle">Here's what's happening with your invoicing today.</p>
                     </header>
-                    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+                    <div class="grid-4 mb-24">
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
                             <div style="font-size:1.5rem;font-weight:700;" id="dash-total-invoiced">£0.00</div>
@@ -86,7 +86,7 @@
                             <div style="font-size:1.5rem;font-weight:700;" id="dash-total-count">0</div>
                         </section>
                     </div>
-                    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+                    <div class="grid-3 mb-24">
                         <section class="widget" style="padding:20px;text-align:center;">
                             <div style="font-size:2rem;font-weight:700;color:var(--success-color);" id="dash-paid-count">0</div>
                             <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Paid</div>
@@ -185,7 +185,7 @@
                                 <input type="file" id="logo-upload" accept="image/*" style="display:none;">
                             </div>
                             <form id="complex-invoice-form" onsubmit="return false;">
-                                <div class="invoice-top-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:32px;">
+                                <div class="invoice-top-grid grid-3" style="margin-bottom:32px;">
                                     <div class="form-group">
                                         <label>Customer Name *</label>
                                         <div id="contact-autocomplete-wrap" class="contact-autocomplete-wrap">
@@ -338,7 +338,7 @@
                             </div>
                         </div>
                     </div>
-                    <div style="margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div class="grid-2 mt-24">
                         <div class="glass-widget">
                             <div class="widget-header"><h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Personalized Email</h3></div>
                             <div class="widget-content">
@@ -413,7 +413,7 @@
                         </div>
                         <div class="modal-body">
                             <input type="hidden" id="bill-edit-id">
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                            <div class="grid-2 gap-16">
                                 <div class="form-group"><label>Bill Number *</label><input type="text" id="bill-number" class="form-control" placeholder="BILL-0001"></div>
                                 <div class="form-group"><label>Vendor Name *</label><input type="text" id="bill-vendor" class="form-control" placeholder="Supplier name"></div>
                                 <div class="form-group"><label>Vendor Email</label><input type="email" id="bill-vendor-email" class="form-control" placeholder="billing@supplier.com"></div>
@@ -586,7 +586,7 @@
                     <div class="glass-widget" style="margin-bottom:24px;">
                         <div class="widget-header"><h3>Company Details</h3></div>
                         <div class="widget-content">
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                            <div class="grid-2 gap-16">
                                 <div class="form-group"><label>Company Name</label><input type="text" id="settings-company-name" class="form-control" placeholder="Your Company Ltd"></div>
                                 <div class="form-group"><label>Company Email</label><input type="email" id="settings-company-email" class="form-control" placeholder="hello@company.com"></div>
                                 <div class="form-group"><label>Company Phone</label><input type="tel" id="settings-company-phone" class="form-control" placeholder="+1 555 123 4567"></div>
@@ -627,7 +627,7 @@
                             <button class="btn btn-primary" onclick="showAddEmployeeModal()">+ Add Employee</button>
                         </div>
                     </div>
-                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;" id="hr-stats-grid">
+                    <div class="grid-5 mb-24" id="hr-stats-grid">
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Staff</div>
                             <div style="font-size:1.5rem;font-weight:700;" id="hr-total">0</div>
@@ -703,12 +703,12 @@
                             <button class="btn btn-outline" id="emp-delete-btn" onclick="deleteCurrentEmployee()" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>
                         </div>
                     </div>
-                    <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
+                    <div class="grid-2-1">
                         <div>
                             <div class="glass-widget" style="margin-bottom:24px;">
                                 <div class="widget-header"><h3>Employee Details</h3></div>
                                 <div class="widget-content">
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:0.9rem;">
+                                    <div class="grid-2 gap-16 font-sm">
                                         <div><span style="color:var(--text-secondary);">Employee ID:</span> <span id="emp-detail-eid">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Email:</span> <span id="emp-detail-email">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Phone:</span> <input type="tel" id="emp-detail-phone" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="phone"><span id="emp-detail-phone-ro">-</span></div>
@@ -820,7 +820,7 @@
                                 <div><span style="color:var(--text-secondary);">Email Opens:</span> <span id="ps-detail-opens" style="font-weight:700;color:var(--primary-color);margin-left:4px;">0</span></div>
                                 <div><span style="color:var(--text-secondary);">Last Opened:</span> <span id="ps-detail-last-opened" style="font-weight:600;color:var(--text-primary);margin-left:4px;">Never</span></div>
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;">
+                            <div class="grid-2 gap-32">
                                 <div>
                                     <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;">Earnings</h3>
                                     <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
@@ -977,7 +977,7 @@
                             <button class="btn btn-primary" onclick="openDeptModal()">+ Add Department</button>
                         </div>
                     </div>
-                    <div id="dept-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;"></div>
+                    <div id="dept-cards-grid" class="grid-auto"></div>
                     <div id="dept-empty" style="display:none;text-align:center;padding:60px 20px;">
                         <div style="font-size:3rem;margin-bottom:12px;">&#127970;</div>
                         <div style="font-size:1.1rem;font-weight:600;margin-bottom:8px;">No departments yet</div>
@@ -1032,7 +1032,7 @@
                             <button class="modal-close" onclick="closeDeptDetail()">&times;</button>
                         </div>
                         <div class="modal-body">
-                            <div id="dept-detail-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;"></div>
+                            <div id="dept-detail-stats" class="grid-2 gap-12 mb-12"></div>
                             <div style="font-weight:600;font-size:0.85rem;margin-bottom:10px;color:var(--text-secondary);">Team Members</div>
                             <div id="dept-detail-employees"></div>
                         </div>
@@ -1055,7 +1055,7 @@
                             <button class="btn btn-primary" onclick="showBulkOnboardModal()">+ Bulk Onboard</button>
                         </div>
                     </div>
-                    <div id="onboarding-hub-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;"></div>
+                    <div id="onboarding-hub-stats" class="grid-4 mb-24"></div>
                     <div class="invoices-tabs">
                         <button class="tab active" onclick="filterOnboardingHub('all',this)">All</button>
                         <button class="tab" onclick="filterOnboardingHub('onboarding',this)">In Progress</button>
@@ -1151,11 +1151,11 @@
                         <div class="modal-body">
                             <div class="form-group"><label>Title</label><input type="text" id="goal-title" class="form-control" placeholder="e.g. Complete project X"></div>
                             <div class="form-group"><label>Description</label><textarea id="goal-desc" class="form-control" rows="2" placeholder="Optional description"></textarea></div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div class="grid-2 gap-12">
                                 <div class="form-group"><label>Target Value</label><input type="number" id="goal-target" class="form-control" value="100"></div>
                                 <div class="form-group"><label>Unit</label><select id="goal-unit" class="form-control"><option value="%">%</option><option value="hours">Hours</option><option value="days">Days</option><option value="tasks">Tasks</option><option value="revenue">Revenue</option><option value="count">Count</option><option value="score">Score</option><option value="tickets">Tickets</option></select></div>
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div class="grid-2 gap-12">
                                 <div class="form-group"><label>Category</label><select id="goal-category" class="form-control"><option value="performance">Performance</option><option value="sales">Sales</option><option value="training">Training</option><option value="project">Project</option></select></div>
                                 <div class="form-group"><label>Priority</label><select id="goal-priority" class="form-control"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></div>
                             </div>
@@ -1179,11 +1179,11 @@
                             <div class="form-group"><label>Department</label><select id="dept-goal-dept" class="form-control"><option value="">Select department...</option></select></div>
                             <div class="form-group"><label>Title</label><input type="text" id="dept-goal-title" class="form-control" placeholder="e.g. Q4 Performance Target"></div>
                             <div class="form-group"><label>Description</label><textarea id="dept-goal-desc" class="form-control" rows="2" placeholder="Optional description"></textarea></div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div class="grid-2 gap-12">
                                 <div class="form-group"><label>Target Value</label><input type="number" id="dept-goal-target" class="form-control" value="100"></div>
                                 <div class="form-group"><label>Unit</label><select id="dept-goal-unit" class="form-control"><option value="%">%</option><option value="hours">Hours</option><option value="days">Days</option><option value="tasks">Tasks</option><option value="revenue">Revenue</option><option value="count">Count</option><option value="score">Score</option><option value="tickets">Tickets</option></select></div>
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                            <div class="grid-2 gap-12">
                                 <div class="form-group"><label>Category</label><select id="dept-goal-category" class="form-control"><option value="performance">Performance</option><option value="sales">Sales</option><option value="training">Training</option><option value="project">Project</option></select></div>
                                 <div class="form-group"><label>Priority</label><select id="dept-goal-priority" class="form-control"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></div>
                             </div>
@@ -1238,7 +1238,7 @@
 
                     <!-- LIVE TAB -->
                     <div id="att-sub-live">
-                        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;" id="att-stats-grid">
+                        <div class="grid-5 mb-24" id="att-stats-grid">
                             <section class="widget" style="padding:20px;">
                                 <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Employees</div>
                                 <div style="font-size:1.5rem;font-weight:700;" id="att-total">0</div>
@@ -1266,7 +1266,7 @@
                                 <button class="btn btn-outline" onclick="loadLiveAttendance()" style="font-size:0.8rem;"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                             </div>
                             <div class="widget-content">
-                                <div id="live-attendance-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;"></div>
+                                <div id="live-attendance-grid" class="grid-auto" style="gap:12px;"></div>
                             </div>
                         </div>
                         <div class="glass-widget" style="margin-bottom:24px;">
@@ -1275,7 +1275,7 @@
                                 <div id="att-employee-buttons" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
                             </div>
                         </div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+                        <div class="grid-2 gap-16 mb-24">
                             <div class="glass-widget">
                                 <div class="widget-header">
                                     <h3><i class="bi bi-magic" style="color:var(--primary-color);margin-right:6px;"></i>AI Attendance Alerts</h3>
@@ -1326,7 +1326,7 @@
 
                     <!-- ANALYTICS TAB -->
                     <div id="att-sub-analytics" class="d-none">
-                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;">
+                    <div class="grid-4 mb-24">
                             <section class="widget" style="padding:20px;">
                                 <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Avg Daily Hours (30d)</div>
                                 <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="ana-avg-hours">0h</div>
@@ -1357,7 +1357,7 @@
                         <div class="glass-widget" style="max-width:700px;margin-bottom:24px;">
                             <div class="widget-header"><h3><i class="bi bi-megaphone"></i> Announce Overtime</h3></div>
                             <div class="widget-content">
-                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                                <div class="grid-2 gap-16">
                                     <div class="form-group">
                                         <label>Employee</label>
                                         <select id="ot-employee" class="form-control"><option value="">Select employee...</option></select>
@@ -1396,7 +1396,7 @@
                         <div class="glass-widget" style="max-width:600px;">
                             <div class="widget-header"><h3><i class="bi bi-geo-alt"></i> Geofence & Work Hours</h3></div>
                             <div class="widget-content">
-                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                                <div class="grid-2 gap-16">
                                     <div class="form-group"><label>Office Name</label><input type="text" id="set-office-name" class="form-control" value="Head Office"></div>
                                     <div class="form-group"><label>Geofence Radius (meters)</label><input type="number" id="set-radius" class="form-control" value="200"></div>
                                     <div class="form-group"><label>Office Latitude</label><input type="number" step="any" id="set-lat" class="form-control"></div>
@@ -1510,7 +1510,7 @@
                             <button class="btn btn-outline btn-sm" onclick="showRecSubmissions()">&larr; Back</button>
                             <h2 style="font-size:1.2rem;font-weight:700;">Application Details</h2>
                         </div>
-                        <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
+                        <div class="grid-2-1">
                             <div class="glass-widget">
                                 <div class="widget-header"><h3>Answers</h3></div>
                                 <div class="widget-content" id="rec-detail-answers"></div>
@@ -1573,7 +1573,7 @@
             </div>
             <div style="padding:24px;">
                 <form id="add-employee-form" onsubmit="return false;">
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div class="grid-2 gap-16">
                         <div class="form-group"><label>First Name *</label><input type="text" id="emp-first-name" class="form-control" required></div>
                         <div class="form-group"><label>Last Name *</label><input type="text" id="emp-last-name" class="form-control" required></div>
                         <div class="form-group"><label>Email *</label><input type="email" id="emp-email" class="form-control" required></div>
@@ -1639,7 +1639,7 @@
             <div style="padding:24px;">
                 <form id="generate-payslip-form" onsubmit="return false;">
                     <div id="ps-employee-id-container"><input type="hidden" id="ps-employee-id"></div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div class="grid-2 gap-16">
                         <div class="form-group"><label>Period Start *</label><input type="date" id="ps-period-start" class="form-control" required onchange="autoFetchPayDetails()"></div>
                         <div class="form-group"><label>Period End *</label><input type="date" id="ps-period-end" class="form-control" required onchange="autoFetchPayDetails()"></div>
                         <div class="form-group"><label>Pay Date *</label><input type="date" id="ps-pay-date" class="form-control" required></div>
@@ -1658,7 +1658,7 @@
                     <!-- Live Preview -->
                     <div id="ps-preview" style="background:rgba(67,97,238,0.06);border:1px solid rgba(67,97,238,0.15);border-radius:12px;padding:16px;margin-top:16px;display:none;">
                         <div style="font-weight:600;font-size:0.9rem;margin-bottom:12px;color:var(--primary-color);">Live Preview</div>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.85rem;">
+                        <div class="grid-2 gap-8 font-sm">
                             <div>Basic Salary: <strong id="prev-basic">£0</strong></div>
                             <div>Overtime Pay: <strong id="prev-ot">£0</strong></div>
                             <div>Bonus: <strong id="prev-bonus">£0</strong></div>

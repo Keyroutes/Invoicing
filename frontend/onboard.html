@@ -83,6 +83,7 @@
         }
         .form-control::placeholder { color: #475569; }
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 768px) { .form-row { grid-template-columns: 1fr; } }
         .logo-upload {
             border: 2px dashed rgba(255,255,255,0.1);
             border-radius: 16px;
