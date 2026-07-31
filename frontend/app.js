@@ -2,6 +2,11 @@
 // aniprotech - app.js (Production)
 // ============================================================
 
+var _appCurrency = 'GBP';
+var _currencySymbols = { GBP: '£', USD: '$', EUR: '€', AUD: 'A$', CAD: 'C$', INR: '₹', JPY: '¥' };
+function getCurrencySymbol() { return _currencySymbols[_appCurrency] || '£'; }
+function formatMoney(val) { return getCurrencySymbol() + parseFloat(val || 0).toFixed(2); }
+
 // --- Toast Notifications ---
 function showToast(message, type) {
     type = type || 'info';
@@ -66,6 +71,7 @@ function showView(viewId) {
     if (viewId === 'create-invoice-view' && typeof setupContactAutocomplete === 'function') setupContactAutocomplete();
     if (viewId === 'settings-view' && typeof loadGmailStatus === 'function') loadGmailStatus();
     if (viewId === 'settings-view' && typeof loadSettings === 'function') loadSettings();
+    if (viewId === 'settings-view' && typeof loadAuditLogs === 'function') loadAuditLogs();
     if (viewId === 'reports-view' && typeof loadReports === 'function') loadReports();
     // Close mobile menu
     var mainNav = document.getElementById('main-nav');
@@ -81,8 +87,8 @@ var allInvoices = [];
 var currentFilter = 'all';
 
 function formatCurrency(amount, currency) {
-    currency = currency || 'USD';
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency }).format(amount || 0);
+    currency = currency || _appCurrency || 'GBP';
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency }).format(amount || 0);
 }
 
 // --- Auth ---
@@ -388,6 +394,8 @@ async function viewInvoice(number) {
         document.getElementById('view-inv-due-date').textContent = inv.due_date;
         var dueVal = document.getElementById('view-inv-due-val');
         if (dueVal) dueVal.textContent = (inv.due || 0).toFixed(2);
+        var dueCurr = document.getElementById('view-inv-due-currency');
+        if (dueCurr) dueCurr.textContent = getCurrencySymbol();
 
         var openTracking = document.getElementById('view-inv-open-tracking');
         var openCountEl = document.getElementById('view-inv-open-count');
@@ -568,17 +576,20 @@ function generateInvoicePDF() {
 
     // ===== LINE ITEMS TABLE =====
     // Page: w=612, h=792, ml=50, mr=562, usable=512
-    // Conservative layout: desc stays LEAGUES away from qty
-    var COL = {
-        itemL: ml,        itemR: ml + 74,
-        descL: ml + 80,
-        qtyR:  mr - 160,
-        priceR: mr - 104,
-        discR: mr - 58,
-        amountR: mr - 6
-    };
-    var descRightEdge = COL.qtyR - 30;
-    var descMaxW = descRightEdge - COL.descL - 4;
+    // Fixed columns with clear boundaries: Item | Desc | Qty | Unit Price | Disc | Amount
+    var COL_ITEM_L = ml;
+    var COL_ITEM_R = ml + 55;
+    var COL_DESC_L = ml + 61;
+    var COL_DESC_R = ml + 240;
+    var COL_QTY_L = ml + 246;
+    var COL_QTY_R = ml + 294;
+    var COL_PRICE_L = ml + 300;
+    var COL_PRICE_R = ml + 366;
+    var COL_DISC_L = ml + 372;
+    var COL_DISC_R = ml + 442;
+    var COL_AMT_L = ml + 448;
+    var COL_AMT_R = mr;
+    var descMaxW = COL_DESC_R - COL_DESC_L - 6;
 
     function clipText(text, maxW) {
         var t = text || '-';
@@ -593,12 +604,12 @@ function generateInvoicePDF() {
         doc.setFontSize(7.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(220, 225, 235);
-        doc.text('Item', COL.itemL + 4, yPos + 13);
-        doc.text('Description', COL.descL + 4, yPos + 13);
-        doc.text('Qty', COL.qtyR, yPos + 13, { align: 'right' });
-        doc.text('Unit Price', COL.priceR, yPos + 13, { align: 'right' });
-        doc.text('Disc Amount', COL.discR, yPos + 13, { align: 'right' });
-        doc.text('Amount', COL.amountR - 6, yPos + 13, { align: 'right' });
+        doc.text('Item', COL_ITEM_L + 3, yPos + 13);
+        doc.text('Description', COL_DESC_L + 3, yPos + 13);
+        doc.text('Qty', COL_QTY_R - 2, yPos + 13, { align: 'right' });
+        doc.text('Unit Price', COL_PRICE_R - 2, yPos + 13, { align: 'right' });
+        doc.text('Disc', COL_DISC_R - 2, yPos + 13, { align: 'right' });
+        doc.text('Amount', COL_AMT_R - 2, yPos + 13, { align: 'right' });
         return yPos + 24;
     }
 
@@ -630,7 +641,7 @@ function generateInvoicePDF() {
     var rowIdx = 0;
     var pageNum = 1;
 
-    var nameMaxW = COL.itemR - COL.itemL - 8;
+    var nameMaxW = COL_ITEM_R - COL_ITEM_L - 6;
 
     rows.forEach(function(row) {
         doc.setFontSize(9.5);
@@ -677,19 +688,19 @@ function generateInvoicePDF() {
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(nameLines, COL.itemL + 4, y + 14);
+        doc.text(nameLines, COL_ITEM_L + 3, y + 14);
 
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 116, 139);
-        doc.text(descLines, COL.descL + 4, y + 14);
+        doc.text(descLines, COL_DESC_L + 3, y + 14);
 
-        doc.text(row.qty, COL.qtyR, y + 14, { align: 'right' });
-        doc.text(row.price, COL.priceR, y + 14, { align: 'right' });
-        doc.text(row.disc, COL.discR, y + 14, { align: 'right' });
+        doc.text(row.qty, COL_QTY_R - 2, y + 14, { align: 'right' });
+        doc.text(row.price, COL_PRICE_R - 2, y + 14, { align: 'right' });
+        doc.text(row.disc, COL_DISC_R - 2, y + 14, { align: 'right' });
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 41, 59);
-        doc.text(row.amount, COL.amountR - 6, y + 14, { align: 'right' });
+        doc.text(row.amount, COL_AMT_R - 2, y + 14, { align: 'right' });
 
         y += rowH;
         rowIdx++;
@@ -700,7 +711,7 @@ function generateInvoicePDF() {
         doc.rect(ml, y, mr - ml, 22, 'F');
         doc.setFontSize(9);
         doc.setTextColor(148, 163, 184);
-        doc.text('No line items', COL.descL + 4, y + 14);
+        doc.text('No line items', COL_DESC_L + 3, y + 14);
         y += 22;
     }
 
@@ -747,7 +758,7 @@ function generateInvoicePDF() {
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
-    doc.text('TOTAL GBP', totLabelX, y);
+    doc.text('TOTAL ' + _appCurrency, totLabelX, y);
     doc.text(total, totValX, y, { align: 'right' });
     y += 24;
 
@@ -1222,7 +1233,10 @@ async function saveCompanyDetails() {
         company_name: document.getElementById('settings-company-name') ? document.getElementById('settings-company-name').value : '',
         email: document.getElementById('settings-company-email') ? document.getElementById('settings-company-email').value : '',
         phone_number: document.getElementById('settings-company-phone') ? document.getElementById('settings-company-phone').value : '',
-        company_address: document.getElementById('settings-company-address') ? document.getElementById('settings-company-address').value : ''
+        company_address: document.getElementById('settings-company-address') ? document.getElementById('settings-company-address').value : '',
+        company_abn: document.getElementById('settings-company-abn') ? document.getElementById('settings-company-abn').value : '',
+        company_website: document.getElementById('settings-company-website') ? document.getElementById('settings-company-website').value : '',
+        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'GBP'
     };
     try {
         var res = await fetch('/api/settings', {
@@ -1300,6 +1314,54 @@ async function loadSettings() {
     }).catch(function() {});
 }
 window.loadSettings = loadSettings;
+
+async function loadAuditLogs() {
+    var container = document.getElementById('audit-log-container');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary);">Loading...</div>';
+    try {
+        var res = await fetch('/api/audit-logs?limit=50');
+        if (!res.ok) throw new Error('Failed');
+        var logs = await res.json();
+        if (!logs.length) {
+            container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No activity recorded yet.</div>';
+            return;
+        }
+        var actionIcons = {
+            'invoice_created': { icon: '&#128196;', color: 'var(--primary-color)' },
+            'invoice_sent': { icon: '&#9993;', color: 'var(--primary-color)' },
+            'invoice_marked_paid': { icon: '&#9989;', color: 'var(--success-color)' },
+            'invoice_deleted': { icon: '&#128465;', color: 'var(--danger-color)' },
+            'employee_created': { icon: '&#128100;', color: 'var(--success-color)' },
+            'employee_updated': { icon: '&#9998;', color: 'var(--primary-color)' },
+            'employee_deleted': { icon: '&#128100;', color: 'var(--danger-color)' },
+            'leave_approved': { icon: '&#9989;', color: 'var(--success-color)' },
+            'leave_rejected': { icon: '&#10060;', color: 'var(--danger-color)' },
+            'bill_created': { icon: '&#128196;', color: 'var(--warning-color)' },
+            'bill_paid': { icon: '&#9989;', color: 'var(--success-color)' },
+            'bill_deleted': { icon: '&#128465;', color: 'var(--danger-color)' },
+            'payslip_marked_paid': { icon: '&#128176;', color: 'var(--success-color)' },
+            'goal_assigned_dept': { icon: '&#127919;', color: 'var(--primary-color)' },
+            'goal_saved_for_dept': { icon: '&#127919;', color: 'var(--warning-color)' },
+        };
+        container.innerHTML = '<div style="max-height:500px;overflow-y:auto;">' +
+            logs.map(function(log) {
+                var a = actionIcons[log.action] || { icon: '&#8226;', color: 'var(--text-secondary)' };
+                var actionLabel = log.action.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                return '<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);">' +
+                    '<div style="width:32px;height:32px;border-radius:8px;background:' + a.color + '15;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:1rem;">' + a.icon + '</div>' +
+                    '<div style="flex:1;min-width:0;">' +
+                        '<div style="font-size:0.85rem;font-weight:500;">' + esc(actionLabel) + (log.entity_name ? ' — <span style="color:var(--primary-color);">' + esc(log.entity_name) + '</span>' : '') + '</div>' +
+                        (log.details ? '<div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(log.details) + '</div>' : '') +
+                    '</div>' +
+                    '<div style="font-size:0.75rem;color:var(--text-secondary);white-space:nowrap;flex-shrink:0;">' + esc(log.created_at || '') + '</div>' +
+                '</div>';
+            }).join('') + '</div>';
+    } catch(e) {
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger-color);">Failed to load activity log.</div>';
+    }
+}
+window.loadAuditLogs = loadAuditLogs;
 
 function handleSettingsLogoUpload(e) {
     var file = e.target.files[0];
@@ -2423,6 +2485,8 @@ async function viewPayslip(psId) {
         document.getElementById('ps-detail-period').textContent = ps.period_start + ' to ' + ps.period_end;
         document.getElementById('ps-detail-pay-date').textContent = ps.pay_date || '-';
         document.getElementById('ps-detail-net').textContent = (ps.net_pay || 0).toFixed(2);
+        var currEl = document.getElementById('ps-detail-currency');
+        if (currEl) currEl.textContent = getCurrencySymbol();
         document.getElementById('ps-detail-company').textContent = ps.company ? ps.company.name || '-' : '-';
         document.getElementById('ps-detail-company-addr').textContent = ps.company ? (ps.company.address || '') : '';
 
@@ -2436,7 +2500,8 @@ async function viewPayslip(psId) {
         document.getElementById('ps-detail-ret').textContent = (ps.retirement || 0).toFixed(2);
         document.getElementById('ps-detail-other').textContent = (ps.other_deductions || 0).toFixed(2);
         document.getElementById('ps-detail-dedtotal').textContent = (ps.total_deductions || 0).toFixed(2);
-        document.getElementById('ps-detail-net-big').textContent = '\u00A3' + (ps.net_pay || 0).toFixed(2);
+        var netBigEl = document.getElementById('ps-detail-net-big');
+        if (netBigEl) netBigEl.textContent = getCurrencySymbol() + (ps.net_pay || 0).toFixed(2);
 
         var notesEl = document.getElementById('ps-detail-notes');
         if (ps.notes) { notesEl.style.display = 'block'; document.getElementById('ps-detail-notes-text').textContent = ps.notes; }
@@ -2538,14 +2603,15 @@ function recalcPayslip() {
     var tax = Math.round(gross * (taxRate / 100) * 100) / 100;
     var totalDed = tax + empDeductions + insurance + retirement + otherDed;
     var net = Math.round((gross - totalDed) * 100) / 100;
-    document.getElementById('prev-basic').textContent = '\u00A3' + basic.toLocaleString();
-    document.getElementById('prev-ot').textContent = '\u00A3' + otPay.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-bonus').textContent = '\u00A3' + bonus.toLocaleString();
-    document.getElementById('prev-allow').textContent = '\u00A3' + allowances.toLocaleString();
-    document.getElementById('prev-gross').textContent = '\u00A3' + gross.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-tax').textContent = '\u00A3' + tax.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-ded').textContent = '\u00A3' + (empDeductions + insurance + retirement + otherDed).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-    document.getElementById('prev-net').textContent = '\u00A3' + net.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    var cs = getCurrencySymbol();
+    document.getElementById('prev-basic').textContent = cs + basic.toLocaleString();
+    document.getElementById('prev-ot').textContent = cs + otPay.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-bonus').textContent = cs + bonus.toLocaleString();
+    document.getElementById('prev-allow').textContent = cs + allowances.toLocaleString();
+    document.getElementById('prev-gross').textContent = cs + gross.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-tax').textContent = cs + tax.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-ded').textContent = cs + (empDeductions + insurance + retirement + otherDed).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById('prev-net').textContent = cs + net.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     document.getElementById('ps-preview').style.display = 'block';
     var attInfo = document.getElementById('prev-attendance');
     if (currentPayDetails && attInfo) {
@@ -2807,7 +2873,7 @@ function generatePayslipPDF() {
     doc.text('NET PAY', margin + 20, y + 22);
     doc.setFontSize(24);
     doc.setTextColor(16, 185, 129);
-    doc.text('\u00A3' + netPay, w - margin - 20, y + 30, { align: 'right' });
+    doc.text(getCurrencySymbol() + netPay, w - margin - 20, y + 30, { align: 'right' });
     y += 70;
 
     // === FOOTER ===
@@ -3244,6 +3310,7 @@ document.addEventListener('DOMContentLoaded', function() {
     preloadSearchData();
     loadSavedLogo();
     setupLogoUpload();
+    fetch('/api/settings').then(function(r){return r.json()}).then(function(d){if(d.currency){_appCurrency=d.currency;var el=document.getElementById('setting-currency');if(el)el.value=d.currency;}}).catch(function(){});
     if (document.querySelectorAll('.line-item-row').length === 0 && document.getElementById('line-items-body')) {
         addLineItemRow();
     }
@@ -4287,7 +4354,7 @@ async function loadPayrollAnomalies() {
                 var color = a.direction === 'increased' ? 'var(--success-color)' : 'var(--danger-color)';
                 return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);">' +
                     '<div style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0;"></div>' +
-                    '<div style="flex:1;"><strong>' + esc(a.employee_name) + '</strong><br><span style="font-size:0.8rem;color:var(--text-secondary);">£' + a.previous_net.toFixed(2) + ' → £' + a.latest_net.toFixed(2) + ' (' + a.change_pct + '% ' + a.direction + ')</span></div>' +
+                    '<div style="flex:1;"><strong>' + esc(a.employee_name) + '</strong><br><span style="font-size:0.8rem;color:var(--text-secondary);">' + getCurrencySymbol() + a.previous_net.toFixed(2) + ' → ' + getCurrencySymbol() + a.latest_net.toFixed(2) + ' (' + a.change_pct + '% ' + a.direction + ')</span></div>' +
                     '<span class="status-pill" style="background:' + color + '20;color:' + color + ';">' + a.change_pct + '%</span>' +
                 '</div>';
             }).join('') + '</div>';

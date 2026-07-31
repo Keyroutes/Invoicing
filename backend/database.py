@@ -542,5 +542,35 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # clients.currency
+            try:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS currency VARCHAR DEFAULT 'GBP'"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Audit logs table
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS audit_logs (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        user_type VARCHAR DEFAULT 'client',
+                        user_name VARCHAR DEFAULT '',
+                        action VARCHAR NOT NULL,
+                        entity_type VARCHAR DEFAULT '',
+                        entity_id INTEGER,
+                        entity_name VARCHAR DEFAULT '',
+                        details TEXT DEFAULT '',
+                        ip_address VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_client_id ON audit_logs (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs (created_at)"))
+                conn.commit()
+            except Exception:
+                pass
+
     except Exception as e:
         print(f"Column check skipped: {e}")

@@ -38,6 +38,7 @@ class DBClient(Base):
     industry = Column(String, default="")
     is_active = Column(Boolean, default=True)
     is_onboarded = Column(Boolean, default=False)
+    currency = Column(String, default="GBP")
     last_login = Column(String, default="")
     login_count = Column(Integer, default=0)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -434,6 +435,22 @@ class DBDepartmentGoal(Base):
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     department = relationship("DBDepartment")
+
+
+class DBAuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    user_type = Column(String, default="client")
+    user_name = Column(String, default="")
+    action = Column(String, nullable=False)
+    entity_type = Column(String, default="")
+    entity_id = Column(Integer, nullable=True)
+    entity_name = Column(String, default="")
+    details = Column(Text, default="")
+    ip_address = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 class DBNotification(Base):

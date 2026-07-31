@@ -326,7 +326,7 @@
             </div>
             <div class="stat-card danger">
                 <div class="stat-label">Outstanding</div>
-                <div class="stat-value" id="stat-outstanding">£0</div>
+                <div class="stat-value" id="stat-outstanding">0</div>
             </div>
         </div>
         <div class="stats-grid" style="margin-top:16px;">
@@ -427,7 +427,7 @@
                 document.getElementById('stat-total').textContent = data.total_clients;
                 document.getElementById('stat-active').textContent = data.active_clients;
                 document.getElementById('stat-invoices').textContent = data.total_invoices;
-                document.getElementById('stat-outstanding').textContent = '£' + data.total_outstanding.toLocaleString();
+                document.getElementById('stat-outstanding').textContent = data.total_outstanding.toLocaleString();
             } catch (e) { console.error(e); }
         }
 

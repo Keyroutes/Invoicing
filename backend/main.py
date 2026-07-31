@@ -65,6 +65,17 @@ def log_login(db, client_id, email, user_type="client", login_type="password", r
             client.login_count = (client.login_count or 0) + 1
     db.commit()
 
+def log_audit(db, client_id, action, entity_type="", entity_id=None, entity_name="", details="", request=None, user_type="client", user_name=""):
+    ip = ""
+    if request and request.client:
+        ip = request.client.host or ""
+    log = models.DBAuditLog(
+        client_id=client_id, user_type=user_type, user_name=user_name,
+        action=action, entity_type=entity_type, entity_id=entity_id,
+        entity_name=entity_name, details=details, ip_address=ip,
+    )
+    db.add(log)
+
 def generate_secret_key() -> str:
     return secrets.token_hex(32)
 
@@ -857,6 +868,8 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
 
     db.commit()
     db.refresh(db_invoice)
+    log_audit(db, client.id, "invoice_created", "invoice", db_invoice.id, number, f"Total: {total:.2f}", request)
+    db.commit()
 
     return get_invoice(number, request, db)
 
@@ -1058,6 +1071,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
 
     inv.status = "Sent"
     inv.sent = datetime.now().strftime("%Y-%m-%d")
+    log_audit(db, client.id, "invoice_sent", "invoice", inv.id, inv.number, f"Sent to {inv.email}", request)
     db.commit()
 
     return {"message": "Email sending initiated via Gmail API", "status": "Sent", "sent_date": inv.sent}
@@ -1243,6 +1257,8 @@ def create_bill(request: Request, body: dict = None, db: Session = Depends(get_d
     db.add(bill)
     db.commit()
     db.refresh(bill)
+    log_audit(db, client.id, "bill_created", "bill", bill.id, bill.number, f"Vendor: {bill.vendor_name}, Total: {bill.total}", request)
+    db.commit()
     return {"id": bill.id, "number": bill.number}
 
 
@@ -1285,6 +1301,7 @@ def delete_bill(bill_id: int, request: Request, db: Session = Depends(get_db)):
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     db.query(models.DBBillLineItem).filter(models.DBBillLineItem.bill_id == bill.id).delete()
+    log_audit(db, client.id, "bill_deleted", "bill", bill.id, bill.number, "", request)
     db.delete(bill)
     db.commit()
     return {"ok": True}
@@ -1298,6 +1315,7 @@ def mark_bill_paid(bill_id: int, request: Request, body: dict = None, db: Sessio
         raise HTTPException(status_code=404, detail="Bill not found")
     bill.amount_paid = bill.total or bill.amount or 0.0
     bill.status = "Paid"
+    log_audit(db, client.id, "bill_paid", "bill", bill.id, bill.number, f"Amount: {bill.amount_paid}", request)
     db.commit()
     return {"ok": True, "status": "Paid"}
 
@@ -1513,6 +1531,7 @@ def delete_invoice(number: str, request: Request, db: Session = Depends(get_db))
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     db.query(models.DBLineItem).filter(models.DBLineItem.invoice_id == inv.id).delete()
+    log_audit(db, client.id, "invoice_deleted", "invoice", inv.id, inv.number, f"Contact: {inv.to_contact}", request)
     db.delete(inv)
     db.commit()
     return {"message": "Invoice deleted successfully"}
@@ -1526,6 +1545,7 @@ def mark_invoice_paid(number: str, request: Request, db: Session = Depends(get_d
     inv.status = "Paid"
     inv.paid = inv.due
     inv.due = 0.0
+    log_audit(db, client.id, "invoice_marked_paid", "invoice", inv.id, inv.number, f"Amount: {inv.paid}", request)
     db.commit()
     return {"message": "Invoice marked as paid", "status": "Paid"}
 
@@ -1550,6 +1570,19 @@ def save_settings(request: Request, body: dict = None, db: Session = Depends(get
                 db.add(setting)
     db.commit()
     return {"message": "Settings saved"}
+
+@app.get("/api/audit-logs")
+def get_audit_logs(request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    logs = db.query(models.DBAuditLog).filter(
+        models.DBAuditLog.client_id == client.id
+    ).order_by(models.DBAuditLog.created_at.desc()).limit(limit).all()
+    return [{
+        "id": l.id, "user_type": l.user_type, "user_name": l.user_name,
+        "action": l.action, "entity_type": l.entity_type, "entity_id": l.entity_id,
+        "entity_name": l.entity_name, "details": l.details, "ip_address": l.ip_address,
+        "created_at": l.created_at,
+    } for l in logs]
 
 @app.get("/api/my/login-history")
 def my_login_history(request: Request, limit: int = 50, db: Session = Depends(get_db)):
@@ -1813,6 +1846,8 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
 
     db.commit()
     db.refresh(emp)
+    log_audit(db, client.id, "employee_created", "employee", emp.id, f"{emp.first_name} {emp.last_name}", f"Dept: {body.department_id or 'None'}", request)
+    db.commit()
     return {
         "id": emp.id, "employee_id": emp.employee_id,
         "first_name": emp.first_name, "last_name": emp.last_name,
@@ -1897,6 +1932,7 @@ def update_employee(emp_id: int, request: Request, body: dict = None, db: Sessio
             )
             db.add(note)
             dg.is_assigned = True
+    log_audit(db, client.id, "employee_updated", "employee", emp.id, f"{emp.first_name} {emp.last_name}", f"Fields: {', '.join(body.keys()) if body else 'none'}", request)
     db.commit()
     return {"message": "Employee updated"}
 
@@ -1906,8 +1942,10 @@ def delete_employee(emp_id: int, request: Request, db: Session = Depends(get_db)
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    emp_name = f"{emp.first_name} {emp.last_name}"
     db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).delete()
     db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp_id).delete()
+    log_audit(db, client.id, "employee_deleted", "employee", emp.id, emp_name, "", request)
     db.delete(emp)
     db.commit()
     return {"message": "Employee deleted"}
@@ -2317,6 +2355,7 @@ def mark_payslip_paid(ps_id: int, request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Payslip not found")
     ps.status = "Paid"
     ps.pay_date = ps.pay_date or datetime.now().strftime("%Y-%m-%d")
+    log_audit(db, client.id, "payslip_marked_paid", "payslip", ps.id, ps.number, f"Net: {ps.net_pay}", request)
     db.commit()
     return {"message": "Payslip marked as paid"}
 
@@ -3725,8 +3764,10 @@ def assign_department_goal(request: Request, body: dict = None, db: Session = De
             due_date=body.get("due_date", ""), created_by="HR",
         )
         db.add(dept_goal)
+        log_audit(db, client.id, "goal_saved_for_dept", "goal", None, body.get("title", ""), f"Dept: {dept.name} (pending)", request)
         db.commit()
         return {"message": f"Goal saved for {dept.name}. It will be assigned to employees when they join.", "count": 0, "department": dept.name, "pending": True}
+    log_audit(db, client.id, "goal_assigned_dept", "goal", None, body.get("title", ""), f"Dept: {dept.name}, {len(created)} employees", request)
     db.commit()
     return {"message": f"Goal assigned to {len(created)} employees in {dept.name}", "count": len(created), "department": dept.name}
 
@@ -3784,6 +3825,7 @@ def action_leave_simple(leave_id: int, request: Request, body: dict = None, db: 
         type="success" if leave.status == "approved" else "warning",
     )
     db.add(note)
+    log_audit(db, client.id, f"leave_{leave.status}", "leave", leave.id, f"{leave.leave_type} ({leave.days}d)", f"Employee ID: {leave.employee_id}", request)
     db.commit()
     return {"message": f"Leave {leave.status}"}
 
