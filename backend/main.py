@@ -666,8 +666,17 @@ def get_gmail_credentials(access_token: str = None, refresh_token: str = None):
         return None
     return creds
 
-def get_stored_refresh_token(db: Session):
-    setting = db.query(models.DBSettings).filter(models.DBSettings.key == "GOOGLE_REFRESH_TOKEN").first()
+def get_stored_refresh_token(db: Session, client_id: int = None):
+    q = db.query(models.DBSettings).filter(models.DBSettings.key == "GOOGLE_REFRESH_TOKEN")
+    if client_id:
+        # Try client-specific token first
+        setting = q.filter(models.DBSettings.client_id == client_id).first()
+        if setting:
+            return setting.value
+    # Fallback to global token (no client_id) for backward compat
+    setting = q.filter(models.DBSettings.client_id == None).first()
+    if not setting:
+        setting = q.first()
     return setting.value if setting else None
 
 def validate_email_address(email: str) -> bool:
@@ -731,7 +740,7 @@ def prepare_email_message(to_email, subject, body_text, html_body, from_email, l
     return msg.as_string()
 
 
-def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf", logo_data: str = ""):
+def send_email_background(to_email: str, subject: str, body: str, from_email: str, html_body: str = None, pdf_b64: str = None, pdf_filename: str = "invoice.pdf", logo_data: str = "", client_id: int = None):
     pdf_bytes = None
     if pdf_b64:
         try:
@@ -742,7 +751,7 @@ def send_email_background(to_email: str, subject: str, body: str, from_email: st
     raw_msg = prepare_email_message(to_email, subject, body, html_body or "", from_email, logo_data or "", pdf_bytes, pdf_filename)
 
     with SessionLocal() as db:
-        refresh_token = get_stored_refresh_token(db)
+        refresh_token = get_stored_refresh_token(db, client_id=client_id)
 
     if not refresh_token:
         return False, "Gmail refresh token not configured"
@@ -1194,7 +1203,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{inv.number}.pdf" if pdf_b64 else "invoice.pdf"
 
-    background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename, logo_data)
+    background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename, logo_data, client_id=client.id)
 
     inv.status = "Sent"
     inv.sent = datetime.now().strftime("%Y-%m-%d")
@@ -1556,18 +1565,6 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
             request.session['access_token'] = access_token
             if refresh_token:
                 request.session['refresh_token'] = refresh_token
-                try:
-                    setting = db.query(models.DBSettings).filter(
-                        models.DBSettings.key == "GOOGLE_REFRESH_TOKEN"
-                    ).first()
-                    if not setting:
-                        setting = models.DBSettings(key="GOOGLE_REFRESH_TOKEN", value=refresh_token)
-                        db.add(setting)
-                    else:
-                        setting.value = refresh_token
-                    db.commit()
-                except Exception as e:
-                    logger.error(f"Failed to save refresh token: {e}")
 
             google_email = user.get('email', '')
 
@@ -1587,12 +1584,9 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
                     return RedirectResponse(url="/superadmin-login.html")
                 existing_client = db.query(models.DBClient).filter(models.DBClient.email == google_email).first()
                 if existing_client:
-                    request.session['client_id'] = existing_client.id
-                    log_login(db, existing_client.id, google_email, "client", "google", request, "success")
-                    if existing_client.is_onboarded:
-                        return RedirectResponse(url="/app.html")
-                    else:
-                        return RedirectResponse(url="/onboard.html")
+                    client_id = existing_client.id
+                    request.session['client_id'] = client_id
+                    log_login(db, client_id, google_email, "client", "google", request, "success")
                 else:
                     new_client = models.DBClient(
                         email=google_email,
@@ -1602,10 +1596,33 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
                         is_onboarded=False,
                     )
                     db.add(new_client)
-                    db.commit()
-                    db.refresh(new_client)
-                    request.session['client_id'] = new_client.id
-                    log_login(db, new_client.id, google_email, "client", "google", request, "success")
+                    db.flush()
+                    client_id = new_client.id
+                    request.session['client_id'] = client_id
+                    log_login(db, client_id, google_email, "client", "google", request, "success")
+
+                # Save refresh token per-client
+                if refresh_token and client_id:
+                    try:
+                        setting = db.query(models.DBSettings).filter(
+                            models.DBSettings.key == "GOOGLE_REFRESH_TOKEN",
+                            models.DBSettings.client_id == client_id
+                        ).first()
+                        if not setting:
+                            setting = models.DBSettings(key="GOOGLE_REFRESH_TOKEN", value=refresh_token, client_id=client_id)
+                            db.add(setting)
+                        else:
+                            setting.value = refresh_token
+                        db.commit()
+                    except Exception as e:
+                        logger.error(f"Failed to save refresh token: {e}")
+
+                if existing_client:
+                    if existing_client.is_onboarded:
+                        return RedirectResponse(url="/app.html")
+                    else:
+                        return RedirectResponse(url="/onboard.html")
+                else:
                     return RedirectResponse(url="/onboard.html")
     except Exception as e:
         logger.error(f"Callback processing failed: {e}")
@@ -1632,7 +1649,8 @@ def logout(request: Request):
 @app.get("/api/gmail/status")
 def gmail_status(request: Request, db: Session = Depends(get_db)):
     user = request.session.get('user')
-    refresh_token = get_stored_refresh_token(db)
+    client_id = request.session.get('client_id')
+    refresh_token = get_stored_refresh_token(db, client_id=client_id)
     # Try to get the authorized Gmail email from the refresh token owner
     gmail_email = None
     if refresh_token:
@@ -1657,7 +1675,8 @@ def gmail_status(request: Request, db: Session = Depends(get_db)):
 def disconnect_gmail(request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     setting = db.query(models.DBSettings).filter(
-        models.DBSettings.key == "GOOGLE_REFRESH_TOKEN"
+        models.DBSettings.key == "GOOGLE_REFRESH_TOKEN",
+        models.DBSettings.client_id == client.id
     ).first()
     if setting:
         db.delete(setting)
@@ -2634,7 +2653,7 @@ Best regards,
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{ps.number}.pdf" if pdf_b64 else "payslip.pdf"
 
-    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename, logo_data)
+    background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename, logo_data, client_id=client.id)
     ps.status = "Sent" if ps.status == "Draft" else ps.status
     ps.sent = datetime.now().strftime("%Y-%m-%d")
     db.commit()
