@@ -4,6 +4,9 @@ import uuid
 import smtplib
 import ssl
 import json
+import html as html_mod
+import time
+from collections import defaultdict
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, Response, HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -82,7 +85,13 @@ def generate_secret_key() -> str:
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY or SECRET_KEY == "generate_a_random_secret_string":
     SECRET_KEY = generate_secret_key()
-    logger.warning("Generated new SECRET_KEY - set it in .env for persistence")
+    try:
+        env_path = os.path.join(os.path.dirname(__file__), ".env")
+        with open(env_path, "a") as f:
+            f.write(f"\nSECRET_KEY={SECRET_KEY}\n")
+        logger.info("Generated and persisted new SECRET_KEY to .env")
+    except Exception:
+        logger.warning("Generated new SECRET_KEY but could not persist to .env - set SECRET_KEY in .env for persistence")
 
 def ensure_admin_user():
     try:
@@ -100,6 +109,26 @@ def ensure_admin_user():
                 logger.info("Upgraded admin password to hashed format")
     except Exception as e:
         logger.error(f"Admin user init failed: {e}")
+
+# --- Rate Limiter (in-memory, per-IP) ---
+class RateLimiter:
+    def __init__(self):
+        self._hits = defaultdict(list)
+    def is_rate_limited(self, key: str, max_requests: int = 10, window: int = 60) -> bool:
+        now = time.time()
+        self._hits[key] = [t for t in self._hits[key] if now - t < window]
+        if len(self._hits[key]) >= max_requests:
+            return True
+        self._hits[key].append(now)
+        return False
+
+rate_limiter = RateLimiter()
+
+def esc(val) -> str:
+    """HTML-escape a value for safe insertion into HTML."""
+    if val is None:
+        return ""
+    return html_mod.escape(str(val))
 
 from contextlib import asynccontextmanager
 
@@ -238,20 +267,25 @@ class TestEmail(BaseModel):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=os.getenv("CORS_ORIGINS", "").split(",") if os.getenv("CORS_ORIGINS") else [],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 @app.middleware("http")
-async def no_cache_html(request: Request, call_next):
-    path = request.url.path
-    if not (path.endswith(".html") or path == "/"):
-        return await call_next(request)
+async def security_middleware(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    path = request.url.path
+    if path.endswith(".html") or path == "/":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 # --- Client Registration & Auth ---
@@ -286,7 +320,14 @@ def get_client_user(request: Request, db: Session):
     return client
 
 @app.post("/api/client/register")
-def client_register(body: ClientRegister, db: Session = Depends(get_db)):
+def client_register(body: ClientRegister, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"register:{ip}", max_requests=5, window=300):
+        raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not any(c.isupper() for c in body.password) or not any(c.isdigit() for c in body.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter and one number")
     existing = db.query(models.DBClient).filter(models.DBClient.email == body.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -303,6 +344,9 @@ def client_register(body: ClientRegister, db: Session = Depends(get_db)):
 
 @app.post("/api/client/login")
 def client_login(body: ClientLogin, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"login:{ip}", max_requests=10, window=60):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     client = db.query(models.DBClient).filter(models.DBClient.email == body.email).first()
     if not client or not verify_password(body.password, client.password_hash):
         log_login(db, None, body.email, "client", "password", request, "failed")
@@ -394,6 +438,9 @@ def ensure_super_admin():
 
 @app.post("/api/superadmin/login")
 def superadmin_login(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"sa_login:{ip}", max_requests=5, window=60):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     body = body or {}
     identifier = (body.get("identifier") or body.get("username") or "").strip().lower()
     password = body.get("password", "")
@@ -1046,7 +1093,7 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
     if not logo_data and inv_client and inv_client.logo_url:
         logo_data = inv_client.logo_url
     if logo_data:
-        logo_html = f'<div style="margin-bottom:24px;"><img src="{logo_data}" style="max-height:48px;max-width:200px;"></div>'
+        logo_html = f'<div style="margin-bottom:24px;"><img src="{esc(logo_data)}" style="max-height:48px;max-width:200px;"></div>'
 
     line_items_html = ""
     if inv.line_items:
@@ -1060,10 +1107,10 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
             rows += f'''
                 <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;">
                   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
-                    <div style="font-size:15px;font-weight:700;color:#1e293b;">{li.name or 'Item'}</div>
+                    <div style="font-size:15px;font-weight:700;color:#1e293b;">{esc(li.name) or 'Item'}</div>
                     <div style="font-size:16px;font-weight:800;color:#0f172a;">{cur_symbol}{amount:.2f}</div>
                   </div>
-                  {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;word-wrap:break-word;">{li.description}</div>' if li.description else ''}
+                  {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;word-wrap:break-word;">{esc(li.description)}</div>' if li.description else ''}
                   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
                     <span style="font-size:12px;color:#94a3b8;">Qty: <strong style="color:#475569;">{int(li.qty)}</strong></span>
                     <span style="font-size:12px;color:#94a3b8;">Price: <strong style="color:#475569;">{cur_symbol}{li.price:.2f}</strong></span>
@@ -1080,7 +1127,7 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
               {rows}
             </div>'''
 
-    body = f"""Hello {inv.to_contact},
+    body = f"""Hello {esc(inv.to_contact)},
 
 Please find the details of your invoice {inv.number} from {company_name or sender_name} below.
 
@@ -1129,18 +1176,18 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
             {f'''
             <div style="background-color: #f8fafc; padding: 16px 40px; border-bottom: 1px solid #e2e8f0;">
               <div style="font-size: 13px; color: #475569;">
-                <strong style="color: #1e293b;">{company_name}</strong>
-                {f' &bull; {company_address}' if company_address else ''}
-                {f' &bull; {company_email}' if company_email else ''}
-                {f' &bull; {company_phone}' if company_phone else ''}
+                <strong style="color: #1e293b;">{esc(company_name)}</strong>
+                {f' &bull; {esc(company_address)}' if company_address else ''}
+                {f' &bull; {esc(company_email)}' if company_email else ''}
+                {f' &bull; {esc(company_phone)}' if company_phone else ''}
               </div>
             </div>
             ''' if company_name else ''}
 
             <!-- Body -->
             <div style="padding: 40px;">
-              <p style="font-size: 16px; color: #1e293b; margin: 0 0 6px 0;">Hello <strong>{inv.to_contact}</strong>,</p>
-              <p style="font-size: 14px; color: #64748b; margin: 0 0 32px 0;">Here's your invoice from <strong>{company_name or sender_name}</strong>. Please find the details below.</p>
+              <p style="font-size: 16px; color: #1e293b; margin: 0 0 6px 0;">Hello <strong>{esc(inv.to_contact)}</strong>,</p>
+              <p style="font-size: 14px; color: #64748b; margin: 0 0 32px 0;">Here's your invoice from <strong>{esc(company_name or sender_name)}</strong>. Please find the details below.</p>
 
               <!-- Invoice Details Cards -->
               <div style="margin-bottom: 32px;">
@@ -1190,7 +1237,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
             <div style="padding: 24px 40px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
               <p style="font-size: 13px; color: #94a3b8; margin: 0 0 4px 0;">Thank you for your business!</p>
               <p style="font-size: 12px; color: #64748b; margin: 0;">{sender_name}</p>
-              {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{company_address}</p>' if company_address else ''}
+              {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{esc(company_address)}</p>' if company_address else ''}
               <p style="font-size: 11px; color: #94a3b8; margin: 12px 0 0 0;"><a href="mailto:hello@keyroutes.co?subject=unsubscribe" style="color: #94a3b8;">Unsubscribe</a> from these notifications</p>
             </div>
           </div>
@@ -2568,9 +2615,9 @@ def send_payslip_email(ps_id: int, request: Request, background_tasks: Backgroun
     subject = f"Payslip {ps.number} from {company_name}"
 
     logo_data = client.logo_url or ""
-    logo_html = f'<div style="margin-bottom:24px;"><img src="{logo_data}" style="max-height:48px;max-width:200px;"></div>' if logo_data else ""
+    logo_html = f'<div style="margin-bottom:24px;"><img src="{esc(logo_data)}" style="max-height:48px;max-width:200px;"></div>' if logo_data else ""
 
-    body_text = f"""Hello {emp.first_name},
+    body_text = f"""Hello {esc(emp.first_name)},
 
 Please find your payslip {ps.number} for the period {ps.period_start} to {ps.period_end}.
 
@@ -2593,17 +2640,17 @@ Best regards,
 <div style="background-color:#0f172a;padding:40px;text-align:center;">
 {logo_html}
 <h1 style="font-size:32px;font-weight:800;color:#fff;margin:0 0 8px 0;">PAYSLIP</h1>
-<p style="font-size:16px;color:#94a3b8;margin:0;">{ps.number}</p>
+<p style="font-size:16px;color:#94a3b8;margin:0;">{esc(ps.number)}</p>
 <div style="margin-top:16px;display:inline-block;background-color:#0ea5e9;padding:8px 20px;border-radius:20px;">
 <span style="font-size:14px;color:#fff;font-weight:600;">Net Pay: &pound;{ps.net_pay:.2f}</span>
 </div>
 </div>
 <div style="background-color:#f8fafc;padding:16px 40px;border-bottom:1px solid #e2e8f0;">
-<div style="font-size:13px;color:#475569;"><strong style="color:#1e293b;">{company_name}</strong>{f' &bull; {company_address}' if company_address else ''}{f' &bull; {company_email}' if company_email else ''}</div>
+<div style="font-size:13px;color:#475569;"><strong style="color:#1e293b;">{esc(company_name)}</strong>{f' &bull; {esc(company_address)}' if company_address else ''}{f' &bull; {esc(company_email)}' if company_email else ''}</div>
 </div>
 <div style="padding:40px;">
-<p style="font-size:16px;color:#1e293b;margin:0 0 6px 0;">Hello <strong>{emp.first_name}</strong>,</p>
-<p style="font-size:14px;color:#64748b;margin:0 0 24px 0;">Here's your payslip from <strong>{company_name}</strong> for the period {ps.period_start} to {ps.period_end}.</p>
+<p style="font-size:16px;color:#1e293b;margin:0 0 6px 0;">Hello <strong>{esc(emp.first_name)}</strong>,</p>
+<p style="font-size:14px;color:#64748b;margin:0 0 24px 0;">Here's your payslip from <strong>{esc(company_name)}</strong> for the period {esc(ps.period_start)} to {esc(ps.period_end)}.</p>
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:24px;">
 <tr>
 <td style="background-color:#f1f5f9;border-radius:10px;padding:16px;text-align:center;width:33%;">
@@ -2642,7 +2689,7 @@ Best regards,
 </div>
 <div style="padding:24px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
 <p style="font-size:13px;color:#94a3b8;margin:0;">Thank you for your hard work!</p>
-<p style="font-size:12px;color:#64748b;margin:4px 0 0 0;">{company_name}</p>
+<p style="font-size:12px;color:#64748b;margin:4px 0 0 0;">{esc(company_name)}</p>
 <p style="font-size:11px;color:#94a3b8;margin:12px 0 0 0;"><a href="mailto:hello@keyroutes.co?subject=unsubscribe" style="color:#94a3b8;">Unsubscribe</a> from these notifications</p>
 </div>
 </div>
@@ -3061,6 +3108,9 @@ def set_employee_password(emp_id: int, request: Request, body: dict = None, db: 
 
 @app.post("/api/employee/auth/login")
 def employee_login(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"emp_login:{ip}", max_requests=10, window=60):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
     if not body or not body.get("email") or not body.get("password"):
         raise HTTPException(status_code=400, detail="Email and password required")
     email = body["email"].strip().lower()

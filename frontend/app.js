@@ -262,7 +262,7 @@ function showToast(message, type) {
     const toast = document.createElement('div');
     toast.className = 'toast toast-' + type;
     const icons = { success: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>', error: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>', warning: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>', info: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>' };
-    toast.innerHTML = '<span class="toast-icon">' + (icons[type] || icons.info) + '</span><span class="toast-message">' + message + '</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>';
+    toast.innerHTML = '<span class="toast-icon">' + (icons[type] || icons.info) + '</span><span class="toast-message">' + esc(message) + '</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>';
     container.appendChild(toast);
     requestAnimationFrame(function() { toast.classList.add('toast-show'); });
     setTimeout(function() { toast.classList.remove('toast-show'); setTimeout(function() { toast.remove(); }, 300); }, 5000);
@@ -424,7 +424,7 @@ function renderCashFlowChart(cashFlowData) {
     for (var i = 0; i < cashFlowData.months.length; i++) {
         var hIn = (cashFlowData.money_in[i] / maxTotal) * 100;
         var hOut = (cashFlowData.money_out[i] / maxTotal) * 100;
-        html += '<div class="chart-month"><div class="bar-group"><div class="bar in" style="height:' + hIn + '%" title="In: ' + formatCurrency(cashFlowData.money_in[i]) + '"></div><div class="bar out" style="height:' + hOut + '%" title="Out: ' + formatCurrency(cashFlowData.money_out[i]) + '"></div></div><span class="month-label">' + cashFlowData.months[i] + '</span></div>';
+        html += '<div class="chart-month"><div class="bar-group"><div class="bar in" style="height:' + hIn + '%" title="In: ' + formatCurrency(cashFlowData.money_in[i]) + '"></div><div class="bar out" style="height:' + hOut + '%" title="Out: ' + formatCurrency(cashFlowData.money_out[i]) + '"></div></div><span class="month-label">' + esc(cashFlowData.months[i]) + '</span></div>';
     }
     html += '</div><div class="chart-legend"><div class="legend-item"><div class="legend-color in"></div><span>Money in</span></div><div class="legend-item"><div class="legend-color out"></div><span>Money out</span></div></div>';
     container.innerHTML = html;
@@ -458,7 +458,7 @@ function renderInvoices(invoices) {
         var statusClass = (inv.status || '').toLowerCase().replace(/\s+/g, '-');
         var opens = inv.open_count || 0;
         var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + inv.number + '\')">' + inv.number + '</a></td><td>' + (inv.ref || '-') + '</td><td>' + inv.to + '</td><td>' + inv.date + '</td><td>' + inv.due_date + '</td><td class="text-right">' + formatCurrency(inv.paid, inv.currency) + '</td><td class="text-right">' + formatCurrency(inv.due, inv.currency) + '</td><td><span class="status-pill status-' + statusClass + '">' + inv.status + '</span></td><td class="text-right">' + openBadge + '</td><td>' + (inv.sent || '-') + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + esc(inv.number) + '\')">' + esc(inv.number) + '</a></td><td>' + esc(inv.ref || '-') + '</td><td>' + esc(inv.to) + '</td><td>' + esc(inv.date) + '</td><td>' + esc(inv.due_date) + '</td><td class="text-right">' + formatCurrency(inv.paid, inv.currency) + '</td><td class="text-right">' + formatCurrency(inv.due, inv.currency) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(inv.status) + '</span></td><td class="text-right">' + openBadge + '</td><td>' + esc(inv.sent || '-') + '</td></tr>');
     });
 }
 
@@ -711,7 +711,7 @@ async function viewInvoice(number) {
                 if (taxType === 'exclusive') { itemVat = amount * 0.20; }
                 else if (taxType === 'inclusive') { itemVat = amount - (amount / 1.20); amount -= itemVat; }
                 subtotal += amount; vat += itemVat;
-                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + (item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + item.description + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
+                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
             });
         }
         document.getElementById('view-summary-subtotal').textContent = subtotal.toFixed(2);
@@ -1300,7 +1300,7 @@ function previewInvoice() {
             var vat = 0;
             if (taxType === 'exclusive') { vat = amount * 0.20; }
             else if (taxType === 'inclusive') { vat = amount - (amount / 1.20); amount -= vat; }
-            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + name + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + desc + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + disc + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
+            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(name) + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(desc) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + disc + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
         }
     });
 
@@ -1809,7 +1809,7 @@ function renderEmployees(employees) {
     employees.forEach(function(e) {
         var statusClass = (e.status || '').toLowerCase().replace(/\s+/g, '-');
         var typeLabel = (e.employment_type || '').replace('_', ' ');
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewEmployee(' + e.id + ')">' + e.first_name + ' ' + e.last_name + '</a><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (e.email || '') + '</span></td><td>' + (e.employee_id || '-') + '</td><td>' + (e.department_name || '-') + '</td><td>' + (e.job_title || '-') + '</td><td>' + typeLabel + '</td><td>' + (e.start_date || '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + e.status + '</span></td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="viewEmployee(' + e.id + ')">View</button></td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewEmployee(' + e.id + ')">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</a><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(e.email || '') + '</span></td><td>' + esc(e.employee_id || '-') + '</td><td>' + esc(e.department_name || '-') + '</td><td>' + esc(e.job_title || '-') + '</td><td>' + esc(typeLabel) + '</td><td>' + esc(e.start_date || '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(e.status) + '</span></td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="viewEmployee(' + e.id + ')">View</button></td></tr>');
     });
 }
 
@@ -1882,7 +1882,7 @@ async function viewEmployee(empId) {
             items.forEach(function(item) {
                 var checkedAttr = item.is_completed ? 'checked' : '';
                 var style = item.is_completed ? 'text-decoration:line-through;color:var(--text-secondary);' : '';
-                listEl.insertAdjacentHTML('beforeend', '<label style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);cursor:pointer;font-size:0.9rem;' + style + '"><input type="checkbox" ' + checkedAttr + ' onchange="toggleOnbItem(' + item.id + ', this.checked)" style="margin-top:4px;accent-color:var(--primary-color);"><div><div style="font-weight:500;">' + item.title + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (item.category || '') + ' &bull; ' + (item.assigned_to || '') + '</div></div></label>');
+                listEl.insertAdjacentHTML('beforeend', '<label style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-color);cursor:pointer;font-size:0.9rem;' + style + '"><input type="checkbox" ' + checkedAttr + ' onchange="toggleOnbItem(' + item.id + ', this.checked)" style="margin-top:4px;accent-color:var(--primary-color);"><div><div style="font-weight:500;">' + esc(item.title) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(item.category || '') + ' &bull; ' + esc(item.assigned_to || '') + '</div></div></label>');
             });
         }
 
@@ -1901,7 +1901,7 @@ async function viewEmployee(empId) {
             } else {
                 payslips.forEach(function(p) {
                     var statusClass = (p.status || '').toLowerCase();
-                    psListEl.insertAdjacentHTML('beforeend', '<div style="padding:12px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="viewPayslip(' + p.id + ')"><div><div style="font-weight:500;font-size:0.9rem;">' + p.number + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + p.period_start + ' to ' + p.period_end + '</div></div><div style="text-align:right;"><div style="font-weight:600;font-size:0.9rem;">' + formatCurrency(p.net_pay) + '</div><span class="status-pill status-' + statusClass + '" style="font-size:0.7rem;">' + p.status + '</span></div></div>');
+                    psListEl.insertAdjacentHTML('beforeend', '<div style="padding:12px 16px;border-bottom:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="viewPayslip(' + p.id + ')"><div><div style="font-weight:500;font-size:0.9rem;">' + esc(p.number) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(p.period_start) + ' to ' + esc(p.period_end) + '</div></div><div style="text-align:right;"><div style="font-weight:600;font-size:0.9rem;">' + formatCurrency(p.net_pay) + '</div><span class="status-pill status-' + statusClass + '" style="font-size:0.7rem;">' + esc(p.status) + '</span></div></div>');
                 });
             }
         }
@@ -1928,12 +1928,12 @@ async function showAddEmployeeModal() {
         var depts = await deptRes.json();
         var deptSel = document.getElementById('emp-department');
         deptSel.innerHTML = '<option value="">None</option>';
-        depts.forEach(function(d) { deptSel.insertAdjacentHTML('beforeend', '<option value="' + d.id + '">' + d.name + '</option>'); });
+        depts.forEach(function(d) { deptSel.insertAdjacentHTML('beforeend', '<option value="' + d.id + '">' + esc(d.name) + '</option>'); });
         var empRes = await fetch('/api/employees');
         var emps = await empRes.json();
         var mgrSel = document.getElementById('emp-reports-to');
         mgrSel.innerHTML = '<option value="">None</option>';
-        emps.forEach(function(e) { mgrSel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
+        emps.forEach(function(e) { mgrSel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</option>'); });
     } catch (e) { console.error(e); }
 }
 window.showAddEmployeeModal = showAddEmployeeModal;
@@ -2311,7 +2311,7 @@ async function openDeptDetail(id) {
                 empList.insertAdjacentHTML('beforeend',
                     '<div onclick="closeDeptDetail();viewEmployee(' + e.id + ')" style="display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;cursor:pointer;transition:background 0.15s;border-bottom:1px solid var(--border-color);">' +
                         '<div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,' + d.color + '40,' + d.color + '20);color:' + d.color + ';display:flex;align-items:center;justify-content:center;font-weight:600;font-size:0.85rem;">' + initial + '</div>' +
-                        '<div><div style="font-weight:500;font-size:0.9rem;">' + e.name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (e.job_title || '') + '</div></div>' +
+                        '<div><div style="font-weight:500;font-size:0.9rem;">' + esc(e.name) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(e.job_title || '') + '</div></div>' +
                     '</div>'
                 );
             });
@@ -2385,8 +2385,8 @@ function renderOnboardingHub() {
                     '<div style="width:42px;height:42px;border-radius:10px;background:rgba(0,240,255,0.1);color:var(--primary-color);display:flex;align-items:center;justify-content:center;font-weight:600;">' + (e.name || '?')[0].toUpperCase() + '</div>' +
                     '<div style="flex:1;min-width:0;">' +
                         '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">' +
-                            '<span style="font-weight:600;font-size:0.95rem;">' + e.name + '</span>' +
-                            '<span style="font-size:0.75rem;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.08);color:var(--text-secondary);">' + (e.department || 'No dept') + '</span>' +
+                            '<span style="font-weight:600;font-size:0.95rem;">' + esc(e.name) + '</span>' +
+                            '<span style="font-size:0.75rem;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,0.08);color:var(--text-secondary);">' + esc(e.department || 'No dept') + '</span>' +
                             (e.overdue > 0 ? '<span style="font-size:0.72rem;padding:2px 8px;border-radius:6px;background:rgba(239,68,68,0.15);color:var(--danger-color);">' + e.overdue + ' overdue</span>' : '') +
                         '</div>' +
                         '<div style="display:flex;align-items:center;gap:12px;">' +
@@ -2586,8 +2586,8 @@ function renderBulkItemsPreview() {
         list.insertAdjacentHTML('beforeend',
             '<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:0.85rem;border-bottom:1px solid var(--border-color);">' +
                 '<span style="color:var(--primary-color);">&#10003;</span>' +
-                '<span style="flex:1;">' + item.title + '</span>' +
-                '<span style="font-size:0.72rem;color:var(--text-secondary);">' + (item.category || '') + '</span>' +
+                '<span style="flex:1;">' + esc(item.title) + '</span>' +
+                '<span style="font-size:0.72rem;color:var(--text-secondary);">' + esc(item.category || '') + '</span>' +
             '</div>'
         );
     });
@@ -2623,7 +2623,7 @@ async function showOnboardingTemplates() {
             templates.forEach(function(t) {
                 list.insertAdjacentHTML('beforeend',
                     '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;">' +
-                        '<div><div style="font-weight:600;">' + t.name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (t.items ? t.items.length : 0) + ' items</div></div>' +
+                        '<div><div style="font-weight:600;">' + esc(t.name) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (t.items ? t.items.length : 0) + ' items</div></div>' +
                         '<button onclick="deleteOnbTemplate(' + t.id + ')" style="background:none;border:none;color:var(--danger-color);cursor:pointer;padding:4px;" title="Delete">' +
                             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
                         '</button>' +
@@ -2744,7 +2744,7 @@ function renderPayslips(payslips) {
         var statusClass = (p.status || '').toLowerCase();
         var opens = p.open_count || 0;
         var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewPayslip(' + p.id + ')">' + p.number + '</a></td><td>' + (p.employee_name || '-') + '</td><td>' + (p.period_start || '') + ' to ' + (p.period_end || '') + '</td><td>' + (p.pay_date || '-') + '</td><td class="text-right">' + formatCurrency(p.gross_pay) + '</td><td class="text-right">' + formatCurrency(p.total_deductions) + '</td><td class="text-right">' + formatCurrency(p.net_pay) + '</td><td><span class="status-pill status-' + statusClass + '">' + p.status + '</span></td><td>' + (p.sent || '-') + '</td><td class="text-right">' + openBadge + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewPayslip(' + p.id + ')">' + esc(p.number) + '</a></td><td>' + esc(p.employee_name || '-') + '</td><td>' + esc(p.period_start || '') + ' to ' + esc(p.period_end || '') + '</td><td>' + esc(p.pay_date || '-') + '</td><td class="text-right">' + formatCurrency(p.gross_pay) + '</td><td class="text-right">' + formatCurrency(p.total_deductions) + '</td><td class="text-right">' + formatCurrency(p.net_pay) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(p.status) + '</span></td><td>' + esc(p.sent || '-') + '</td><td class="text-right">' + openBadge + '</td></tr>');
     });
 }
 
@@ -3226,7 +3226,7 @@ async function loadAttendanceButtons() {
         }
         activeEmps.forEach(function(e) {
             var initials = (e.first_name[0] || '') + (e.last_name[0] || '');
-            container.insertAdjacentHTML('beforeend', '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:var(--radius-md);min-width:280px;"><div style="width:40px;height:40px;border-radius:50%;background:var(--primary-color);color:#0b0f19;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.85rem;flex-shrink:0;">' + initials + '</div><div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:0.9rem;">' + e.first_name + ' ' + e.last_name + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + (e.job_title || e.email || '') + '</div></div><button class="btn btn-outline btn-sm" onclick="clockInOut(' + e.id + ')" id="att-btn-' + e.id + '" style="flex-shrink:0;">Clock In</button></div>');
+            container.insertAdjacentHTML('beforeend', '<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:var(--radius-md);min-width:280px;"><div style="width:40px;height:40px;border-radius:50%;background:var(--primary-color);color:#0b0f19;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.85rem;flex-shrink:0;">' + esc(initials) + '</div><div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:0.9rem;">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</div><div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(e.job_title || e.email || '') + '</div></div><button class="btn btn-outline btn-sm" onclick="clockInOut(' + e.id + ')" id="att-btn-' + e.id + '" style="flex-shrink:0;">Clock In</button></div>');
         });
     } catch (e) { console.error('Attendance buttons error:', e); }
 }
@@ -3294,7 +3294,7 @@ function renderAttendance(records) {
     records.forEach(function(r) {
         var statusClass = r.status === 'completed' ? 'paid' : r.status === 'present' ? 'sent' : 'draft';
         var typeBadge = r.check_type ? '<span class="status-pill status-' + (r.check_type === 'office' ? 'sent' : r.check_type === 'remote' ? 'paid' : 'draft') + '">' + r.check_type + '</span>' : '-';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + r.employee_name + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + (r.employee_email || '') + '</span></td><td>' + r.date + '</td><td>' + (r.clock_in || '-') + '</td><td>' + (r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td>' + typeBadge + '</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + (r.location_label || '') + '">' + (r.location_label ? r.location_label.substring(0, 30) : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + r.status + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + esc(r.employee_name) + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(r.employee_email || '') + '</span></td><td>' + esc(r.date) + '</td><td>' + esc(r.clock_in || '-') + '</td><td>' + esc(r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td>' + typeBadge + '</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(r.location_label || '') + '">' + (r.location_label ? esc(r.location_label.substring(0, 30)) : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(r.status) + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
     });
 }
 
@@ -3431,19 +3431,19 @@ async function loadLiveAttendance() {
             return '<div style="background:#fff;border:2px solid ' + borderColor + ';border-radius:12px;padding:16px;position:relative;">' +
                 '<div style="position:absolute;top:12px;right:12px;width:10px;height:10px;border-radius:50%;background:' + statusColor + ';"></div>' +
                 '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
-                    '<div style="width:40px;height:40px;border-radius:50%;background:' + (isWorking ? '#d1fae5' : '#f1f5f9') + ';display:flex;align-items:center;justify-content:center;font-weight:700;color:' + statusColor + ';">' + emp.full_name.charAt(0) + '</div>' +
-                    '<div><div style="font-weight:600;font-size:0.95rem;">' + emp.full_name + '</div>' +
-                    '<div style="font-size:0.78rem;color:#64748b;">' + (emp.job_title || emp.department || 'Employee') + '</div></div>' +
+                    '<div style="width:40px;height:40px;border-radius:50%;background:' + (isWorking ? '#d1fae5' : '#f1f5f9') + ';display:flex;align-items:center;justify-content:center;font-weight:700;color:' + statusColor + ';">' + esc(emp.full_name.charAt(0)) + '</div>' +
+                    '<div><div style="font-weight:600;font-size:0.95rem;">' + esc(emp.full_name) + '</div>' +
+                    '<div style="font-size:0.78rem;color:#64748b;">' + esc(emp.job_title || emp.department || 'Employee') + '</div></div>' +
                 '</div>' +
                 '<div style="display:flex;justify-content:space-between;font-size:0.82rem;color:#64748b;">' +
-                    '<span><i class="bi bi-clock"></i> ' + (emp.clock_in || '--:--') + '</span>' +
-                    '<span><i class="bi bi-clock-history"></i> ' + (emp.clock_out || '--:--') + '</span>' +
+                    '<span><i class="bi bi-clock"></i> ' + esc(emp.clock_in || '--:--') + '</span>' +
+                    '<span><i class="bi bi-clock-history"></i> ' + esc(emp.clock_out || '--:--') + '</span>' +
                     '<span><i class="bi bi-hourglass-split"></i> ' + (emp.total_hours || 0) + 'h</span>' +
                 '</div>' +
                 '<div style="margin-top:8px;display:flex;gap:8px;font-size:0.75rem;color:#64748b;">' +
-                    (emp.check_type ? '<span><i class="bi ' + (icons[emp.check_type] || 'bi-geo') + '"></i> ' + emp.check_type + '</span>' : '') +
-                    (emp.location_label ? '<span title="' + emp.location_label + '"><i class="bi bi-geo-alt"></i></span>' : '') +
-                    (emp.ip_address ? '<span title="IP: ' + emp.ip_address + '"><i class="bi bi-wifi"></i></span>' : '') +
+                    (emp.check_type ? '<span><i class="bi ' + (icons[emp.check_type] || 'bi-geo') + '"></i> ' + esc(emp.check_type) + '</span>' : '') +
+                    (emp.location_label ? '<span title="' + esc(emp.location_label) + '"><i class="bi bi-geo-alt"></i></span>' : '') +
+                    (emp.ip_address ? '<span title="IP: ' + esc(emp.ip_address) + '"><i class="bi bi-wifi"></i></span>' : '') +
                 '</div>' +
             '</div>';
         }).join('');
@@ -3531,7 +3531,7 @@ async function loadOvertimeTab() {
         var sel = document.getElementById('ot-employee');
         if (sel) {
             sel.innerHTML = '<option value="">Select employee...</option>';
-            emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + e.first_name + ' ' + e.last_name + '</option>'); });
+        emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</option>'); });
         }
         var otDate = document.getElementById('ot-date');
         if (otDate && !otDate.value) otDate.value = new Date().toISOString().split('T')[0];
@@ -3565,7 +3565,7 @@ async function loadOvertimeLogs() {
         if (!tbody) return;
         if (logs.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:30px;color:var(--text-secondary);">No overtime logs</td></tr>'; return; }
         tbody.innerHTML = logs.map(function(l) {
-            return '<tr><td><strong>' + l.employee_name + '</strong></td><td>' + l.date + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + (l.reason || '-') + '</td><td>' + (l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + l.status + '</span></td></tr>';
+            return '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + esc(l.date) + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + esc(l.reason || '-') + '</td><td>' + esc(l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + esc(l.status) + '</span></td></tr>';
         }).join('');
     } catch (e) { console.error('Overtime logs load failed:', e); }
 }
