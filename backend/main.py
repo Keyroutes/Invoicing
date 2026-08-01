@@ -101,10 +101,40 @@ def ensure_admin_user():
     except Exception as e:
         logger.error(f"Admin user init failed: {e}")
 
-app = FastAPI(title="Accounting Platform API")
+from contextlib import asynccontextmanager
 
-@app.on_event("startup")
-async def startup_event():
+CURRENCY_SYMBOLS = {
+    "AED": "د.إ", "AFN": "؋", "ALL": "L", "AMD": "֏", "ANG": "ƒ", "AOA": "Kz", "ARS": "$",
+    "AUD": "A$", "AWG": "ƒ", "AZN": "₼", "BAM": "KM", "BBD": "$", "BDT": "৳", "BGN": "лв",
+    "BHD": "ب.د", "BIF": "FBu", "BMD": "$", "BND": "$", "BOB": "Bs", "BRL": "R$", "BSD": "$",
+    "BTN": "Nu.", "BWP": "P", "BYN": "Br", "BZD": "$", "CAD": "C$", "CDF": "FC", "CHF": "CHF",
+    "CLP": "$", "CNY": "¥", "COP": "$", "CRC": "₡", "CUP": "$", "CVE": "Esc", "CZK": "Kč",
+    "DJF": "Fdj", "DKK": "kr", "DOP": "RD$", "DZD": "دج", "EGP": "£", "ERN": "Nfk", "ETB": "Br",
+    "EUR": "€", "FJD": "FJ$", "FKP": "£", "GBP": "£", "GEL": "₾", "GHS": "₵", "GIP": "£",
+    "GMD": "D", "GNF": "FG", "GTQ": "Q", "GYD": "$", "HKD": "HK$", "HNL": "L", "HRK": "kn",
+    "HTG": "G", "HUF": "Ft", "IDR": "Rp", "ILS": "₪", "INR": "₹", "IQD": "ع.د", "IRR": "﷼",
+    "ISK": "kr", "JMD": "J$", "JOD": "د.ا", "JPY": "¥", "KES": "KSh", "KGS": "с", "KHR": "៛",
+    "KMF": "CF", "KPW": "₩", "KRW": "₩", "KWD": "د.ك", "KYD": "CI$", "KZT": "₸", "LAK": "₭",
+    "LBP": "ل.ل", "LKR": "₨", "LRD": "$", "LSL": "L", "LYD": "ل.د", "MAD": "د.م.", "MDL": "L",
+    "MGA": "Ar", "MKD": "ден", "MMK": "K", "MNT": "₮", "MOP": "MOP$", "MRU": "UM", "MUR": "₨",
+    "MVR": "Rf", "MWK": "MK", "MXN": "$", "MYR": "RM", "MZN": "MT", "NAD": "$", "NGN": "₦",
+    "NIO": "C$", "NOK": "kr", "NPR": "₨", "NZD": "NZ$", "OMR": "ر.ع.", "PAB": "B/.", "PEN": "S/",
+    "PGK": "K", "PHP": "₱", "PKR": "₨", "PLN": "zł", "PYG": "₲", "QAR": "ر.ق", "RON": "lei",
+    "RSD": "дин", "RUB": "₽", "RWF": "FRw", "SAR": "﷼", "SBD": "SI$", "SCR": "₨", "SDG": "ج.س",
+    "SEK": "kr", "SGD": "S$", "SHP": "£", "SLL": "Le", "SOS": "Sh", "SRD": "$", "SSP": "£",
+    "STN": "Db", "SVC": "$", "SYP": "£", "SZL": "L", "THB": "฿", "TJS": "SM", "TMT": "m",
+    "TND": "د.ت", "TOP": "T$", "TRY": "₺", "TTD": "TT$", "TWD": "NT$", "TZS": "Sh", "UAH": "₴",
+    "UGX": "USh", "USD": "$", "UYU": "$U", "UZS": "so'm", "VES": "Bs", "VND": "₫", "VUV": "VT",
+    "WST": "T", "XAF": "FCFA", "XCD": "EC$", "XOF": "CFA", "XPF": "₣", "YER": "﷼", "ZAR": "R",
+    "ZMW": "ZK", "ZWL": "Z$",
+}
+
+def currency_symbol(code):
+    code = (code or "").upper()
+    return CURRENCY_SYMBOLS.get(code, code or "£")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     try:
         models.Base.metadata.create_all(bind=engine)
         ensure_columns()
@@ -112,6 +142,10 @@ async def startup_event():
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+    ensure_super_admin()
+    yield
+
+app = FastAPI(title="Accounting Platform API", lifespan=lifespan)
 
 class AdminAuth(AuthenticationBackend):
     async def login(self, request: Request) -> bool:
@@ -191,6 +225,7 @@ class InvoiceCreate(BaseModel):
     line_items: List[LineItem]
     tax_type: Optional[str] = "exclusive"
     status: Optional[str] = "Draft"
+    currency: Optional[str] = ""
 
 class SendInvoiceEmail(BaseModel):
     logo_data: Optional[str] = ""
@@ -341,18 +376,61 @@ def save_logo(body: LogoUpdate, request: Request, db: Session = Depends(get_db))
 
 # --- Super Admin ---
 
-@app.on_event("startup")
 def ensure_super_admin():
     with SessionLocal() as db:
-        existing = db.query(models.DBSuperAdmin).first()
-        if not existing:
-            db.add(models.DBSuperAdmin(username="superadmin", password_hash="", email="hello@keyroutes.co"))
-            db.commit()
-            logger.info("Created default super admin (Google OAuth: hello@keyroutes.co)")
-        elif existing.email != "hello@keyroutes.co":
-            existing.email = "hello@keyroutes.co"
-            db.commit()
-            logger.info("Updated super admin email to hello@keyroutes.co")
+        env_emails = [e.strip().lower() for e in os.getenv("SUPERADMIN_EMAILS", "hello@keyroutes.co").split(",") if e.strip()]
+        existing_all = db.query(models.DBSuperAdmin).all()
+        existing_emails = {e.email.strip().lower() for e in existing_all if e.email}
+        for em in env_emails:
+            if em not in existing_emails:
+                db.add(models.DBSuperAdmin(username="superadmin", password_hash="", email=em))
+                existing_emails.add(em)
+        pwd = os.getenv("SUPERADMIN_PASSWORD", "")
+        if pwd:
+            for sa in db.query(models.DBSuperAdmin).all():
+                sa.password_hash = hash_password(pwd)
+        db.commit()
+        logger.info("Super admin setup complete (%d admins)", len(env_emails))
+
+@app.post("/api/superadmin/login")
+def superadmin_login(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    body = body or {}
+    identifier = (body.get("identifier") or body.get("username") or "").strip().lower()
+    password = body.get("password", "")
+    env_pwd = os.getenv("SUPERADMIN_PASSWORD", "")
+    sa = None
+    if identifier:
+        sa = db.query(models.DBSuperAdmin).filter(
+            (models.DBSuperAdmin.email == identifier) | (models.DBSuperAdmin.username == identifier)
+        ).first()
+    if sa:
+        ok = False
+        if sa.password_hash:
+            ok = verify_password(password, sa.password_hash)
+        elif env_pwd:
+            ok = verify_password(password, hash_password(env_pwd))
+        if ok:
+            request.session['superadmin_id'] = sa.id
+            log_login(db, None, identifier or sa.email, "superadmin", "password", request, "success")
+            return {"ok": True, "username": sa.username, "email": sa.email}
+    log_login(db, None, identifier or "superadmin", "superadmin", "password", request, "failed")
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+@app.post("/api/superadmin/change-password")
+def superadmin_change_password(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    body = body or {}
+    new_pwd = body.get("new_password", "")
+    if len(new_pwd) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    admin = db.query(models.DBSuperAdmin).filter(models.DBSuperAdmin.id == sa_id).first()
+    if not admin:
+        raise HTTPException(status_code=401, detail="Not found")
+    admin.password_hash = hash_password(new_pwd)
+    db.commit()
+    return {"message": "Password updated"}
 
 @app.post("/api/superadmin/logout")
 def superadmin_logout(request: Request):
@@ -476,6 +554,7 @@ def superadmin_toggle_client(client_id: int, request: Request, db: Session = Dep
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     client.is_active = not client.is_active
+    log_audit(db, client.id, "client_" + ("enabled" if client.is_active else "disabled"), "client", client.id, client.company_name or client.email, "", request, user_type="superadmin", user_name="superadmin")
     db.commit()
     return {"message": "Client " + ("enabled" if client.is_active else "disabled"), "is_active": client.is_active}
 
@@ -494,8 +573,50 @@ def superadmin_delete_client(client_id: int, request: Request, db: Session = Dep
     db.query(models.DBContact).filter(models.DBContact.client_id == client_id).delete()
     db.query(models.DBSettings).filter(models.DBSettings.client_id == client_id).delete()
     db.delete(client)
+    log_audit(db, client_id, "client_deleted", "client", client_id, "", "Client and all data deleted", request, user_type="superadmin", user_name="superadmin")
     db.commit()
     return {"message": "Client deleted"}
+
+@app.post("/api/superadmin/impersonate/{client_id}")
+def superadmin_impersonate(client_id: int, request: Request, db: Session = Depends(get_db)):
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+    client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    if not client.is_active:
+        raise HTTPException(status_code=400, detail="Client account is disabled")
+    request.session['client_id'] = client.id
+    log_audit(db, client.id, "impersonate", "client", client.id, client.company_name or client.email, "Super admin logged in as client", request, user_type="superadmin", user_name="superadmin")
+    db.commit()
+    return {"message": "Now acting as " + (client.company_name or client.email), "client_id": client.id}
+
+@app.get("/api/superadmin/trends")
+def superadmin_trends(request: Request, db: Session = Depends(get_db)):
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+    from datetime import timedelta
+    from collections import defaultdict
+    now = datetime.now()
+    months = [(now - timedelta(days=30 * i)).strftime("%Y-%m") for i in range(5, -1, -1)]
+    revenue_by_month = defaultdict(float)
+    logins_by_month = defaultdict(int)
+    for inv in db.query(models.DBInvoice).filter(models.DBInvoice.status == "Paid").all():
+        m = inv.issue_date[:7] if inv.issue_date and len(inv.issue_date) >= 7 else None
+        if m in months:
+            revenue_by_month[m] += (inv.paid or 0)
+    for l in db.query(models.DBClientLoginLog).filter(models.DBClientLoginLog.status == "success").all():
+        m = l.created_at[:7] if l.created_at and len(l.created_at) >= 7 else None
+        if m in months:
+            logins_by_month[m] += 1
+    return {
+        "months": months,
+        "revenue": [round(revenue_by_month.get(m, 0), 2) for m in months],
+        "active_users": [logins_by_month.get(m, 0) for m in months],
+        "total_revenue": round(sum(inv.paid or 0 for inv in db.query(models.DBInvoice).filter(models.DBInvoice.status == "Paid").all()), 2),
+    }
 
 @app.get("/api/superadmin/clients/{client_id}")
 def superadmin_get_client(client_id: int, request: Request, db: Session = Depends(get_db)):
@@ -718,6 +839,7 @@ def get_invoices(request: Request, db: Session = Depends(get_db)):
         "status": inv.status,
         "sent": inv.sent,
         "tax_type": inv.tax_type,
+        "currency": inv.currency or (client.currency if client else ""),
         "open_count": inv.open_count or 0,
         "last_opened": inv.last_opened or "",
     } for inv in invoices]
@@ -753,6 +875,7 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
         "status": inv.status,
         "sent": inv.sent,
         "tax_type": inv.tax_type,
+        "currency": inv.currency or (client.currency if client else ""),
         "tracking_id": inv.tracking_id,
         "open_count": inv.open_count or 0,
         "last_opened": inv.last_opened or "",
@@ -848,7 +971,8 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
         due=round(total, 2),
         status=invoice.status or "Draft",
         sent="",
-        tax_type=invoice.tax_type
+        tax_type=invoice.tax_type,
+        currency=(invoice.currency or "").upper() or (client.currency or "")
     )
     db.add(db_invoice)
     db.flush()
@@ -901,6 +1025,9 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
     company_abn = settings_map.get("company_abn", "") or (inv_client.abn if inv_client else "")
     company_website = settings_map.get("company_website", "") or (inv_client.website if inv_client else "")
 
+    cur = (inv.currency or settings_map.get("currency") or (inv_client.currency if inv_client else "") or "GBP").upper()
+    cur_symbol = currency_symbol(cur)
+
     sender_name = os.getenv("FROM_NAME", "aniprotech")
     from_header = f"{sender_name} <{from_email}>"
     subject = f"Invoice {inv.number} from {sender_name}"
@@ -925,12 +1052,12 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
                 <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;">
                   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
                     <div style="font-size:15px;font-weight:700;color:#1e293b;">{li.name or 'Item'}</div>
-                    <div style="font-size:16px;font-weight:800;color:#0f172a;">&pound;{amount:.2f}</div>
+                    <div style="font-size:16px;font-weight:800;color:#0f172a;">{cur_symbol}{amount:.2f}</div>
                   </div>
                   {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;word-wrap:break-word;">{li.description}</div>' if li.description else ''}
                   <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
                     <span style="font-size:12px;color:#94a3b8;">Qty: <strong style="color:#475569;">{int(li.qty)}</strong></span>
-                    <span style="font-size:12px;color:#94a3b8;">Price: <strong style="color:#475569;">&pound;{li.price:.2f}</strong></span>
+                    <span style="font-size:12px;color:#94a3b8;">Price: <strong style="color:#475569;">{cur_symbol}{li.price:.2f}</strong></span>
                     {f'<span style="font-size:12px;color:#94a3b8;">Discount: {disc_html}</span>' if disc_val > 0 else ''}
                   </div>
                 </div>'''
@@ -957,9 +1084,9 @@ Line Items:
     for li in inv.line_items:
         item_label = f"{li.name} - {li.description}" if li.name else li.description
         disc_text = f" (Disc: {li.disc}%)" if li.disc else ""
-        body += f"  - {item_label} x{int(li.qty)} @ \u00a3{li.price:.2f}{disc_text}\n"
+        body += f"  - {item_label} x{int(li.qty)} @ {cur_symbol}{li.price:.2f}{disc_text}\n"
     body += f"""
-Total Amount Due: \u00a3{inv.due:.2f}
+Total Amount Due: {cur_symbol}{inv.due:.2f}
 
 Payment is due by {inv.due_date}. If you have any questions about this invoice, please reply to this email.
 
@@ -985,7 +1112,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
               <h1 style="font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 8px 0;">INVOICE</h1>
               <p style="font-size: 16px; color: #94a3b8; margin: 0; font-weight: 600;">{inv.number}</p>
               <div style="margin-top: 16px; display: inline-block; background-color: #0ea5e9; padding: 8px 20px; border-radius: 20px;">
-                <span style="font-size: 14px; color: #ffffff; font-weight: 600;">Amount Due: &pound;{inv.due:.2f}</span>
+                <span style="font-size: 14px; color: #ffffff; font-weight: 600;">Amount Due: {cur_symbol}{inv.due:.2f}</span>
               </div>
             </div>
 
@@ -1036,7 +1163,7 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
                 <tr>
                   <td style="background-color: #0f172a; border-radius: 12px; padding: 24px; text-align: right;">
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 4px;">TOTAL AMOUNT</div>
-                    <div style="font-size: 32px; font-weight: 800; color: #ffffff;">&pound;{inv.due:.2f}</div>
+                    <div style="font-size: 32px; font-weight: 800; color: #ffffff;">{cur_symbol}{inv.due:.2f}</div>
                   </td>
                 </tr>
               </table>
@@ -1107,7 +1234,10 @@ def send_invoice_whatsapp(number: str, background_tasks: BackgroundTasks, reques
     if not inv.phone_number:
         raise HTTPException(status_code=400, detail="Invoice has no phone number")
 
-    message = f"Hello {inv.to_contact},\n\nPlease find the details of your invoice {inv.number} below:\n\nTotal Due: \u00a3{inv.due:.2f}\nDue Date: {inv.due_date}\n\nThank you for your business!"
+    inv_client = db.query(models.DBClient).filter(models.DBClient.id == inv.client_id).first() if inv.client_id else None
+    ws_cur = (inv.currency or (inv_client.currency if inv_client else "") or "GBP").upper()
+    ws_sym = currency_symbol(ws_cur)
+    message = f"Hello {inv.to_contact},\n\nPlease find the details of your invoice {inv.number} below:\n\nTotal Due: {ws_sym}{inv.due:.2f}\nDue Date: {inv.due_date}\n\nThank you for your business!"
     background_tasks.add_task(send_whatsapp_background, inv.phone_number, message)
 
     if inv.status == "Draft":

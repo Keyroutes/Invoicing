@@ -72,6 +72,7 @@ class DBInvoice(Base):
     status = Column(String, default="Draft", index=True)
     sent = Column(String, default="")
     tax_type = Column(String, default="exclusive")
+    currency = Column(String, default="")
     tracking_id = Column(String, unique=True, index=True, default=lambda: str(uuid.uuid4()))
     open_count = Column(Integer, default=0)
     last_opened = Column(String, default="")

@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Setup Your Business - aniprotech</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b0f19">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -179,18 +181,18 @@
                 <p class="step-subtitle">This will only take a minute. Your details will appear on invoices and emails.</p>
                 <div class="form-group">
                     <label>Business Name *</label>
-                    <input type="text" id="ob-company" class="form-control" placeholder="Your Company Pty Ltd">
+                    <input type="text" id="ob-company" class="form-control" placeholder="Your Company Pty Ltd" oninput="validateStep1()">
                 </div>
                 <div class="form-group">
                     <label>Your Name *</label>
-                    <input type="text" id="ob-name" class="form-control" placeholder="John Smith">
+                    <input type="text" id="ob-name" class="form-control" placeholder="John Smith" oninput="validateStep1()">
                 </div>
                 <div class="form-group">
                     <label>Phone Number</label>
                     <input type="text" id="ob-phone" class="form-control" placeholder="+61 400 000 000">
                 </div>
                 <div class="btn-row">
-                    <button class="btn-primary" onclick="goStep(2)">Continue →</button>
+                    <button class="btn-primary" id="step1-continue" onclick="goStep(2)">Continue →</button>
                 </div>
             </div>
 
@@ -253,6 +255,7 @@
         var logoData = '';
 
         function goStep(step) {
+            if (step === 2 && !validateStep1()) return;
             document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
             document.getElementById('step-' + step).classList.add('active');
             document.querySelectorAll('.progress-step').forEach((s, i) => {
@@ -262,6 +265,22 @@
             });
             currentStep = step;
         }
+
+        function validateStep1() {
+            var company = (document.getElementById('ob-company').value || '').trim();
+            var name = (document.getElementById('ob-name').value || '').trim();
+            var btn = document.getElementById('step1-continue');
+            var ok = company !== '' && name !== '';
+            if (btn) btn.disabled = !ok;
+            return ok;
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && currentStep === 1) {
+                e.preventDefault();
+                goStep(2);
+            }
+        });
 
         function handleLogoUpload(e) {
             var file = e.target.files[0];
@@ -321,6 +340,7 @@
             if (data.website) document.getElementById('ob-website').value = data.website;
             if (data.abn) document.getElementById('ob-abn').value = data.abn;
             if (data.industry) document.getElementById('ob-industry').value = data.industry;
+            validateStep1();
         }).catch(() => { window.location.href = '/login.html'; });
     </script>
 </body>

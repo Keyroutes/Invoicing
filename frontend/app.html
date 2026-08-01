@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>aniprotech - Dashboard</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0b0f19">
+    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
@@ -11,6 +14,11 @@
 </head>
 <body>
     <div id="toast-container"></div>
+
+    <div id="superadmin-impersonate-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:1000;background:linear-gradient(135deg,#7877c6,#00f0ff);color:#0b0f19;padding:8px 16px;font-size:0.85rem;font-weight:600;display:none;align-items:center;justify-content:space-between;gap:12px;">
+        <span>You are viewing this account as a super admin (support mode).</span>
+        <a href="/superadmin.html" style="color:#0b0f19;text-decoration:underline;font-weight:700;white-space:nowrap;">Return to Admin Panel &rarr;</a>
+    </div>
 
     <!-- Mobile Overlay -->
     <div class="mobile-overlay" id="mobile-overlay" onclick="toggleMobileMenu()"></div>
@@ -225,6 +233,17 @@
                                             <option value="inclusive">Tax inclusive</option>
                                             <option value="none">No tax</option>
                                         </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Currency</label>
+                                        <div class="currency-picker">
+                                            <input type="text" id="inv-currency-display" class="form-control" placeholder="Select currency" readonly onclick="toggleCurrencyPicker('invCurrency', event)">
+                                            <input type="hidden" id="inv-currency" value="">
+                                            <div class="currency-picker-list" id="inv-currency-list" style="display:none;">
+                                                <input type="text" class="currency-search" id="inv-currency-search" placeholder="Search currency or country..." oninput="renderCurrencyItems('invCurrency', this.value)">
+                                                <div class="currency-items" id="inv-currency-items"></div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
@@ -594,7 +613,16 @@
                                 <div class="form-group"><label>Company Address</label><input type="text" id="settings-company-address" class="form-control" placeholder="123 Business St, City"></div>
                                 <div class="form-group"><label>ABN / Tax ID</label><input type="text" id="settings-company-abn" class="form-control" placeholder="12 345 678 901"></div>
                                 <div class="form-group"><label>Website</label><input type="text" id="settings-company-website" class="form-control" placeholder="www.company.com"></div>
-                                <div class="form-group"><label>Currency</label><select id="setting-currency" class="form-control"><option value="GBP">GBP (£) - British Pound</option><option value="USD">USD ($) - US Dollar</option><option value="EUR">EUR (€) - Euro</option><option value="AUD">AUD (A$) - Australian Dollar</option><option value="CAD">CAD (C$) - Canadian Dollar</option><option value="INR">INR (₹) - Indian Rupee</option><option value="JPY">JPY (¥) - Japanese Yen</option></select></div>
+                                <div class="form-group"><label>Currency</label>
+                                    <div class="currency-picker">
+                                        <input type="text" id="setting-currency-display" class="form-control" placeholder="Select currency" readonly onclick="toggleCurrencyPicker('settingsCurrency', event)">
+                                        <input type="hidden" id="setting-currency" value="GBP">
+                                        <div class="currency-picker-list" id="setting-currency-list" style="display:none;">
+                                            <input type="text" class="currency-search" id="setting-currency-search" placeholder="Search currency or country..." oninput="renderCurrencyItems('settingsCurrency', this.value)">
+                                            <div class="currency-items" id="setting-currency-items"></div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <button class="btn btn-primary" onclick="saveCompanyDetails()" style="margin-top:16px;">Save Details</button>
                         </div>
@@ -1750,6 +1778,6 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=20260729"></script>
+    <script src="app.js?v=20260802"></script>
 </body>
 </html>

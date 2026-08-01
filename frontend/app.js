@@ -3,9 +3,256 @@
 // ============================================================
 
 var _appCurrency = 'GBP';
-var _currencySymbols = { GBP: '£', USD: '$', EUR: '€', AUD: 'A$', CAD: 'C$', INR: '₹', JPY: '¥' };
-function getCurrencySymbol() { return _currencySymbols[_appCurrency] || '£'; }
+var _viewCurrency = '';
+
+var CURRENCIES = [
+    {code:'AED', name:'UAE Dirham', symbol:'د.إ', country:'United Arab Emirates'},
+    {code:'AFN', name:'Afghan Afghani', symbol:'؋', country:'Afghanistan'},
+    {code:'ALL', name:'Albanian Lek', symbol:'L', country:'Albania'},
+    {code:'AMD', name:'Armenian Dram', symbol:'֏', country:'Armenia'},
+    {code:'ANG', name:'Netherlands Antillean Guilder', symbol:'ƒ', country:'Curaçao'},
+    {code:'AOA', name:'Angolan Kwanza', symbol:'Kz', country:'Angola'},
+    {code:'ARS', name:'Argentine Peso', symbol:'$', country:'Argentina'},
+    {code:'AUD', name:'Australian Dollar', symbol:'A$', country:'Australia'},
+    {code:'AWG', name:'Aruban Florin', symbol:'ƒ', country:'Aruba'},
+    {code:'AZN', name:'Azerbaijani Manat', symbol:'₼', country:'Azerbaijan'},
+    {code:'BAM', name:'Bosnia-Herzegovina Convertible Mark', symbol:'KM', country:'Bosnia and Herzegovina'},
+    {code:'BBD', name:'Barbadian Dollar', symbol:'$', country:'Barbados'},
+    {code:'BDT', name:'Bangladeshi Taka', symbol:'৳', country:'Bangladesh'},
+    {code:'BGN', name:'Bulgarian Lev', symbol:'лв', country:'Bulgaria'},
+    {code:'BHD', name:'Bahraini Dinar', symbol:'ب.د', country:'Bahrain'},
+    {code:'BIF', name:'Burundian Franc', symbol:'FBu', country:'Burundi'},
+    {code:'BMD', name:'Bermudan Dollar', symbol:'$', country:'Bermuda'},
+    {code:'BND', name:'Brunei Dollar', symbol:'$', country:'Brunei'},
+    {code:'BOB', name:'Bolivian Boliviano', symbol:'Bs', country:'Bolivia'},
+    {code:'BRL', name:'Brazilian Real', symbol:'R$', country:'Brazil'},
+    {code:'BSD', name:'Bahamian Dollar', symbol:'$', country:'Bahamas'},
+    {code:'BTN', name:'Bhutanese Ngultrum', symbol:'Nu.', country:'Bhutan'},
+    {code:'BWP', name:'Botswana Pula', symbol:'P', country:'Botswana'},
+    {code:'BYN', name:'Belarusian Ruble', symbol:'Br', country:'Belarus'},
+    {code:'BZD', name:'Belize Dollar', symbol:'$', country:'Belize'},
+    {code:'CAD', name:'Canadian Dollar', symbol:'C$', country:'Canada'},
+    {code:'CDF', name:'Congolese Franc', symbol:'FC', country:'DR Congo'},
+    {code:'CHF', name:'Swiss Franc', symbol:'CHF', country:'Switzerland'},
+    {code:'CLP', name:'Chilean Peso', symbol:'$', country:'Chile'},
+    {code:'CNY', name:'Chinese Yuan', symbol:'¥', country:'China'},
+    {code:'COP', name:'Colombian Peso', symbol:'$', country:'Colombia'},
+    {code:'CRC', name:'Costa Rican Colón', symbol:'₡', country:'Costa Rica'},
+    {code:'CUP', name:'Cuban Peso', symbol:'$', country:'Cuba'},
+    {code:'CVE', name:'Cape Verdean Escudo', symbol:'Esc', country:'Cape Verde'},
+    {code:'CZK', name:'Czech Koruna', symbol:'Kč', country:'Czech Republic'},
+    {code:'DJF', name:'Djiboutian Franc', symbol:'Fdj', country:'Djibouti'},
+    {code:'DKK', name:'Danish Krone', symbol:'kr', country:'Denmark'},
+    {code:'DOP', name:'Dominican Peso', symbol:'RD$', country:'Dominican Republic'},
+    {code:'DZD', name:'Algerian Dinar', symbol:'دج', country:'Algeria'},
+    {code:'EGP', name:'Egyptian Pound', symbol:'£', country:'Egypt'},
+    {code:'ERN', name:'Eritrean Nakfa', symbol:'Nfk', country:'Eritrea'},
+    {code:'ETB', name:'Ethiopian Birr', symbol:'Br', country:'Ethiopia'},
+    {code:'EUR', name:'Euro', symbol:'€', country:'European Union'},
+    {code:'FJD', name:'Fijian Dollar', symbol:'FJ$', country:'Fiji'},
+    {code:'FKP', name:'Falkland Islands Pound', symbol:'£', country:'Falkland Islands'},
+    {code:'GBP', name:'British Pound', symbol:'£', country:'United Kingdom'},
+    {code:'GEL', name:'Georgian Lari', symbol:'₾', country:'Georgia'},
+    {code:'GHS', name:'Ghanaian Cedi', symbol:'₵', country:'Ghana'},
+    {code:'GIP', name:'Gibraltar Pound', symbol:'£', country:'Gibraltar'},
+    {code:'GMD', name:'Gambian Dalasi', symbol:'D', country:'Gambia'},
+    {code:'GNF', name:'Guinean Franc', symbol:'FG', country:'Guinea'},
+    {code:'GTQ', name:'Guatemalan Quetzal', symbol:'Q', country:'Guatemala'},
+    {code:'GYD', name:'Guyanaese Dollar', symbol:'$', country:'Guyana'},
+    {code:'HKD', name:'Hong Kong Dollar', symbol:'HK$', country:'Hong Kong'},
+    {code:'HNL', name:'Honduran Lempira', symbol:'L', country:'Honduras'},
+    {code:'HRK', name:'Croatian Kuna', symbol:'kn', country:'Croatia'},
+    {code:'HTG', name:'Haitian Gourde', symbol:'G', country:'Haiti'},
+    {code:'HUF', name:'Hungarian Forint', symbol:'Ft', country:'Hungary'},
+    {code:'IDR', name:'Indonesian Rupiah', symbol:'Rp', country:'Indonesia'},
+    {code:'ILS', name:'Israeli New Shekel', symbol:'₪', country:'Israel'},
+    {code:'INR', name:'Indian Rupee', symbol:'₹', country:'India'},
+    {code:'IQD', name:'Iraqi Dinar', symbol:'ع.د', country:'Iraq'},
+    {code:'IRR', name:'Iranian Rial', symbol:'﷼', country:'Iran'},
+    {code:'ISK', name:'Icelandic Króna', symbol:'kr', country:'Iceland'},
+    {code:'JMD', name:'Jamaican Dollar', symbol:'J$', country:'Jamaica'},
+    {code:'JOD', name:'Jordanian Dinar', symbol:'د.ا', country:'Jordan'},
+    {code:'JPY', name:'Japanese Yen', symbol:'¥', country:'Japan'},
+    {code:'KES', name:'Kenyan Shilling', symbol:'KSh', country:'Kenya'},
+    {code:'KGS', name:'Kyrgystani Som', symbol:'с', country:'Kyrgyzstan'},
+    {code:'KHR', name:'Cambodian Riel', symbol:'៛', country:'Cambodia'},
+    {code:'KMF', name:'Comorian Franc', symbol:'CF', country:'Comoros'},
+    {code:'KPW', name:'North Korean Won', symbol:'₩', country:'North Korea'},
+    {code:'KRW', name:'South Korean Won', symbol:'₩', country:'South Korea'},
+    {code:'KWD', name:'Kuwaiti Dinar', symbol:'د.ك', country:'Kuwait'},
+    {code:'KYD', name:'Cayman Islands Dollar', symbol:'CI$', country:'Cayman Islands'},
+    {code:'KZT', name:'Kazakhstani Tenge', symbol:'₸', country:'Kazakhstan'},
+    {code:'LAK', name:'Laotian Kip', symbol:'₭', country:'Laos'},
+    {code:'LBP', name:'Lebanese Pound', symbol:'ل.ل', country:'Lebanon'},
+    {code:'LKR', name:'Sri Lankan Rupee', symbol:'₨', country:'Sri Lanka'},
+    {code:'LRD', name:'Liberian Dollar', symbol:'$', country:'Liberia'},
+    {code:'LSL', name:'Lesotho Loti', symbol:'L', country:'Lesotho'},
+    {code:'LYD', name:'Libyan Dinar', symbol:'ل.د', country:'Libya'},
+    {code:'MAD', name:'Moroccan Dirham', symbol:'د.م.', country:'Morocco'},
+    {code:'MDL', name:'Moldovan Leu', symbol:'L', country:'Moldova'},
+    {code:'MGA', name:'Malagasy Ariary', symbol:'Ar', country:'Madagascar'},
+    {code:'MKD', name:'Macedonian Denar', symbol:'ден', country:'North Macedonia'},
+    {code:'MMK', name:'Myanmar Kyat', symbol:'K', country:'Myanmar'},
+    {code:'MNT', name:'Mongolian Tugrik', symbol:'₮', country:'Mongolia'},
+    {code:'MOP', name:'Macanese Pataca', symbol:'MOP$', country:'Macau'},
+    {code:'MRU', name:'Mauritanian Ouguiya', symbol:'UM', country:'Mauritania'},
+    {code:'MUR', name:'Mauritian Rupee', symbol:'₨', country:'Mauritius'},
+    {code:'MVR', name:'Maldivian Rufiyaa', symbol:'Rf', country:'Maldives'},
+    {code:'MWK', name:'Malawian Kwacha', symbol:'MK', country:'Malawi'},
+    {code:'MXN', name:'Mexican Peso', symbol:'$', country:'Mexico'},
+    {code:'MYR', name:'Malaysian Ringgit', symbol:'RM', country:'Malaysia'},
+    {code:'MZN', name:'Mozambican Metical', symbol:'MT', country:'Mozambique'},
+    {code:'NAD', name:'Namibian Dollar', symbol:'$', country:'Namibia'},
+    {code:'NGN', name:'Nigerian Naira', symbol:'₦', country:'Nigeria'},
+    {code:'NIO', name:'Nicaraguan Córdoba', symbol:'C$', country:'Nicaragua'},
+    {code:'NOK', name:'Norwegian Krone', symbol:'kr', country:'Norway'},
+    {code:'NPR', name:'Nepalese Rupee', symbol:'₨', country:'Nepal'},
+    {code:'NZD', name:'New Zealand Dollar', symbol:'NZ$', country:'New Zealand'},
+    {code:'OMR', name:'Omani Rial', symbol:'ر.ع.', country:'Oman'},
+    {code:'PAB', name:'Panamanian Balboa', symbol:'B/.', country:'Panama'},
+    {code:'PEN', name:'Peruvian Sol', symbol:'S/', country:'Peru'},
+    {code:'PGK', name:'Papua New Guinean Kina', symbol:'K', country:'Papua New Guinea'},
+    {code:'PHP', name:'Philippine Peso', symbol:'₱', country:'Philippines'},
+    {code:'PKR', name:'Pakistani Rupee', symbol:'₨', country:'Pakistan'},
+    {code:'PLN', name:'Polish Złoty', symbol:'zł', country:'Poland'},
+    {code:'PYG', name:'Paraguayan Guarani', symbol:'₲', country:'Paraguay'},
+    {code:'QAR', name:'Qatari Rial', symbol:'ر.ق', country:'Qatar'},
+    {code:'RON', name:'Romanian Leu', symbol:'lei', country:'Romania'},
+    {code:'RSD', name:'Serbian Dinar', symbol:'дин', country:'Serbia'},
+    {code:'RUB', name:'Russian Ruble', symbol:'₽', country:'Russia'},
+    {code:'RWF', name:'Rwandan Franc', symbol:'FRw', country:'Rwanda'},
+    {code:'SAR', name:'Saudi Riyal', symbol:'﷼', country:'Saudi Arabia'},
+    {code:'SBD', name:'Solomon Islands Dollar', symbol:'SI$', country:'Solomon Islands'},
+    {code:'SCR', name:'Seychellois Rupee', symbol:'₨', country:'Seychelles'},
+    {code:'SDG', name:'Sudanese Pound', symbol:'ج.س', country:'Sudan'},
+    {code:'SEK', name:'Swedish Krona', symbol:'kr', country:'Sweden'},
+    {code:'SGD', name:'Singapore Dollar', symbol:'S$', country:'Singapore'},
+    {code:'SHP', name:'Saint Helena Pound', symbol:'£', country:'Saint Helena'},
+    {code:'SLL', name:'Sierra Leonean Leone', symbol:'Le', country:'Sierra Leone'},
+    {code:'SOS', name:'Somali Shilling', symbol:'Sh', country:'Somalia'},
+    {code:'SRD', name:'Surinamese Dollar', symbol:'$', country:'Suriname'},
+    {code:'SSP', name:'South Sudanese Pound', symbol:'£', country:'South Sudan'},
+    {code:'STN', name:'São Tomé and Príncipe Dobra', symbol:'Db', country:'São Tomé and Príncipe'},
+    {code:'SVC', name:'Salvadoran Colón', symbol:'$', country:'El Salvador'},
+    {code:'SYP', name:'Syrian Pound', symbol:'£', country:'Syria'},
+    {code:'SZL', name:'Swazi Lilangeni', symbol:'L', country:'Eswatini'},
+    {code:'THB', name:'Thai Baht', symbol:'฿', country:'Thailand'},
+    {code:'TJS', name:'Tajikistani Somoni', symbol:'SM', country:'Tajikistan'},
+    {code:'TMT', name:'Turkmenistani Manat', symbol:'m', country:'Turkmenistan'},
+    {code:'TND', name:'Tunisian Dinar', symbol:'د.ت', country:'Tunisia'},
+    {code:'TOP', name:'Tongan Paʻanga', symbol:'T$', country:'Tonga'},
+    {code:'TRY', name:'Turkish Lira', symbol:'₺', country:'Turkey'},
+    {code:'TTD', name:'Trinidad and Tobago Dollar', symbol:'TT$', country:'Trinidad and Tobago'},
+    {code:'TWD', name:'New Taiwan Dollar', symbol:'NT$', country:'Taiwan'},
+    {code:'TZS', name:'Tanzanian Shilling', symbol:'Sh', country:'Tanzania'},
+    {code:'UAH', name:'Ukrainian Hryvnia', symbol:'₴', country:'Ukraine'},
+    {code:'UGX', name:'Ugandan Shilling', symbol:'USh', country:'Uganda'},
+    {code:'USD', name:'US Dollar', symbol:'$', country:'United States'},
+    {code:'UYU', name:'Uruguayan Peso', symbol:'$U', country:'Uruguay'},
+    {code:'UZS', name:'Uzbekistani Som', symbol:"so'm", country:'Uzbekistan'},
+    {code:'VES', name:'Venezuelan Bolívar', symbol:'Bs', country:'Venezuela'},
+    {code:'VND', name:'Vietnamese Đồng', symbol:'₫', country:'Vietnam'},
+    {code:'VUV', name:'Vanuatu Vatu', symbol:'VT', country:'Vanuatu'},
+    {code:'WST', name:'Samoan Tala', symbol:'T', country:'Samoa'},
+    {code:'XAF', name:'Central African CFA Franc', symbol:'FCFA', country:'Central Africa'},
+    {code:'XCD', name:'East Caribbean Dollar', symbol:'EC$', country:'Eastern Caribbean'},
+    {code:'XOF', name:'West African CFA Franc', symbol:'CFA', country:'West Africa'},
+    {code:'XPF', name:'CFP Franc', symbol:'₣', country:'French Pacific'},
+    {code:'YER', name:'Yemeni Rial', symbol:'﷼', country:'Yemen'},
+    {code:'ZAR', name:'South African Rand', symbol:'R', country:'South Africa'},
+    {code:'ZMW', name:'Zambian Kwacha', symbol:'ZK', country:'Zambia'},
+    {code:'ZWL', name:'Zimbabwean Dollar', symbol:'Z$', country:'Zimbabwe'}
+];
+
+function getCurrencyInfo(code) {
+    code = (code || '').toUpperCase();
+    for (var i = 0; i < CURRENCIES.length; i++) {
+        if (CURRENCIES[i].code === code) return CURRENCIES[i];
+    }
+    return { code: code, name: code, symbol: code, country: '' };
+}
+function getCurrencySymbol(code) {
+    code = code || _viewCurrency || _appCurrency || 'GBP';
+    return getCurrencyInfo(code).symbol;
+}
 function formatMoney(val) { return getCurrencySymbol() + parseFloat(val || 0).toFixed(2); }
+
+// --- Searchable Currency Picker ---
+var _curPickers = {};
+
+function setupCurrencyPicker(name, displayId, hiddenId, listId, searchId, itemsId, onChange) {
+    _curPickers[name] = { displayId: displayId, hiddenId: hiddenId, listId: listId, itemsId: itemsId, onChange: onChange || null };
+    var searchEl = document.getElementById(searchId);
+    if (searchEl) searchEl.addEventListener('input', function() { renderCurrencyItems(name, this.value); });
+    renderCurrencyItems(name, '');
+    var hidden = document.getElementById(hiddenId);
+    if (hidden && hidden.value) setCurrencyPickerDisplay(name, hidden.value);
+}
+
+function renderCurrencyItems(name, q) {
+    var st = _curPickers[name];
+    if (!st) return;
+    q = (q || '').toLowerCase();
+    var html = '';
+    CURRENCIES.forEach(function(c) {
+        if (q && c.code.toLowerCase().indexOf(q) === -1 &&
+            c.name.toLowerCase().indexOf(q) === -1 &&
+            (c.country || '').toLowerCase().indexOf(q) === -1) return;
+        html += '<div class="currency-option" data-code="' + c.code + '" onclick="currencyPick(\'' + name + '\',\'' + c.code + '\')">' +
+                '<span class="cur-code">' + c.code + '</span>' +
+                '<span class="cur-symbol">' + c.symbol + '</span>' +
+                '<span class="cur-name">' + c.name + '</span>' +
+                (c.country ? '<span class="cur-country">' + c.country + '</span>' : '') +
+                '</div>';
+    });
+    var items = document.getElementById(st.itemsId);
+    if (items) items.innerHTML = html || '<div class="currency-option no-result">No currency found</div>';
+}
+
+function currencyPick(name, code) {
+    var st = _curPickers[name];
+    if (!st) return;
+    setCurrencyPickerDisplay(name, code);
+    var list = document.getElementById(st.listId);
+    if (list) list.style.display = 'none';
+    if (st.onChange) st.onChange(code);
+}
+
+function setCurrencyPickerDisplay(name, code) {
+    var st = _curPickers[name];
+    if (!st) return;
+    var info = getCurrencyInfo(code);
+    var disp = document.getElementById(st.displayId);
+    if (disp) disp.value = code + ' (' + info.symbol + ') - ' + info.name;
+    var hidden = document.getElementById(st.hiddenId);
+    if (hidden) hidden.value = info.code;
+}
+
+function toggleCurrencyPicker(name, ev) {
+    if (ev) ev.stopPropagation();
+    var st = _curPickers[name];
+    if (!st) return;
+    var list = document.getElementById(st.listId);
+    if (!list) return;
+    var wasOpen = list.style.display === 'block';
+    closeAllCurrencyPickers();
+    if (!wasOpen) {
+        list.style.display = 'block';
+        var search = list.querySelector('.currency-search');
+        if (search) { search.value = ''; renderCurrencyItems(name, ''); }
+    }
+}
+
+function closeAllCurrencyPickers() {
+    Object.keys(_curPickers).forEach(function(name) {
+        var el = document.getElementById(_curPickers[name].listId);
+        if (el) el.style.display = 'none';
+    });
+}
+
+document.addEventListener('click', function(ev) {
+    if (ev.target && ev.target.closest && !ev.target.closest('.currency-picker')) closeAllCurrencyPickers();
+});
 
 // --- Toast Notifications ---
 function showToast(message, type) {
@@ -33,6 +280,7 @@ window.toggleMobileMenu = toggleMobileMenu;
 
 // --- View Switcher ---
 function showView(viewId) {
+    if (viewId !== 'view-invoice-view') _viewCurrency = '';
     document.querySelectorAll('.view-section').forEach(function(el) {
         el.classList.remove('active');
         el.style.display = 'none';
@@ -41,6 +289,12 @@ function showView(viewId) {
     if (target) {
         target.classList.add('active');
         target.style.display = 'block';
+    }
+    if (viewId === 'create-invoice-view') {
+        var curHidden = document.getElementById('inv-currency');
+        if (curHidden && curHidden.value !== _appCurrency) {
+            setCurrencyPickerDisplay('invCurrency', _appCurrency);
+        }
     }
     document.querySelectorAll('.nav-item').forEach(function(el) { el.classList.remove('active'); });
     var navMap = {
@@ -87,8 +341,12 @@ var allInvoices = [];
 var currentFilter = 'all';
 
 function formatCurrency(amount, currency) {
-    currency = currency || _appCurrency || 'GBP';
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency }).format(amount || 0);
+    currency = currency || _viewCurrency || _appCurrency || 'GBP';
+    try {
+        return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency }).format(amount || 0);
+    } catch (e) {
+        return getCurrencyInfo(currency).symbol + (parseFloat(amount) || 0).toFixed(2);
+    }
 }
 
 // --- Auth ---
@@ -115,6 +373,13 @@ async function checkAuthStatus() {
         if (loginBtn) loginBtn.style.display = 'inline-block';
         if (userInfo) userInfo.style.display = 'none';
     }
+    try {
+        var saRes = await fetch('/api/superadmin/me');
+        if (saRes.ok) {
+            var banner = document.getElementById('superadmin-impersonate-banner');
+            if (banner) { banner.style.display = 'flex'; }
+        }
+    } catch (e) {}
 }
 
 function handleLogout() {
@@ -193,7 +458,7 @@ function renderInvoices(invoices) {
         var statusClass = (inv.status || '').toLowerCase().replace(/\s+/g, '-');
         var opens = inv.open_count || 0;
         var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + inv.number + '\')">' + inv.number + '</a></td><td>' + (inv.ref || '-') + '</td><td>' + inv.to + '</td><td>' + inv.date + '</td><td>' + inv.due_date + '</td><td class="text-right">' + formatCurrency(inv.paid) + '</td><td class="text-right">' + formatCurrency(inv.due) + '</td><td><span class="status-pill status-' + statusClass + '">' + inv.status + '</span></td><td class="text-right">' + openBadge + '</td><td>' + (inv.sent || '-') + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + inv.number + '\')">' + inv.number + '</a></td><td>' + (inv.ref || '-') + '</td><td>' + inv.to + '</td><td>' + inv.date + '</td><td>' + inv.due_date + '</td><td class="text-right">' + formatCurrency(inv.paid, inv.currency) + '</td><td class="text-right">' + formatCurrency(inv.due, inv.currency) + '</td><td><span class="status-pill status-' + statusClass + '">' + inv.status + '</span></td><td class="text-right">' + openBadge + '</td><td>' + (inv.sent || '-') + '</td></tr>');
     });
 }
 
@@ -381,6 +646,7 @@ async function viewInvoice(number) {
         var response = await fetch('/api/invoices/' + encodeURIComponent(number));
         if (!response.ok) throw new Error('Failed');
         var inv = await response.json();
+        _viewCurrency = inv.currency || '';
         document.getElementById('view-inv-title').textContent = 'Invoice ' + inv.number;
         document.getElementById('view-inv-number-val').textContent = inv.number;
         document.getElementById('view-inv-status').textContent = inv.status;
@@ -450,7 +716,7 @@ async function viewInvoice(number) {
         }
         document.getElementById('view-summary-subtotal').textContent = subtotal.toFixed(2);
         document.getElementById('view-summary-vat').textContent = vat.toFixed(2);
-        document.getElementById('view-summary-total').textContent = (subtotal + vat).toFixed(2);
+        document.getElementById('view-summary-total').textContent = (subtotal + vat).toFixed(2) + ' ' + (_viewCurrency || _appCurrency);
 
         document.getElementById('view-invoice-delete-btn').dataset.number = inv.number;
         document.getElementById('view-invoice-paid-btn').dataset.number = inv.number;
@@ -758,7 +1024,7 @@ function generateInvoicePDF() {
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 41, 59);
-    doc.text('TOTAL ' + _appCurrency, totLabelX, y);
+    doc.text('TOTAL ' + (_viewCurrency || _appCurrency), totLabelX, y);
     doc.text(total, totValX, y, { align: 'right' });
     y += 24;
 
@@ -962,9 +1228,10 @@ function calculateTotals() {
     var subEl = document.getElementById('summary-subtotal');
     var vatEl = document.getElementById('summary-vat');
     var totalEl = document.getElementById('summary-total');
+    var curCode = document.getElementById('inv-currency') ? (document.getElementById('inv-currency').value || _appCurrency) : _appCurrency;
     if (subEl) subEl.textContent = subtotal.toFixed(2);
     if (vatEl) vatEl.textContent = totalVat.toFixed(2);
-    if (totalEl) totalEl.textContent = (subtotal + totalVat).toFixed(2);
+    if (totalEl) totalEl.textContent = (subtotal + totalVat).toFixed(2) + ' ' + curCode;
 }
 window.calculateTotals = calculateTotals;
 
@@ -1076,7 +1343,8 @@ async function submitComplexInvoice(status) {
         invoice_number: document.getElementById('inv-number').value,
         reference: document.getElementById('inv-ref').value,
         line_items: line_items,
-        tax_type: (document.getElementById('tax-type') || {}).value || 'exclusive'
+        tax_type: (document.getElementById('tax-type') || {}).value || 'exclusive',
+        currency: document.getElementById('inv-currency') ? document.getElementById('inv-currency').value : (_appCurrency || 'GBP')
     };
 
     try {
@@ -1238,6 +1506,7 @@ async function saveCompanyDetails() {
         company_website: document.getElementById('settings-company-website') ? document.getElementById('settings-company-website').value : '',
         currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'GBP'
     };
+    _appCurrency = payload.currency || _appCurrency;
     try {
         var res = await fetch('/api/settings', {
             method: 'POST',
@@ -1269,6 +1538,7 @@ async function saveSettings() {
         default_payment_terms: document.getElementById('setting-payment-terms') ? document.getElementById('setting-payment-terms').value : '14',
         invoice_prefix: document.getElementById('setting-invoice-prefix') ? document.getElementById('setting-invoice-prefix').value : 'INV-'
     };
+    _appCurrency = payload.currency || _appCurrency;
     try {
         var res = await fetch('/api/settings', {
             method: 'POST',
@@ -1298,7 +1568,7 @@ async function loadSettings() {
         if (data.company_address !== undefined) { var el = document.getElementById('settings-company-address'); if (el) el.value = data.company_address; }
         if (data.company_abn !== undefined) { var el = document.getElementById('settings-company-abn'); if (el) el.value = data.company_abn; }
         if (data.company_website !== undefined) { var el = document.getElementById('settings-company-website'); if (el) el.value = data.company_website; }
-        if (data.currency !== undefined) { var el = document.getElementById('setting-currency'); if (el) el.value = data.currency; }
+        if (data.currency !== undefined) { var el = document.getElementById('setting-currency'); if (el) el.value = data.currency; if (_curPickers['settingsCurrency']) setCurrencyPickerDisplay('settingsCurrency', data.currency); }
         if (data.tax_rate !== undefined) { var el = document.getElementById('setting-tax-rate'); if (el) el.value = data.tax_rate; }
         if (data.default_payment_terms !== undefined) { var el = document.getElementById('setting-payment-terms'); if (el) el.value = data.default_payment_terms; }
         if (data.invoice_prefix !== undefined) { var el = document.getElementById('setting-invoice-prefix'); if (el) el.value = data.invoice_prefix; }
@@ -3310,7 +3580,9 @@ document.addEventListener('DOMContentLoaded', function() {
     preloadSearchData();
     loadSavedLogo();
     setupLogoUpload();
-    fetch('/api/settings').then(function(r){return r.json()}).then(function(d){if(d.currency){_appCurrency=d.currency;var el=document.getElementById('setting-currency');if(el)el.value=d.currency;}}).catch(function(){});
+    if (document.getElementById('inv-currency-display')) setupCurrencyPicker('invCurrency', 'inv-currency-display', 'inv-currency', 'inv-currency-list', 'inv-currency-search', 'inv-currency-items');
+    if (document.getElementById('setting-currency-display')) setupCurrencyPicker('settingsCurrency', 'setting-currency-display', 'setting-currency', 'setting-currency-list', 'setting-currency-search', 'setting-currency-items');
+    fetch('/api/settings').then(function(r){return r.json()}).then(function(d){if(d.currency){_appCurrency=d.currency;var el=document.getElementById('setting-currency');if(el)el.value=d.currency;if(_curPickers['settingsCurrency'])setCurrencyPickerDisplay('settingsCurrency',d.currency);}}).catch(function(){});
     if (document.querySelectorAll('.line-item-row').length === 0 && document.getElementById('line-items-body')) {
         addLineItemRow();
     }

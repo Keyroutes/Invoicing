@@ -94,6 +94,13 @@ def ensure_columns():
                 conn.commit()
                 print("Added 'last_opened' column to invoices table")
 
+            # invoices.currency
+            result = conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='invoices' AND column_name='currency'"))
+            if not result.fetchone():
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN currency VARCHAR DEFAULT ''"))
+                conn.commit()
+                print("Added 'currency' column to invoices table")
+
             # Backfill tracking_ids for existing invoices (single query, no SQL injection)
             try:
                 conn.execute(text("UPDATE invoices SET tracking_id = gen_random_uuid()::text WHERE tracking_id IS NULL OR tracking_id = ''"))
