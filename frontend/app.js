@@ -1435,14 +1435,19 @@ async function loadGmailStatus() {
         var statusEl = document.getElementById('gmail-status');
         var loginBtn = document.getElementById('gmail-login-btn');
         var emailEl = document.getElementById('gmail-email');
+        var disconnectBtn = document.getElementById('gmail-disconnect-btn');
         var demoSection = document.getElementById('demo-email-section');
         if (!statusEl) return;
         if (data.gmail_ready) {
+            var authEmail = data.gmail_authorized_email || data.user_email || 'Connected';
             statusEl.textContent = 'Connected';
             statusEl.style.color = 'var(--success-color)';
-            emailEl.textContent = data.user_email || data.user_name || 'Connected';
+            emailEl.textContent = 'Sending as: ' + authEmail;
             emailEl.style.display = 'block';
+            emailEl.style.color = 'var(--warning-color)';
+            emailEl.style.fontWeight = '600';
             loginBtn.style.display = 'none';
+            if (disconnectBtn) disconnectBtn.style.display = 'inline-block';
             if (demoSection) demoSection.style.display = 'block';
         } else if (data.logged_in) {
             statusEl.textContent = 'Logged in (re-login for refresh token)';
@@ -1450,17 +1455,33 @@ async function loadGmailStatus() {
             emailEl.textContent = data.user_email || '';
             emailEl.style.display = data.user_email ? 'block' : 'none';
             loginBtn.style.display = 'inline-block';
+            if (disconnectBtn) disconnectBtn.style.display = 'none';
             if (demoSection) demoSection.style.display = 'none';
         } else {
             statusEl.textContent = 'Not connected';
             statusEl.style.color = 'var(--danger-color)';
             emailEl.style.display = 'none';
             loginBtn.style.display = 'inline-block';
+            if (disconnectBtn) disconnectBtn.style.display = 'none';
             if (demoSection) demoSection.style.display = 'none';
         }
     } catch (e) { var s = document.getElementById('gmail-status'); if (s) s.textContent = 'Error'; }
 }
 window.loadGmailStatus = loadGmailStatus;
+
+async function disconnectGmail() {
+    if (!confirm('Disconnect Gmail? Emails will stop sending until you re-authorize with the correct Google account.')) return;
+    try {
+        var res = await fetch('/api/gmail/disconnect', { method: 'POST' });
+        if (res.ok) {
+            showToast('Gmail disconnected. Re-authorize with your Google account.', 'success');
+            loadGmailStatus();
+        } else {
+            showToast('Failed to disconnect', 'error');
+        }
+    } catch (e) { showToast('Failed: ' + e, 'error'); }
+}
+window.disconnectGmail = disconnectGmail;
 
 async function testGmailSend() {
     var toEmail = document.getElementById('demo-email').value;

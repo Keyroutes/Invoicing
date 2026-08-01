@@ -1633,13 +1633,36 @@ def logout(request: Request):
 def gmail_status(request: Request, db: Session = Depends(get_db)):
     user = request.session.get('user')
     refresh_token = get_stored_refresh_token(db)
+    # Try to get the authorized Gmail email from the refresh token owner
+    gmail_email = None
+    if refresh_token:
+        try:
+            creds = get_gmail_credentials(access_token=None, refresh_token=refresh_token)
+            if creds and creds.valid:
+                service = build('gmail', 'v1', credentials=creds)
+                profile = service.users().getProfile(userId="me").execute()
+                gmail_email = profile.get("emailAddress")
+        except Exception:
+            pass
     return {
         "logged_in": bool(user),
         "user_email": user.get('email') if user else None,
         "user_name": user.get('name') if user else None,
         "refresh_token_stored": bool(refresh_token),
-        "gmail_ready": bool(refresh_token)
+        "gmail_ready": bool(refresh_token),
+        "gmail_authorized_email": gmail_email
     }
+
+@app.post("/api/gmail/disconnect")
+def disconnect_gmail(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    setting = db.query(models.DBSettings).filter(
+        models.DBSettings.key == "GOOGLE_REFRESH_TOKEN"
+    ).first()
+    if setting:
+        db.delete(setting)
+        db.commit()
+    return {"ok": True, "message": "Gmail disconnected. Re-authorize with your Google account."}
 
 # --- Test Email Endpoint (for demos) ---
 

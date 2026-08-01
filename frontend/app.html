@@ -579,8 +579,9 @@
                                         <p id="gmail-email" style="color:var(--primary-color);font-size:0.9rem;margin-top:4px;display:none;"></p>
                                     </div>
                                 </div>
-                                <div style="display:flex;gap:12px;align-items:center;">
+                                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
                                     <a href="/api/auth/login" class="btn btn-primary" id="gmail-login-btn">Login with Google</a>
+                                    <button class="btn btn-outline" id="gmail-disconnect-btn" onclick="disconnectGmail()" style="font-size:0.85rem;display:none;color:var(--danger-color);border-color:var(--danger-color);">Disconnect Gmail</button>
                                     <button class="btn btn-outline" onclick="handleLogout()" style="font-size:0.85rem;">Logout</button>
                                 </div>
                             </div>
