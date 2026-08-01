@@ -305,6 +305,17 @@ function showView(viewId) {
         'bills-view': 'nav-bills',
         'reports-view': 'nav-reports',
         'contacts-view': 'nav-contacts',
+        'employees-view': 'nav-people',
+        'employee-detail-view': 'nav-people',
+        'departments-view': 'nav-people',
+        'attendance-view': 'nav-people',
+        'leave-view': 'nav-leave',
+        'goals-view': 'nav-goals',
+        'onboarding-hub-view': 'nav-onboarding',
+        'recruitment-view': 'nav-recruitment',
+        'payroll-view': 'nav-payroll',
+        'payslip-detail-view': 'nav-payroll',
+        'orgchart-view': 'nav-org',
         'settings-view': 'nav-settings'
     };
     var navId = navMap[viewId];
@@ -3620,6 +3631,26 @@ document.addEventListener('DOMContentLoaded', function() {
     var dueEl = document.getElementById('inv-due-date');
     if (issueEl) issueEl.value = today;
     if (dueEl) dueEl.value = dueDate;
+
+    // Auto-refresh live attendance every 30 seconds when on attendance view
+    var attRefreshInterval = null;
+    function startAttRefresh() {
+        if (attRefreshInterval) return;
+        attRefreshInterval = setInterval(function() {
+            var attView = document.getElementById('attendance-view');
+            if (attView && attView.style.display !== 'none') {
+                var liveSub = document.getElementById('att-sub-live');
+                if (liveSub && !liveSub.classList.contains('d-none')) {
+                    loadLiveAttendance();
+                    loadAttendanceStats();
+                }
+            } else {
+                clearInterval(attRefreshInterval);
+                attRefreshInterval = null;
+            }
+        }, 30000);
+    }
+    startAttRefresh();
 });
 
 // ============ RECRUITMENT ============
