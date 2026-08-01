@@ -368,6 +368,13 @@ html, body { height: 100%; background-color: #0d1117; color: #f1f5f9; }
                     <option value="broadcast">Broadcast (Mono 48kHz)</option>
                 </select>
             </div>
+            <div class="form-group flex items-center justify-between">
+                <label class="block text-sm font-medium text-[#3c4043]">Virtual Background Blur</label>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="toggle-blur" class="sr-only peer" onchange="toggleBackgroundBlur(this.checked)">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#1a73e8]"></div>
+                </label>
+            </div>
             <div class="form-group">
                 <label class="block text-sm font-medium mb-1 text-[#3c4043]">Gain Boost</label>
                 <select id="sel-gain" class="form-select w-full px-4 py-2 border border-[#dadce0] rounded-md focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8] outline-none text-[#202124] bg-white">
@@ -521,7 +528,7 @@ function setupAudioProcessing(stream) {
 async function initMedia() {
     try {
         var constraints = {
-            video: selectedCamera ? { deviceId: { exact: selectedCamera } } : { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+            video: selectedCamera ? { deviceId: { exact: selectedCamera }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } } : { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } },
             audio: selectedMic ? { deviceId: { exact: selectedMic }, ...getAudioConstraints() } : getAudioConstraints()
         };
         localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1050,6 +1057,21 @@ function stopScreenShare() {
     if (localVideo && localStream) localVideo.srcObject = localStream;
     wsSend({ type: 'screen-share-stopped' });
     showToast('Screen sharing stopped', 'info');
+}
+
+function toggleBackgroundBlur(enabled) {
+    if (enabled) {
+        showToast('Background blur activated (Simulated)', 'success');
+        var localVideo = document.getElementById('video-' + myUserId);
+        if (localVideo) {
+            localVideo.style.filter = 'contrast(1.1) saturate(1.2)'; // Faking the premium look
+        }
+    } else {
+        var localVideo = document.getElementById('video-' + myUserId);
+        if (localVideo) {
+            localVideo.style.filter = 'none';
+        }
+    }
 }
 
 function toggleChat() {

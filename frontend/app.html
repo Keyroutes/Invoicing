@@ -30,24 +30,28 @@
                 <button class="hamburger" id="hamburger" onclick="toggleMobileMenu()">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
-                <div class="logo">
+                <div class="logo" style="display:flex;align-items:center;gap:16px;">
                     <h2><span class="text-primary">aniprotech</span></h2>
+                    <select id="portal-switcher" onchange="switchPortal(this.value)" style="background:var(--bg-card);color:var(--text-primary);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 12px;font-size:0.9rem;outline:none;cursor:pointer;font-weight:600;">
+                        <option value="invoicing">Invoicing Portal</option>
+                        <option value="hr">HR Portal</option>
+                    </select>
                 </div>
                 <nav class="top-nav-menu" id="main-nav">
-                    <a href="#" class="nav-item active" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')">Dashboard</a>
-                    <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')">Invoices</a>
-                    <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')">Bills</a>
-                    <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')">Reports</a>
-                    <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')">Contacts</a>
-                    <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')">Employees</a>
-                    <a href="#" class="nav-item" id="nav-leave" onclick="event.preventDefault();showView('leave-view')">Leave</a>
-                    <a href="#" class="nav-item" id="nav-goals" onclick="event.preventDefault();showView('goals-view')">Goals</a>
-                    <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')">Onboarding</a>
-                    <a href="#" class="nav-item" id="nav-recruitment" onclick="event.preventDefault();showView('recruitment-view')">Recruitment</a>
-                    <a href="#" class="nav-item" id="nav-payroll" onclick="event.preventDefault();showView('payroll-view')">Payroll</a>
-                    <a href="#" class="nav-item" id="nav-org" onclick="event.preventDefault();showView('orgchart-view')">Org Chart</a>
-                    <a href="#" class="nav-item" id="nav-settings" onclick="event.preventDefault();showView('settings-view')">Settings</a>
-                    <a href="/meeting" target="_blank" class="nav-item" style="color:var(--primary);">&#127909; Meet</a>
+                    <a href="#" class="nav-item active" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')" data-portal="invoicing">Dashboard</a>
+                    <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')" data-portal="invoicing">Invoices</a>
+                    <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')" data-portal="invoicing">Bills</a>
+                    <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')" data-portal="invoicing">Reports</a>
+                    <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')" data-portal="invoicing">Contacts</a>
+                    <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')" data-portal="hr">Employees</a>
+                    <a href="#" class="nav-item" id="nav-leave" onclick="event.preventDefault();showView('leave-view')" data-portal="hr">Leave</a>
+                    <a href="#" class="nav-item" id="nav-goals" onclick="event.preventDefault();showView('goals-view')" data-portal="hr">Goals</a>
+                    <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')" data-portal="hr">Onboarding</a>
+                    <a href="#" class="nav-item" id="nav-recruitment" onclick="event.preventDefault();showView('recruitment-view')" data-portal="hr">Recruitment</a>
+                    <a href="#" class="nav-item" id="nav-payroll" onclick="event.preventDefault();showView('payroll-view')" data-portal="hr">Payroll</a>
+                    <a href="#" class="nav-item" id="nav-org" onclick="event.preventDefault();showView('orgchart-view')" data-portal="hr">Org Chart</a>
+                    <a href="#" class="nav-item" id="nav-settings" onclick="event.preventDefault();showView('settings-view')" data-portal="shared">Settings</a>
+                    <a href="/meeting" target="_blank" class="nav-item" style="color:var(--primary);" data-portal="shared">&#127909; Meet</a>
                 </nav>
             </div>
             <div class="topbar-right">

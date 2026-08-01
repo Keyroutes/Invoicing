@@ -334,7 +334,35 @@ function showView(viewId) {
     if (mobileOverlay) mobileOverlay.classList.remove('active');
     document.body.classList.remove('no-scroll');
 }
+}
 window.showView = showView;
+
+function switchPortal(portalId, skipNav) {
+    if (!portalId) portalId = localStorage.getItem('active_portal') || 'invoicing';
+    localStorage.setItem('active_portal', portalId);
+    
+    var switcher = document.getElementById('portal-switcher');
+    if (switcher) switcher.value = portalId;
+
+    var navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(function(item) {
+        var portal = item.getAttribute('data-portal');
+        if (portal === portalId || portal === 'shared') {
+            item.style.display = '';
+        } else if (portal) {
+            item.style.display = 'none';
+        }
+    });
+
+    if (!skipNav) {
+        if (portalId === 'invoicing') {
+            showView('dashboard-view');
+        } else {
+            showView('employees-view');
+        }
+    }
+}
+window.switchPortal = switchPortal;
 
 // --- Utility ---
 var allInvoices = [];
@@ -3626,7 +3654,15 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     // Set default dates
     var today = new Date().toISOString().split('T')[0];
-    var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+    var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];    
+    var urlParams = new URLSearchParams(window.location.search);
+    var urlPortal = urlParams.get('portal');
+    if (urlPortal) {
+        switchPortal(urlPortal, true);
+    } else {
+        switchPortal(null, true);
+    }
+    
     var issueEl = document.getElementById('inv-issue-date');
     var dueEl = document.getElementById('inv-due-date');
     if (issueEl) issueEl.value = today;
