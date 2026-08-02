@@ -433,6 +433,12 @@ function renderDashboard(data) {
     document.getElementById('dash-total-revenue').textContent = formatCurrency(s.total_revenue);
     document.getElementById('dash-invoices-owed').textContent = formatCurrency(s.invoices_owed);
     document.getElementById('dash-total-count').textContent = s.total_count || 0;
+    
+    // Inject futuristic chart rendering here:
+    if (typeof renderInvoiceChart === 'function') {
+        renderInvoiceChart(s.total_revenue || 0, s.invoices_owed || 0, s.total_count || 0);
+    }
+
     document.getElementById('dash-paid-count').textContent = s.paid_count || 0;
     document.getElementById('dash-pending-count').textContent = s.pending_count || 0;
     document.getElementById('dash-draft-count').textContent = s.draft_count || 0;
@@ -1839,6 +1845,12 @@ function renderEmployees(employees) {
     var tbody = document.getElementById('employees-table-body');
     if (!tbody) return;
     tbody.innerHTML = '';
+    
+    // Render the HR Chart if present
+    if (typeof renderHRChart === 'function') {
+        renderHRChart(employees);
+    }
+    
     if (employees.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No employees found.</td></tr>';
         return;
