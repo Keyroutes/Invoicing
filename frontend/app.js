@@ -1273,8 +1273,20 @@ function addLineItemRow() {
         '<td style="padding:0;"><input type="number" class="table-input item-qty" style="width:100%;text-align:right;" value="0" step="1" min="0"></td>' +
         '<td style="padding:0;"><input type="number" class="table-input item-price" style="width:100%;text-align:right;" value="0" step="0.01" min="0"></td>' +
         '<td style="padding:0;"><input type="number" class="table-input item-disc" style="width:100%;text-align:right;" placeholder="0" step="1" min="0" max="100"></td>' +
-        '<td style="padding:0;"><select class="table-input" style="width:100%;"><option>200 - Sales</option></select></td>' +
-        '<td style="padding:0;"><select class="table-input" style="width:100%;"><option>20% VAT</option><option>No Tax</option></select></td>' +
+        '<td style="padding:0;"><select class="table-input item-account" style="width:100%;">' + 
+        '<option>200 - Sales</option>' + 
+        '<option>230 - Services</option>' + 
+        '<option>260 - Consulting</option>' + 
+        '<option>400 - Other Revenue</option>' + 
+        '<option>420 - Interest Income</option>' + 
+        '<option>800 - Product Sales</option>' + 
+        '</select></td>' +
+        '<td style="padding:0;"><select class="table-input item-tax-rate" style="width:100%;">' + 
+        '<option>20% VAT</option>' + 
+        '<option>5% VAT</option>' + 
+        '<option>0% Zero Rated</option>' + 
+        '<option>No Tax</option>' + 
+        '</select></td>' +
         '<td style="padding:12px 8px;text-align:right;" class="item-tax-amount">0.00</td>' +
         '<td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td>' +
         '<td style="padding:8px;text-align:center;">' +
@@ -1351,8 +1363,10 @@ async function submitComplexInvoice(status) {
         var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
         var price = parseFloat(row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0) || 0;
         var disc = parseFloat(row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0) || 0;
+        var account = row.querySelector('.item-account') ? row.querySelector('.item-account').value : '200 - Sales';
+        var tax_rate = row.querySelector('.item-tax-rate') ? row.querySelector('.item-tax-rate').value : 'No Tax';
         if (name || desc || qty > 0 || price > 0) {
-            line_items.push({ name: name, description: desc, qty: qty, price: price, disc: disc, account: '200 - Sales', tax_rate: '20% (VAT on Income)' });
+            line_items.push({ name: name, description: desc, qty: qty, price: price, disc: disc, account: account, tax_rate: tax_rate });
         }
     });
     if (line_items.length === 0) { showToast('Add at least one line item', 'error'); return; }
