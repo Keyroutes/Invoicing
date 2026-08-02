@@ -357,7 +357,6 @@ function enforcePortalSeparation() {
     }
 }
 window.enforcePortalSeparation = enforcePortalSeparation;
-enforcePortalSeparation();
 
 // --- Utility ---
 var allInvoices = [];
@@ -3652,6 +3651,9 @@ document.addEventListener('DOMContentLoaded', function() {
     var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];    
     var urlParams = new URLSearchParams(window.location.search);
     
+    // Enforce portal separation based on the physical file
+    enforcePortalSeparation();
+
     // Set initial view based on physical file
     if (window.location.pathname.includes('hr.html')) {
         showView('employees-view');
