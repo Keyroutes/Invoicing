@@ -3721,7 +3721,24 @@ async function loadRecruitmentForms() {
         }
         var forms = await res.json();
         recFormsLookup = {};
-        forms.forEach(function(f) { recFormsLookup[f.id] = f; });
+        var totalCandidates = 0;
+        var totalPipeline = 0;
+        var totalHired = 0;
+        var openForms = 0;
+
+        forms.forEach(function(f) { 
+            recFormsLookup[f.id] = f; 
+            totalCandidates += f.submission_count || 0;
+            totalPipeline += f.pipeline_count || 0;
+            totalHired += f.hired_count || 0;
+            if (f.is_active) openForms++;
+        });
+
+        document.getElementById('rec-metric-forms').textContent = openForms;
+        document.getElementById('rec-metric-candidates').textContent = totalCandidates;
+        document.getElementById('rec-metric-pipeline').textContent = totalPipeline;
+        document.getElementById('rec-metric-hired').textContent = totalHired;
+
         var tbody = document.getElementById('rec-forms-tbody');
         if (!forms.length) { tbody.innerHTML = '<tr><td colspan="6" class="loading">No forms yet</td></tr>'; return; }
         tbody.innerHTML = forms.map(function(f) {
@@ -3984,7 +4001,7 @@ async function loadRecPipeline() {
             var color = stageColors[i % stageColors.length];
             var cards = pipeline[stage] || [];
             var stagesJson = JSON.stringify(stages).replace(/"/g, '&quot;');
-            return '<div style="min-width:260px;max-width:280px;flex-shrink:0;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;overflow:hidden;">' +
+            return '<div class="kanban-column">' +
                 '<div style="padding:12px 16px;border-bottom:2px solid ' + color + ';display:flex;align-items:center;justify-content:space-between;">' +
                     '<div style="display:flex;align-items:center;gap:8px;">' +
                         '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';"></span>' +
@@ -3992,16 +4009,21 @@ async function loadRecPipeline() {
                     '</div>' +
                     '<span style="background:rgba(255,255,255,0.1);padding:2px 8px;border-radius:10px;font-size:0.75rem;font-weight:600;">' + cards.length + '</span>' +
                 '</div>' +
-                '<div style="padding:8px;display:flex;flex-direction:column;gap:8px;min-height:100px;">' +
+                '<div style="padding:12px;display:flex;flex-direction:column;gap:12px;min-height:100px;">' +
                     cards.map(function(c) {
                         var email = c.candidate_email || '';
-                        return '<div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;cursor:pointer;" onclick="showRecSubmissionDetail(' + c.id + ')">' +
-                            '<div style="font-weight:600;font-size:0.9rem;margin-bottom:4px;">' + esc(c.candidate_name || email || 'Unknown') + '</div>' +
-                            (email ? '<div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;">' + esc(email) + '</div>' : '') +
-                            (c.file_name ? '<div style="font-size:0.72rem;color:var(--text-secondary);"><i class="bi bi-paperclip"></i> ' + esc(c.file_name) + '</div>' : '') +
+                        var name = c.candidate_name || email || 'Unknown';
+                        var initial = name.charAt(0).toUpperCase();
+                        return '<div class="kanban-card" onclick="showRecSubmissionDetail(' + c.id + ')">' +
+                            '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">' +
+                                '<div class="kanban-avatar" style="background:' + color + ';">' + initial + '</div>' +
+                                '<div style="font-weight:600;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(name) + '</div>' +
+                            '</div>' +
+                            (email ? '<div style="font-size:0.78rem;color:var(--text-secondary);">' + esc(email) + '</div>' : '') +
+                            (c.file_name ? '<div style="font-size:0.72rem;color:var(--primary-color);margin-top:4px;"><i class="bi bi-paperclip"></i> Resume Attached</div>' : '') +
                             '<div style="display:flex;gap:4px;margin-top:8px;">' +
-                                (i > 0 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i-1]).replace(/"/g, '&quot;') + ',' + (i-1) + ')" style="font-size:0.7rem;padding:2px 6px;">&#9664; Prev</button>' : '') +
-                                (i < stages.length - 1 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i+1]).replace(/"/g, '&quot;') + ',' + (i+1) + ')" style="font-size:0.7rem;padding:2px 6px;">Next &#9654;</button>' : '') +
+                                (i > 0 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i-1]).replace(/"/g, '&quot;') + ',' + (i-1) + ')" style="font-size:0.7rem;padding:2px 6px;flex:1;">&#9664; Prev</button>' : '') +
+                                (i < stages.length - 1 ? '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();moveCandidateStage(' + c.id + ',' + JSON.stringify(stages[i+1]).replace(/"/g, '&quot;') + ',' + (i+1) + ')" style="font-size:0.7rem;padding:2px 6px;flex:1;">Next &#9654;</button>' : '') +
                             '</div>' +
                         '</div>';
                     }).join('') +
@@ -4241,6 +4263,30 @@ async function loadLeaveView() {
 }
 function renderLeaveView() {
     var data = window._allLeaveViewData || [];
+    
+    // Calculate Metrics
+    var pending = 0;
+    var approved = 0;
+    var rejected = 0;
+    var awayToday = 0;
+    var todayStr = new Date().toISOString().split('T')[0];
+
+    data.forEach(function(l) {
+        if (l.status === 'pending') pending++;
+        if (l.status === 'approved') {
+            approved++;
+            if (todayStr >= l.start_date && todayStr <= l.end_date) awayToday++;
+        }
+        if (l.status === 'rejected') rejected++;
+    });
+
+    if (document.getElementById('leave-metric-pending')) {
+        document.getElementById('leave-metric-pending').textContent = pending;
+        document.getElementById('leave-metric-approved').textContent = approved;
+        document.getElementById('leave-metric-away').textContent = awayToday;
+        document.getElementById('leave-metric-rejected').textContent = rejected;
+    }
+
     var filtered = _leaveViewFilter === 'all' ? data : data.filter(function(l) { return l.status === _leaveViewFilter; });
     var tbody = document.getElementById('leave-view-table-body');
     if (!tbody) return;
@@ -4318,17 +4364,18 @@ async function loadGoalsView() {
             '<table class="data-table"><thead><tr><th>Employee</th><th>Department</th><th>Goal</th><th>Progress</th><th>Category</th><th>Priority</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
             allGoals.map(function(g) {
                 var progress = g.target_value > 0 ? Math.min(Math.round(g.current_value / g.target_value * 100), 100) : 0;
-                var pColor = g.priority === 'high' ? 'var(--danger-color)' : g.priority === 'low' ? 'var(--success-color)' : 'var(--warning-color)';
-                var sColor = g.status === 'completed' ? 'var(--success-color)' : 'var(--primary-color)';
-                return '<tr style="cursor:pointer;" onclick="viewEmployee(' + g.employee_id + ')">' +
+                var pBadge = g.priority === 'high' ? 'badge-danger' : g.priority === 'low' ? 'badge-success' : 'badge-warning';
+                var sBadge = g.status === 'completed' ? 'badge-success' : g.status === 'at_risk' ? 'badge-danger' : 'badge-primary';
+                var sColor = g.status === 'completed' ? 'var(--success-color)' : g.status === 'at_risk' ? 'var(--danger-color)' : 'var(--primary-color)';
+                return '<tr style="cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background=\'rgba(255,255,255,0.02)\'" onmouseout="this.style.background=\'transparent\'" onclick="viewEmployee(' + g.employee_id + ')">' +
                     '<td><strong>' + esc(g.employee_name) + '</strong></td>' +
-                    '<td><span style="font-size:0.8rem;">' + esc(g.department_name || '-') + '</span></td>' +
-                    '<td>' + esc(g.title) + '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(g.description || '') + '</span></td>' +
-                    '<td><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + progress + '%;background:' + sColor + ';"></div></div><span style="font-size:0.8rem;white-space:nowrap;">' + progress + '%</span></div></td>' +
-                    '<td><span style="font-size:0.8rem;">' + esc(g.category || '-') + '</span></td>' +
-                    '<td><span style="font-size:0.8rem;color:' + pColor + ';">' + esc(g.priority || '-') + '</span></td>' +
-                    '<td><span style="font-size:0.8rem;">' + (g.due_date || '-') + '</span></td>' +
-                    '<td><span class="status-pill" style="color:' + sColor + ';">' + (g.status || 'in_progress') + '</span></td>' +
+                    '<td><span style="font-size:0.8rem;color:var(--text-secondary);">' + esc(g.department_name || '-') + '</span></td>' +
+                    '<td><strong style="color:var(--text-color);">' + esc(g.title) + '</strong><br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(g.description || '') + '</span></td>' +
+                    '<td><div style="display:flex;align-items:center;gap:8px;"><div class="progress-track"><div class="progress-fill" style="width:' + progress + '%;background:' + sColor + ';"></div></div><span style="font-size:0.8rem;font-weight:600;min-width:35px;text-align:right;">' + progress + '%</span></div></td>' +
+                    '<td><span class="badge badge-info">' + esc(g.category || '-') + '</span></td>' +
+                    '<td><span class="badge ' + pBadge + '">' + esc(g.priority || '-') + '</span></td>' +
+                    '<td><span style="font-size:0.85rem;font-weight:500;">' + (g.due_date || '-') + '</span></td>' +
+                    '<td><span class="badge ' + sBadge + '">' + (g.status ? g.status.replace('_', ' ') : 'in progress') + '</span></td>' +
                 '</tr>';
             }).join('') +
             '</tbody></table></div></div>';

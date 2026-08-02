@@ -3550,11 +3550,14 @@ def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
     result = []
     for f in forms:
         sub_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id).count()
+        hired_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.stage == 'Hired').count()
+        pipeline_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.stage.notin_(['Hired', 'Rejected'])).count()
         result.append({
             "id": f.id, "title": f.title, "description": f.description,
             "fields": f.fields, "is_active": f.is_active,
             "form_token": f.form_token, "pipeline_stages": f.pipeline_stages,
             "created_at": f.created_at, "submission_count": sub_count,
+            "hired_count": hired_count, "pipeline_count": pipeline_count
         })
     return result
 

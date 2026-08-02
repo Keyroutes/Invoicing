@@ -963,6 +963,54 @@
                             <p class="subtitle">Review and manage employee leave applications</p>
                         </div>
                     </div>
+                    
+                    <!-- Leave Metrics -->
+                    <div class="grid-4 mb-24" id="leave-metrics-row">
+                        <section class="widget" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:48px;height:48px;border-radius:50%;background:rgba(245,158,11,0.1);display:flex;align-items:center;justify-content:center;color:var(--warning-color);font-size:1.5rem;">
+                                    <i class="bi bi-hourglass-split"></i>
+                                </div>
+                                <div>
+                                    <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:4px;">Pending Requests</div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--text-color);" id="leave-metric-pending">0</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:48px;height:48px;border-radius:50%;background:rgba(16,185,129,0.1);display:flex;align-items:center;justify-content:center;color:var(--success-color);font-size:1.5rem;">
+                                    <i class="bi bi-check-circle"></i>
+                                </div>
+                                <div>
+                                    <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:4px;">Approved (Total)</div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--text-color);" id="leave-metric-approved">0</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:48px;height:48px;border-radius:50%;background:rgba(99,102,241,0.1);display:flex;align-items:center;justify-content:center;color:var(--primary-color);font-size:1.5rem;">
+                                    <i class="bi bi-calendar-x"></i>
+                                </div>
+                                <div>
+                                    <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:4px;">Away Today</div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--text-color);" id="leave-metric-away">0</div>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:48px;height:48px;border-radius:50%;background:rgba(239,68,68,0.1);display:flex;align-items:center;justify-content:center;color:var(--danger-color);font-size:1.5rem;">
+                                    <i class="bi bi-x-circle"></i>
+                                </div>
+                                <div>
+                                    <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:4px;">Rejected (Total)</div>
+                                    <div style="font-size:1.5rem;font-weight:700;color:var(--text-color);" id="leave-metric-rejected">0</div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
                     <div class="invoices-tabs" id="leave-view-tabs">
                         <button class="tab active" onclick="filterLeaveView('all', this)">All</button>
                         <button class="tab" onclick="filterLeaveView('pending', this)">Pending</button>
@@ -1487,6 +1535,26 @@
                         </div>
                     </div>
 
+                    <!-- Recruitment Metrics -->
+                    <div class="grid-4 mb-24" id="rec-metrics-row">
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Open Forms</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="rec-metric-forms">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Candidates</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--primary-color);" id="rec-metric-candidates">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">In Pipeline</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="rec-metric-pipeline">0</div>
+                        </section>
+                        <section class="widget" style="padding:20px;">
+                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Hired (Total)</div>
+                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="rec-metric-hired">0</div>
+                        </section>
+                    </div>
+
                     <!-- Forms List -->
                     <div id="rec-forms-list">
                         <div class="glass-widget">
@@ -1783,6 +1851,6 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>
