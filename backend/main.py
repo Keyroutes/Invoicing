@@ -826,8 +826,8 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
     all_invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
 
     invoices_owed = sum(inv.due or 0 for inv in all_invoices if inv.status in ["Awaiting Payment", "Sent"])
-    total_revenue = sum(inv.paid or 0 for inv in all_invoices)
-    total_invoiced = sum((inv.paid or 0) + (inv.due or 0) for inv in all_invoices)
+    total_revenue = sum(inv.paid or 0 for inv in all_invoices if inv.status != "Draft")
+    total_invoiced = sum((inv.paid or 0) + (inv.due or 0) for inv in all_invoices if inv.status != "Draft")
     paid_count = sum(1 for inv in all_invoices if inv.status == "Paid")
     pending_count = sum(1 for inv in all_invoices if inv.status in ["Awaiting Payment", "Sent"])
     draft_count = sum(1 for inv in all_invoices if inv.status == "Draft")
@@ -1687,10 +1687,15 @@ def health_check():
     return {"status": "ok"}
 
 @app.get("/api/auth/me")
-def get_current_user(request: Request):
+def get_current_user(request: Request, db: Session = Depends(get_db)):
     user = request.session.get('user')
+    client_id = request.session.get('client_id')
     if user:
         return {"user": user}
+    if client_id:
+        client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
+        if client:
+            return {"user": {"email": client.email, "name": client.contact_name or client.company_name}}
     return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
 @app.get("/api/auth/logout")
