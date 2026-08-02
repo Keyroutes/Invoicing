@@ -336,32 +336,28 @@ function showView(viewId) {
 }
 window.showView = showView;
 
-function switchPortal(portalId, skipNav) {
-    if (!portalId) portalId = localStorage.getItem('active_portal') || 'invoicing';
-    localStorage.setItem('active_portal', portalId);
-    
-    var switcher = document.getElementById('portal-switcher');
-    if (switcher) switcher.value = portalId;
+function enforcePortalSeparation() {
+    var isHrPortal = window.location.pathname.includes('hr.html');
+    var targetPortal = isHrPortal ? 'hr' : 'invoicing';
 
     var navItems = document.querySelectorAll('.nav-item');
     navItems.forEach(function(item) {
         var portal = item.getAttribute('data-portal');
-        if (portal === portalId || portal === 'shared') {
+        if (portal === targetPortal || portal === 'shared') {
             item.style.display = '';
         } else if (portal) {
             item.style.display = 'none';
         }
     });
 
-    if (!skipNav) {
-        if (portalId === 'invoicing') {
-            showView('dashboard-view');
-        } else {
-            showView('employees-view');
-        }
+    // Also hide the portal switcher if it exists, since they are physically separated
+    var switcherContainer = document.getElementById('portal-switcher');
+    if (switcherContainer) {
+        switcherContainer.style.display = 'none';
     }
 }
-window.switchPortal = switchPortal;
+window.enforcePortalSeparation = enforcePortalSeparation;
+enforcePortalSeparation();
 
 // --- Utility ---
 var allInvoices = [];
@@ -3655,11 +3651,12 @@ document.addEventListener('DOMContentLoaded', function() {
     var today = new Date().toISOString().split('T')[0];
     var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];    
     var urlParams = new URLSearchParams(window.location.search);
-    var urlPortal = urlParams.get('portal');
-    if (urlPortal) {
-        switchPortal(urlPortal, true);
+    
+    // Set initial view based on physical file
+    if (window.location.pathname.includes('hr.html')) {
+        showView('employees-view');
     } else {
-        switchPortal(null, true);
+        showView('dashboard-view');
     }
     
     var issueEl = document.getElementById('inv-issue-date');
