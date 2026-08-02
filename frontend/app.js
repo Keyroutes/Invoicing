@@ -415,7 +415,8 @@ async function fetchDashboardData() {
         var response = await fetch('/api/dashboard-summary');
         if (!response.ok) {
             var container = document.getElementById('cash-flow-container');
-            if (container) container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:40px;"><a href="/api/auth/login" style="color:var(--accent-cyan);">Sign in</a> to view dashboard</div>';
+            var loginLink = window.location.pathname.includes('hr.html') ? '/hr-login.html' : '/login.html';
+            if (container) container.innerHTML = '<div style="text-align:center;color:var(--text-secondary);padding:40px;"><a href="' + loginLink + '" style="color:var(--accent-cyan);">Sign in</a> to view dashboard</div>';
             return;
         }
         renderDashboard(await response.json());

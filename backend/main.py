@@ -1587,8 +1587,10 @@ def cash_summary_report(request: Request, db: Session = Depends(get_db)):
         "net_cash": [monthly_in.get(m, 0) - monthly_out.get(m, 0) for m in all_months],
     }
 @app.get("/api/auth/login")
-async def login(request: Request, role: str = "client"):
+async def login(request: Request, role: str = "client", portal: str = None):
     request.session['oauth_role'] = role
+    if portal:
+        request.session['oauth_portal'] = portal
     redirect_uri = str(request.url_for('auth_callback'))
     if redirect_uri.startswith('http://') and 'localhost' not in redirect_uri:
         redirect_uri = redirect_uri.replace('http://', 'https://', 1)
@@ -1612,6 +1614,9 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
             request.session['access_token'] = access_token
             if refresh_token:
                 request.session['refresh_token'] = refresh_token
+
+            oauth_portal = request.session.pop('oauth_portal', 'invoicing')
+            target_dashboard = "/hr.html" if oauth_portal == "hr" else "/app.html"
 
             google_email = user.get('email', '')
 
@@ -1666,7 +1671,7 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
 
                 if existing_client:
                     if existing_client.is_onboarded:
-                        return RedirectResponse(url="/app.html")
+                        return RedirectResponse(url=target_dashboard)
                     else:
                         return RedirectResponse(url="/onboard.html")
                 else:
@@ -1675,7 +1680,7 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
         logger.error(f"Callback processing failed: {e}")
         return RedirectResponse(url="/login.html?error=callback_failed")
 
-    return RedirectResponse(url="/app.html")
+    return RedirectResponse(url=target_dashboard)
 
 @app.get("/api/health")
 def health_check():
