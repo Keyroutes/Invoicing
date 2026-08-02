@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 :root {
     --primary-color: #00f0ff;
     --primary-light: #70ffff;
@@ -22,7 +23,7 @@
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: 'Space Grotesk', -apple-system, sans-serif;
     background-color: var(--background-color);
     background-image: radial-gradient(circle at 15% 50%, rgba(0, 240, 255, 0.08), transparent 25%), radial-gradient(circle at 85% 30%, rgba(255, 0, 60, 0.05), transparent 25%);
     background-attachment: fixed;
@@ -721,3 +722,116 @@ textarea.table-input.item-desc {
     background-color: rgba(255, 255, 255, 0.04);
 }
 
+
+
+
+/* SCI-FI UI OVERRIDES */
+h1, h2, h3, h4, h5, h6, .metric-value, .kanban-card strong, .invoices-header-area h1, .dashboard-header h1 { 
+    font-family: 'Rajdhani', sans-serif; 
+    letter-spacing: 0.5px; 
+}
+
+/* Holographic Grid Background */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image: 
+        linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+    background-size: 30px 30px;
+    z-index: -1;
+    pointer-events: none;
+}
+
+/* Scanline Effect */
+body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+    background-size: 100% 4px;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.4;
+}
+
+/* Chamfered Edges & Glows */
+.widget {
+    clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3), inset 0 0 10px rgba(0, 240, 255, 0.02);
+    position: relative;
+}
+.widget::before {
+    content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 30px;
+    background: var(--primary-color);
+    box-shadow: var(--glow);
+}
+
+.kanban-card {
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    border-left: 2px solid var(--primary-color);
+}
+
+.btn-primary {
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    border-radius: 0;
+    text-transform: uppercase;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    letter-spacing: 1px;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+.btn-primary:hover {
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.6);
+    transform: translateY(-2px);
+}
+
+/* AI Core Orb */
+.ai-core {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #fff, var(--primary-color));
+    box-shadow: 0 0 20px var(--primary-color), 0 0 40px var(--primary-light), inset 0 0 20px rgba(255,255,255,0.8);
+    cursor: pointer;
+    z-index: 10000;
+    animation: pulse 2s infinite alternate;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0b0f19;
+    font-size: 24px;
+}
+@keyframes pulse {
+    0% { transform: scale(1); box-shadow: 0 0 15px var(--primary-color), 0 0 30px var(--primary-light); }
+    100% { transform: scale(1.05); box-shadow: 0 0 25px var(--primary-color), 0 0 50px var(--primary-light); }
+}
+
+.ai-chat-window {
+    position: fixed;
+    bottom: 100px;
+    right: 30px;
+    width: 320px;
+    height: 400px;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--primary-color);
+    box-shadow: var(--shadow-lg), 0 0 15px rgba(0,240,255,0.2);
+    clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px);
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    padding: 16px;
+    transform-origin: bottom right;
+    animation: bootup 0.3s ease-out forwards;
+}
+@keyframes bootup {
+    from { transform: scale(0.8); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}

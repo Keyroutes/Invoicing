@@ -5224,3 +5224,109 @@ async function loadCashSummary() {
     } catch(e) { if (body) body.innerHTML = '<div style="padding:16px;color:var(--danger-color);">Failed to load cash summary</div>'; }
 }
 window.loadCashSummary = loadCashSummary;
+
+
+// --- FUTURISTIC CHARTS ---
+let _invoiceChart = null;
+function renderInvoiceChart(revenue, outstanding, invoices) {
+    var ctx = document.getElementById('invoiceChart');
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') return;
+    
+    if (_invoiceChart) _invoiceChart.destroy();
+    
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.font.family = "'Space Grotesk', sans-serif";
+    
+    _invoiceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Current'],
+            datasets: [{
+                label: 'Revenue Trajectory',
+                data: [revenue*0.2, revenue*0.4, revenue*0.5, revenue*0.8, revenue],
+                borderColor: '#00f0ff',
+                backgroundColor: 'rgba(0, 240, 255, 0.1)',
+                borderWidth: 2,
+                pointBackgroundColor: '#0b0f19',
+                pointBorderColor: '#00f0ff',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                fill: true,
+                tension: 0.4
+            },
+            {
+                label: 'Outstanding',
+                data: [outstanding*0.9, outstanding*0.7, outstanding*0.8, outstanding*1.1, outstanding],
+                borderColor: '#ff003c',
+                backgroundColor: 'rgba(255, 0, 60, 0.1)',
+                borderWidth: 2,
+                pointBackgroundColor: '#0b0f19',
+                pointBorderColor: '#ff003c',
+                borderDash: [5, 5],
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { labels: { color: '#f8fafc', font: { family: "'Rajdhani', sans-serif", size: 14 } } },
+                tooltip: { backgroundColor: 'rgba(15,23,42,0.9)', titleFont: { family: "'Rajdhani'" }, bodyFont: { family: "'Space Grotesk'" }, borderColor: '#00f0ff', borderWidth: 1 }
+            },
+            scales: {
+                y: { grid: { color: 'rgba(255,255,255,0.05)' }, border: { dash: [4, 4] } },
+                x: { grid: { color: 'rgba(255,255,255,0.05)' } }
+            }
+        }
+    });
+}
+
+let _hrChart = null;
+function renderHRChart(employees) {
+    var ctx = document.getElementById('hrChart');
+    if (!ctx) return;
+    if (typeof Chart === 'undefined') return;
+    if (_hrChart) _hrChart.destroy();
+    
+    // Simulate department distribution
+    var depts = {};
+    employees.forEach(e => {
+        var d = e.department_name || 'Unassigned';
+        depts[d] = (depts[d] || 0) + 1;
+    });
+    
+    _hrChart = new Chart(ctx, {
+        type: 'radar',
+        data: {
+            labels: Object.keys(depts),
+            datasets: [{
+                label: 'Workforce Distribution',
+                data: Object.values(depts),
+                backgroundColor: 'rgba(57, 255, 20, 0.2)',
+                borderColor: '#39ff14',
+                pointBackgroundColor: '#39ff14',
+                pointBorderColor: '#fff',
+                pointHoverBackgroundColor: '#fff',
+                pointHoverBorderColor: '#39ff14',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                r: {
+                    angleLines: { color: 'rgba(255,255,255,0.1)' },
+                    grid: { color: 'rgba(255,255,255,0.1)' },
+                    pointLabels: { color: '#00f0ff', font: { family: "'Rajdhani', sans-serif", size: 13 } },
+                    ticks: { display: false }
+                }
+            },
+            plugins: {
+                legend: { labels: { color: '#f8fafc', font: { family: "'Rajdhani', sans-serif" } } }
+            }
+        }
+    });
+}

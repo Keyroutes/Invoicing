@@ -81,6 +81,11 @@
                         <h1>Welcome back!</h1>
                         <p class="subtitle">Here's what's happening with your invoicing today.</p>
                     </header>
+
+                    <!-- Futuristic Chart -->
+                    <div class="widget" style="padding:20px; margin-bottom:24px;">
+                        <canvas id="invoiceChart" height="80"></canvas>
+                    </div>
                     <div class="grid-4 mb-24">
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
@@ -1782,7 +1787,59 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
+
+    <!-- AI Core Orb -->
+    <div class="ai-core" onclick="toggleAIChat()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
+            <path d="M12 22a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2z"></path>
+            <path d="M22 12a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2z"></path>
+            <path d="M2 12a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"></path>
+            <circle cx="12" cy="12" r="4"></circle>
+        </svg>
+    </div>
+    
+    <!-- AI Chat Window -->
+    <div class="ai-chat-window" id="ai-chat-window">
+        <div style="padding-bottom:12px;border-bottom:1px solid var(--primary-color);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+            <strong style="color:var(--primary-light);font-family:'Rajdhani',sans-serif;font-size:1.1rem;letter-spacing:1px;">CORE ASSISTANT</strong>
+            <button onclick="toggleAIChat()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;">&times;</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-size:0.85rem;" id="ai-chat-messages">
+            <div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);">
+                Systems nominal. How can I assist you today?
+            </div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;">
+            <input type="text" placeholder="Query system..." class="table-input" style="flex:1;background:rgba(0,0,0,0.5);border:1px solid rgba(0,240,255,0.3);color:white;" id="ai-chat-input">
+            <button class="btn btn-primary btn-sm" onclick="sendAIChat()" style="min-width:0;padding:0 12px;"><i class="bi bi-send"></i></button>
+        </div>
+    </div>
+    <script>
+        function toggleAIChat() {
+            var w = document.getElementById('ai-chat-window');
+            w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
+        }
+        function sendAIChat() {
+            var inp = document.getElementById('ai-chat-input');
+            if(!inp.value.trim()) return;
+            var msgs = document.getElementById('ai-chat-messages');
+            msgs.innerHTML += '<div style="align-self:flex-end;background:rgba(255,255,255,0.1);padding:8px 12px;border-radius:4px;border-right:2px solid var(--text-secondary);">' + inp.value + '</div>';
+            inp.value = '';
+            setTimeout(() => {
+                msgs.innerHTML += '<div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);color:var(--primary-color);font-family:'Rajdhani',sans-serif;">PROCESSING...</div>';
+                msgs.scrollTop = msgs.scrollHeight;
+                setTimeout(() => {
+                    msgs.lastChild.remove();
+                    msgs.innerHTML += '<div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);">Data query logged. This feature is currently in simulation mode.</div>';
+                    msgs.scrollTop = msgs.scrollHeight;
+                }, 1000);
+            }, 500);
+        }
+    </script>
+
 </body>
 </html>
