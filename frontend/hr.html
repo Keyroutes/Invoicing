@@ -38,12 +38,12 @@
                     </select>
                 </div>
                 <nav class="top-nav-menu" id="main-nav">
-                    <a href="#" class="nav-item active" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')" data-portal="invoicing">Dashboard</a>
-                    <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')" data-portal="invoicing">Invoices</a>
-                    <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')" data-portal="invoicing">Bills</a>
-                    <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')" data-portal="invoicing">Reports</a>
-                    <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')" data-portal="invoicing">Contacts</a>
-                    <a href="#" class="nav-item" id="nav-people" onclick="event.preventDefault();showView('employees-view')" data-portal="hr">Employees</a>
+                    <a href="#" class="nav-item" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')" data-portal="invoicing" style="display: none;">Dashboard</a>
+                    <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')" data-portal="invoicing" style="display: none;">Invoices</a>
+                    <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')" data-portal="invoicing" style="display: none;">Bills</a>
+                    <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')" data-portal="invoicing" style="display: none;">Reports</a>
+                    <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')" data-portal="invoicing" style="display: none;">Contacts</a>
+                    <a href="#" class="nav-item active" id="nav-people" onclick="event.preventDefault();showView('employees-view')" data-portal="hr">Employees</a>
                     <a href="#" class="nav-item" id="nav-leave" onclick="event.preventDefault();showView('leave-view')" data-portal="hr">Leave</a>
                     <a href="#" class="nav-item" id="nav-goals" onclick="event.preventDefault();showView('goals-view')" data-portal="hr">Goals</a>
                     <a href="#" class="nav-item" id="nav-onboarding" onclick="event.preventDefault();showView('onboarding-hub-view')" data-portal="hr">Onboarding</a>
@@ -76,7 +76,7 @@
             <div class="views-container">
 
                 <!-- ========== DASHBOARD ========== -->
-                <div id="dashboard-view" class="view-section active dashboard">
+                <div id="dashboard-view" class="view-section dashboard" style="display: none;">
                     <header class="dashboard-header">
                         <h1>Welcome back!</h1>
                         <p class="subtitle">Here's what's happening with your invoicing today.</p>
@@ -659,7 +659,7 @@
                 </div>
 
                 <!-- ========== EMPLOYEES / PEOPLE ========== -->
-                <div id="employees-view" class="view-section dashboard" style="display:none;">
+                <div id="employees-view" class="view-section active">
                     <div class="invoices-header-area">
                         <div>
                             <h1>Employees</h1>
@@ -1783,6 +1783,6 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=20260802"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>
