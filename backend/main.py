@@ -3550,8 +3550,8 @@ def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
     result = []
     for f in forms:
         sub_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id).count()
-        hired_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.stage == 'Hired').count()
-        pipeline_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.stage.notin_(['Hired', 'Rejected'])).count()
+        hired_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.current_stage == 'Hired').count()
+        pipeline_count = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == f.id, models.DBFormSubmission.current_stage.notin_(['Hired', 'Rejected'])).count()
         result.append({
             "id": f.id, "title": f.title, "description": f.description,
             "fields": f.fields, "is_active": f.is_active,
@@ -3645,7 +3645,12 @@ def get_form_pipeline(form_id: int, request: Request, db: Session = Depends(get_
     ).first()
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
-    stages = form.pipeline_stages or '["Applied","Screening","Interview","Offer","Hired"]'
+    import json
+    stages_str = form.pipeline_stages or '["Applied","Screening","Interview","Offer","Hired"]'
+    try:
+        stages = json.loads(stages_str)
+    except Exception:
+        stages = ["Applied","Screening","Interview","Offer","Hired"]
     subs = db.query(models.DBFormSubmission).filter(
         models.DBFormSubmission.form_id == form_id
     ).order_by(models.DBFormSubmission.stage_order.asc(), models.DBFormSubmission.created_at.desc()).all()
