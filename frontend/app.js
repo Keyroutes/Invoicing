@@ -1161,12 +1161,73 @@ function generateInvoicePDF(isDummy) {
     doc.setTextColor(0,0,0); doc.setDrawColor(0,0,0);
 
     // Column definitions (must be before drawTableHeader is called)
+    // We add col widths for border drawing
     var col = {
         desc:  ml,
         qty:   w - 230,
-        price: w - 150,
-        amt:   mr
+        price: w - 160,
+        amt:   mr - 60
     };
+    var cw = {
+        desc: col.qty - col.desc,
+        qty: col.price - col.qty,
+        price: col.amt - col.price,
+        amt: mr - col.amt
+    };
+
+    // Helper to draw vertical borders for the current row segment
+    function drawRowBorders(startY, endY) {
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.5);
+        // Outer borders
+        doc.line(ml, startY, ml, endY);
+        doc.line(mr, startY, mr, endY);
+        // Inner borders
+        doc.line(col.qty, startY, col.qty, endY);
+        doc.line(col.price, startY, col.price, endY);
+        doc.line(col.amt, startY, col.amt, endY);
+    }
+
+    var _inTable = false;
+    var _tableTopY = y;
+    
+    // We overwrite the table header drawer to include borders
+    function drawTableHeader() {
+        doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+        doc.setDrawColor(0,0,0);
+        lh(ml, mr, y, 0.8); 
+        var hTop = y;
+        y += 8;
+        doc.text('Item / Description',       col.desc + 4,  y + 10);
+        doc.text('Quantity',               col.qty + cw.qty - 4,   y + 10, { align:'right' });
+        doc.text('Unit Price',             col.price + cw.price - 4, y + 10, { align:'right' });
+        doc.text('Amount ' + currLabel,    col.amt + cw.amt - 4,   y + 10, { align:'right' });
+        y += 14;
+        doc.setDrawColor(0,0,0);
+        lh(ml, mr, y, 0.8);
+        drawRowBorders(hTop, y);
+        _tableTopY = y;
+    }
+
+    // Overwrite checkPageBreak to handle closing borders before break and opening after
+    function checkPageBreak(need) {
+        if (y + need > pageBottom) {
+            if (_inTable) {
+                // close borders at bottom of page
+                drawRowBorders(_tableTopY, y);
+                doc.setDrawColor(0,0,0);
+                lh(ml, mr, y, 0.8);
+            }
+            drawFooter();
+            doc.addPage();
+            doc.setFillColor(255,255,255); doc.rect(0,0,w,h,'F');
+            pageNum++;
+            y = 45;
+            if (_inTable) {
+                drawTableHeader();
+            }
+        }
+    }
 
     // Draw the initial table header
     drawTableHeader();
@@ -1175,7 +1236,7 @@ function generateInvoicePDF(isDummy) {
     var rows = [];
     if (isDummy) {
         rows = [{
-            name:'Client Service', desc:'', qty:'8.00', price:'21.00', disc:'0', tax:'0', amount:'168.00'
+            name:'Client Service', desc:'Monthly retainer for premium client services including support and maintenance.', qty:'8.00', price:'21.00', disc:'0', tax:'0', amount:'168.00'
         }];
     } else {
         document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
@@ -1196,29 +1257,74 @@ function generateInvoicePDF(isDummy) {
 
     _inTable = true;
     rows.forEach(function(row) {
-        var nameLines = doc.splitTextToSize(breakLong(row.name||'-', 50), col.qty - col.desc - 10);
-        doc.setFontSize(8.5); doc.setFont('helvetica','normal');
-        var descLines = row.desc ? doc.splitTextToSize(breakLong(row.desc, 60), col.qty - col.desc - 10) : [];
-        var rowH = Math.max(16, (nameLines.length + descLines.length) * 11 + 6);
-        checkPageBreak(rowH + 10);
+        var nameLines = doc.splitTextToSize(breakLong(row.name||'-', 50), cw.desc - 8);
+        var descLines = row.desc ? doc.splitTextToSize(breakLong(row.desc, 60), cw.desc - 8) : [];
+        
+        // We will process line by line to handle breaks mid-row
+        var allLines = [];
+        nameLines.forEach(function(l) { allLines.push({ text: l, isName: true }); });
+        descLines.forEach(function(l) { allLines.push({ text: l, isName: false }); });
+        
+        if (allLines.length === 0) allLines.push({text: '-', isName: true});
 
-        doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
-        doc.text(nameLines, col.desc, y + 11);
-        if (descLines.length > 0) {
-            doc.setTextColor(80,80,80);
-            doc.text(descLines, col.desc, y + 11 + nameLines.length * 11);
-            doc.setTextColor(0,0,0);
+        var rowStartY = y;
+        var padding = 6;
+        y += padding;
+
+        var i = 0;
+        var firstLineOfRow = true;
+        
+        while (i < allLines.length) {
+            checkPageBreak(12); // Need space for at least one line
+            
+            // Re-record rowStartY if we just page-broke
+            if (y === _tableTopY) {
+                rowStartY = y;
+                y += padding;
+            }
+
+            var lObj = allLines[i];
+            doc.setFont('helvetica', lObj.isName ? 'bold' : 'normal');
+            doc.setTextColor(lObj.isName ? 0 : 80, lObj.isName ? 0 : 80, lObj.isName ? 0 : 80);
+            doc.setFontSize(8.5);
+            
+            doc.text(lObj.text, col.desc + 4, y + 8);
+            
+            // Print qty/price/amount only on the first physical line of this item on the current page
+            if (firstLineOfRow) {
+                doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+                doc.text(row.qty,   col.qty + cw.qty - 4,   y + 8, { align:'right' });
+                doc.text(row.price, col.price + cw.price - 4, y + 8, { align:'right' });
+                doc.text(row.amount, col.amt + cw.amt - 4,  y + 8, { align:'right' });
+                firstLineOfRow = false;
+            }
+            
+            y += 11;
+            i++;
+            
+            // If we are at the end of the page and still have lines, close the borders
+            if (y + 12 > pageBottom && i < allLines.length) {
+                y += padding;
+                drawRowBorders(rowStartY, y);
+                doc.setDrawColor(0,0,0); lh(ml, mr, y, 0.8);
+                // The next loop iteration will trigger checkPageBreak
+            }
         }
-        doc.text(row.qty,   col.qty,   y + 11, { align:'right' });
-        doc.text(row.price, col.price, y + 11, { align:'right' });
-        doc.text(row.amount, col.amt,  y + 11, { align:'right' });
-        y += rowH;
+        
+        y += padding;
+        drawRowBorders(rowStartY, y);
+        doc.setDrawColor(200, 200, 200);
+        lh(ml, mr, y, 0.5); // inner horizontal border
     });
 
     _inTable = false;
+    // Final bottom border of table
+    doc.setDrawColor(0,0,0);
+    lh(ml, mr, y, 0.8);
+    
     if (rows.length === 0) {
         doc.setFontSize(8.5); doc.setTextColor(120,120,120);
-        doc.text('No items.', col.desc, y + 11); y += 18;
+        doc.text('No items.', col.desc + 4, y + 11); y += 18;
     }
 
     // Bank / account details note (below rows, before totals line)
