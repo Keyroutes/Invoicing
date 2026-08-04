@@ -967,7 +967,9 @@ window.previewInvoiceTemplate = previewInvoiceTemplate;
 
 // --- DYNAMIC GENERATE INVOICE PDF ---
 function generateInvoicePDF(isDummy) {
-    var doc = new jsPDF('p', 'pt', 'a4');
+    var _jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    if (!_jsPDF) { console.error('jsPDF not loaded'); throw new Error('jsPDF is not loaded'); }
+    var doc = new _jsPDF('p', 'pt', 'a4');
     var w = doc.internal.pageSize.width;
     var h = doc.internal.pageSize.height;
     var ml = 40, mr = w - 40;
