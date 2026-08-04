@@ -1148,13 +1148,15 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
                 
                 doc.setFontSize(10); doc.setFont('helvetica', 'bold');
                 var n = doc.splitTextToSize(row.name || '-', col1W);
-                if (n.length > 2) { n = n.slice(0, 2); n[1] += '...'; } // Max 2 lines for name
+                n = n.map(function(l) { return l.length > 35 ? l.substring(0, 32) + '...' : l; });
+                  if (n.length > 2) { n = n.slice(0, 2); n[1] += '...'; } // Max 2 lines for name
                 
                 doc.setFontSize(8); doc.setFont('helvetica', 'normal');
                 var d = [];
                 if (row.desc) {
                     d = doc.splitTextToSize(row.desc, col1W);
-                    if (d.length > 2) { d = d.slice(0, 2); d[1] += '...'; } // Max 2 lines for desc
+                    d = d.map(function(l) { return l.length > 40 ? l.substring(0, 37) + '...' : l; });
+                      if (d.length > 2) { d = d.slice(0, 2); d[1] += '...'; } // Max 2 lines for desc
                 }
                 
                 var lineDetailsText = row.qty + ' x ' + currencySym + row.price;
@@ -1162,6 +1164,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
                 if (parseFloat(row.tax) > 0) lineDetailsText += ' | +' + row.tax + '% TAX';
                 doc.setFontSize(9); doc.setFont('courier', 'normal');
                 var detailsLines = doc.splitTextToSize(lineDetailsText, col2W);
+                detailsLines = detailsLines.map(function(l) { return l.length > 40 ? l.substring(0, 37) + '...' : l; });
                 
                 var totalHeight = Math.max(24, (n.length + d.length) * 12 + 10, detailsLines.length * 12 + 10);
                 
@@ -1221,6 +1224,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
                 doc.text('> TRANSFER_COORDINATES', ml, y); y += 16;
                 doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(220, 230, 240);
                 var bankLines = doc.splitTextToSize(bankContent, 300);
+                  bankLines = bankLines.map(function(l) { return l.length > 70 ? l.substring(0, 67) + '...' : l; });
                 doc.text(bankLines, ml, y); y += bankLines.length * 14 + 10;
             }
         }
@@ -1230,6 +1234,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             doc.text('TERMS & PROTOCOLS', ml, y); y += 14;
             doc.setFontSize(8); doc.setFont('courier', 'normal'); doc.setTextColor(140, 150, 170);
             var termLines = doc.splitTextToSize(savedTerms, mr - ml);
+              termLines = termLines.map(function(l) { return l.length > 100 ? l.substring(0, 97) + '...' : l; });
             doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
         }
         else if (block.id === 'signature') {
