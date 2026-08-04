@@ -788,10 +788,20 @@ window._invoiceLayout = JSON.parse(JSON.stringify(defaultInvoiceLayout));
 function initTemplateBuilder(layoutData) {
     if (layoutData) {
         try {
-            window._invoiceLayout = JSON.parse(layoutData);
+            var parsed = JSON.parse(layoutData);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                window._invoiceLayout = parsed;
+            } else {
+                window._invoiceLayout = JSON.parse(JSON.stringify(defaultInvoiceLayout));
+            }
         } catch(e) {
             window._invoiceLayout = JSON.parse(JSON.stringify(defaultInvoiceLayout));
         }
+    } else {
+        window._invoiceLayout = JSON.parse(JSON.stringify(defaultInvoiceLayout));
+    }
+    if (!Array.isArray(window._invoiceLayout)) {
+        window._invoiceLayout = JSON.parse(JSON.stringify(defaultInvoiceLayout));
     }
     renderTemplateBuilder();
 }
@@ -808,7 +818,7 @@ function renderTemplateBuilder() {
         el.style.alignItems = 'center';
         el.style.justifyContent = 'space-between';
         el.style.padding = '12px 16px';
-        el.style.background = '#ffffff';
+        el.style.background = 'rgba(255,255,255,0.05)';
         el.style.border = '1px solid var(--border-color)';
         el.style.borderRadius = 'var(--radius-md)';
         el.style.cursor = 'grab';
@@ -1640,7 +1650,7 @@ async function loadSettings() {
         var res = await fetch('/api/settings');
         if (!res.ok) return;
         var data = await res.json();
-        if (data.invoice_layout !== undefined) { initTemplateBuilder(data.invoice_layout); }
+        initTemplateBuilder(data.invoice_layout || null);
         if (data.company_name !== undefined) { var el = document.getElementById('settings-company-name'); if (el) el.value = data.company_name; }
         if (data.email !== undefined) { var el = document.getElementById('settings-company-email'); if (el) el.value = data.email; }
         if (data.phone_number !== undefined) { var el = document.getElementById('settings-company-phone'); if (el) el.value = data.phone_number; }
