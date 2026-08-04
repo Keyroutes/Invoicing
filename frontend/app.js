@@ -1139,57 +1139,57 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             }
             
             rows.forEach(function(row, idx) {
-                checkPageBreak(40);
-                
-                // Enforce strict column widths to prevent overlapping
-                var col1W = 200; // Name & Desc
-                var col2W = 180; // Qty & Price
-                var col3W = 100; // Amount
-                
-                doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                var n = doc.splitTextToSize(row.name || '-', col1W);
-                n = n.map(function(l) { return l.length > 35 ? l.substring(0, 32) + '...' : l; });
-                  if (n.length > 2) { n = n.slice(0, 2); n[1] += '...'; } // Max 2 lines for name
-                
-                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-                var d = [];
-                if (row.desc) {
-                    d = doc.splitTextToSize(row.desc, col1W);
-                    d = d.map(function(l) { return l.length > 40 ? l.substring(0, 37) + '...' : l; });
-                      if (d.length > 2) { d = d.slice(0, 2); d[1] += '...'; } // Max 2 lines for desc
-                }
-                
-                var lineDetailsText = row.qty + ' x ' + currencySym + row.price;
-                if (parseFloat(row.disc) > 0) lineDetailsText += ' | -' + row.disc + '%';
-                if (parseFloat(row.tax) > 0) lineDetailsText += ' | +' + row.tax + '% TAX';
-                doc.setFontSize(9); doc.setFont('courier', 'normal');
-                var detailsLines = doc.splitTextToSize(lineDetailsText, col2W);
-                detailsLines = detailsLines.map(function(l) { return l.length > 40 ? l.substring(0, 37) + '...' : l; });
-                
-                var totalHeight = Math.max(24, (n.length + d.length) * 12 + 10, detailsLines.length * 12 + 10);
-                
-                if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, totalHeight, 'F'); }
-                
-                // Print Col 1 (Name & Desc)
-                doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-                doc.text(n, ml + 8, y + 16);
-                if (d.length > 0) {
-                    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 180);
-                    doc.text(d, ml + 8, y + 16 + (n.length * 12));
-                }
-                
-                // Print Col 2 (Details)
-                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
-                doc.text(detailsLines, ml + col1W + 16, y + 16);
+                  // 1. Calculate boundaries and line arrays FIRST
+                  var col1W = 200; // Name & Desc
+                  var col2W = 180; // Qty & Price
+                  
+                  // Helper function to force-break unspaced words
+                  function breakLongWords(txt, maxLen) {
+                      if (!txt) return '';
+                      return txt.split(' ').map(function(w) { return w.length > maxLen ? w.match(new RegExp('.{1,' + maxLen + '}', 'g')).join(' ') : w; }).join(' ');
+                  }
+                  
+                  doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                  var n = doc.splitTextToSize(breakLongWords(row.name || '-', 40), col1W);
+                  
+                  doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+                  var d = [];
+                  if (row.desc) {
+                      d = doc.splitTextToSize(breakLongWords(row.desc, 50), col1W);
+                  }
+                  
+                  var lineDetailsText = row.qty + ' x ' + currencySym + row.price;
+                  if (parseFloat(row.disc) > 0) lineDetailsText += ' | -' + row.disc + '%';
+                  if (parseFloat(row.tax) > 0) lineDetailsText += ' | +' + row.tax + '% TAX';
+                  doc.setFontSize(9); doc.setFont('courier', 'normal');
+                  var detailsLines = doc.splitTextToSize(breakLongWords(lineDetailsText, 45), col2W);
+                  
+                  var totalHeight = Math.max(24, (n.length + d.length) * 12 + 10, detailsLines.length * 12 + 10);
+                  
+                  // 2. NOW check page break using the precise required height!
+                  checkPageBreak(totalHeight);
+                  
+                  // 3. Draw the row
+                  if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, totalHeight, 'F'); }
+                  
+                  // Print Col 1 (Name & Desc)
+                  doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
+                  doc.text(n, ml + 8, y + 16);
+                  if (d.length > 0) {
+                      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 180);
+                      doc.text(d, ml + 8, y + 16 + (n.length * 12));
+                  }
+                  
+                  // Print Col 2 (Details)
+                  doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
+                  doc.text(detailsLines, ml + col1W + 16, y + 16);
 
-                // Print Col 3 (Amount)
-                doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-                var amountStr = currencySym + row.amount;
-                if (amountStr.length > 12) amountStr = amountStr.substring(0, 10) + '..'; // strict clip
-                doc.text(amountStr, mr - 8, y + 16, { align: 'right' });
-                
-                y += totalHeight;
-            });
+                  // Print Col 3 (Amount)
+                  doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+                  doc.text(currencySym + row.amount, mr - 8, y + 16, { align: 'right' });
+                  
+                  y += totalHeight;
+              });
             if (rows.length === 0) {
                 doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F');
                 doc.setFontSize(10); doc.setTextColor(100, 110, 130);
@@ -1224,7 +1224,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
                 doc.text('> TRANSFER_COORDINATES', ml, y); y += 16;
                 doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(220, 230, 240);
                 var bankLines = doc.splitTextToSize(bankContent, 300);
-                  bankLines = bankLines.map(function(l) { return l.length > 70 ? l.substring(0, 67) + '...' : l; });
+                  
                 doc.text(bankLines, ml, y); y += bankLines.length * 14 + 10;
             }
         }
@@ -1234,7 +1234,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             doc.text('TERMS & PROTOCOLS', ml, y); y += 14;
             doc.setFontSize(8); doc.setFont('courier', 'normal'); doc.setTextColor(140, 150, 170);
             var termLines = doc.splitTextToSize(savedTerms, mr - ml);
-              termLines = termLines.map(function(l) { return l.length > 100 ? l.substring(0, 97) + '...' : l; });
+              
             doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
         }
         else if (block.id === 'signature') {
