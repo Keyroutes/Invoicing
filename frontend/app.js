@@ -1107,6 +1107,7 @@ function generateInvoicePDF(isDummy = false) {
                 if (idx % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(ml, y, mr - ml, 22, 'F'); }
                 doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
                 var n = doc.splitTextToSize(row.name || '-', 150);
+                if (n.length > 4) { n = n.slice(0, 4); n[3] = n[3].substring(0, n[3].length - 3) + '...'; }
                 doc.text(n, ml + 3, y + 14);
                 doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
                 doc.text(row.qty + ' x ' + row.price, ml + 160, y + 14);
@@ -1123,7 +1124,7 @@ function generateInvoicePDF(isDummy = false) {
         }
         else if (block.id === 'totals') {
             checkPageBreak(80);
-            var totLabelX = mr - 220; var totValX = mr - 8;
+            var totLabelX = mr - 300; var totValX = mr - 8;
             doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
             doc.text('Subtotal', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(subtotal, totValX, y, { align: 'right' }); y += 16;
             doc.setTextColor(100, 116, 139); doc.text('VAT', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(vat, totValX, y, { align: 'right' }); y += 6;
