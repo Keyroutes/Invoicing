@@ -433,6 +433,9 @@ function renderDashboard(data) {
     document.getElementById('dash-total-revenue').textContent = formatCurrency(s.total_revenue);
     document.getElementById('dash-invoices-owed').textContent = formatCurrency(s.invoices_owed);
     document.getElementById('dash-total-count').textContent = s.total_count || 0;
+    if (typeof renderInvoiceChart === 'function') {
+        renderInvoiceChart(s.total_revenue || 0, s.invoices_owed || 0, s.total_count || 0);
+    }
     
     
 

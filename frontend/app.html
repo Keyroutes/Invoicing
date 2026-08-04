@@ -32,10 +32,7 @@
                 </button>
                 <div class="logo" style="display:flex;align-items:center;gap:16px;">
                     <h2><span class="text-primary">aniprotech</span></h2>
-                    <select id="portal-switcher" onchange="switchPortal(this.value)" style="background:var(--bg-card);color:var(--text-primary);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:6px 12px;font-size:0.9rem;outline:none;cursor:pointer;font-weight:600;">
-                        <option value="invoicing">Invoicing Portal</option>
-                        <option value="hr">HR Portal</option>
-                    </select>
+                    
                 </div>
                 <nav class="top-nav-menu" id="main-nav">
                     <a href="#" class="nav-item active" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')" data-portal="invoicing">Dashboard</a>
@@ -83,6 +80,11 @@
                     </header>
 
                     
+                    
+                    <!-- Futuristic Chart -->
+                    <div class="widget" style="padding:20px; margin-bottom:24px;">
+                        <div style="position: relative; height: 250px; width: 100%;"><canvas id="invoiceChart"></canvas></div>
+                    </div>
                     <div class="grid-4 mb-24">
                         <section class="widget" style="padding:20px;">
                             <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
@@ -1866,7 +1868,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=10"></script>
+    <script src="app.js?v=11"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()">
