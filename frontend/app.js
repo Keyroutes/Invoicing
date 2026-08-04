@@ -998,6 +998,20 @@ function generateInvoicePDF(isDummy) {
         }).join(' ');
     }
 
+    // Track whether we are inside the line-items table
+    var _inTable = false;
+
+    function drawTableHeader() {
+        doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+        lh(ml, mr, y, 0.8); y += 8;
+        doc.text('Description',            col.desc,  y + 10);
+        doc.text('Quantity',               col.qty,   y + 10, { align:'right' });
+        doc.text('Unit Price',             col.price, y + 10, { align:'right' });
+        doc.text('Amount ' + currLabel,    col.amt,   y + 10, { align:'right' });
+        y += 14;
+        lh(ml, mr, y, 0.8); y += 6;
+    }
+
     function checkPageBreak(need) {
         if (y + need > pageBottom) {
             drawFooter();
@@ -1005,6 +1019,10 @@ function generateInvoicePDF(isDummy) {
             doc.setFillColor(255,255,255); doc.rect(0,0,w,h,'F');
             pageNum++;
             y = 45;
+            // If we are mid-table, reprint the column headers on the new page
+            if (_inTable) {
+                drawTableHeader();
+            }
         }
     }
     function drawFooter() {
@@ -1134,22 +1152,17 @@ function generateInvoicePDF(isDummy) {
     //  LINE ITEMS TABLE
     // ════════════════════════════════════════════════════════
     doc.setTextColor(0,0,0); doc.setDrawColor(0,0,0);
-    lh(ml, mr, y, 0.8); y += 8;
 
-    // Table header
+    // Column definitions (must be before drawTableHeader is called)
     var col = {
         desc:  ml,
         qty:   w - 230,
         price: w - 150,
         amt:   mr
     };
-    doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
-    doc.text('Description',            col.desc,  y + 10);
-    doc.text('Quantity',               col.qty,   y + 10, { align:'right' });
-    doc.text('Unit Price',             col.price, y + 10, { align:'right' });
-    doc.text('Amount ' + currLabel,    col.amt,   y + 10, { align:'right' });
-    y += 14;
-    lh(ml, mr, y, 0.8); y += 6;
+
+    // Draw the initial table header
+    drawTableHeader();
 
     // Rows
     var rows = [];
@@ -1174,6 +1187,7 @@ function generateInvoicePDF(isDummy) {
         });
     }
 
+    _inTable = true;
     rows.forEach(function(row) {
         var nameLines = doc.splitTextToSize(breakLong(row.name||'-', 50), col.qty - col.desc - 10);
         doc.setFontSize(8.5); doc.setFont('helvetica','normal');
@@ -1194,6 +1208,7 @@ function generateInvoicePDF(isDummy) {
         y += rowH;
     });
 
+    _inTable = false;
     if (rows.length === 0) {
         doc.setFontSize(8.5); doc.setTextColor(120,120,120);
         doc.text('No items.', col.desc, y + 11); y += 18;
