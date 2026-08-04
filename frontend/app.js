@@ -1308,7 +1308,7 @@ function addLineItemRow() {
         '<option>0% Zero Rated</option>' + 
         '<option>No Tax</option>' + 
         '</select></td>' +
-        '<td style="padding:12px 8px;text-align:right;" class="item-tax-amount">0.00</td>' +
+        '<td style="display:none;" class="item-tax-amount">0.00</td>' +
         '<td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td>' +
         '<td style="padding:8px;text-align:center;">' +
         '<button type="button" class="btn-icon delete-row" style="color:var(--danger-color);cursor:pointer;background:none;border:none;">' +
