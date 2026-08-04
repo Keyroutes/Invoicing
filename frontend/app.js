@@ -743,6 +743,13 @@ async function viewInvoice(number) {
                 tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
             });
         }
+        var bankView = document.getElementById('view-inv-bank-details');
+        if (inv.bank_details) {
+            document.getElementById('view-inv-bank-content').textContent = inv.bank_details;
+            if (bankView) bankView.style.display = 'block';
+        } else {
+            if (bankView) bankView.style.display = 'none';
+        }
         document.getElementById('view-summary-subtotal').textContent = subtotal.toFixed(2);
         document.getElementById('view-summary-vat').textContent = vat.toFixed(2);
         document.getElementById('view-summary-total').textContent = (subtotal + vat).toFixed(2) + ' ' + (_viewCurrency || _appCurrency);
@@ -775,6 +782,7 @@ function generateInvoicePDF() {
     var phone = document.getElementById('view-inv-phone-display').textContent || '';
     var issueDate = document.getElementById('view-inv-issue-date').textContent || '';
     var dueDate = document.getElementById('view-inv-due-date').textContent || '';
+    var bankContent = document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '';
     var subtotal = document.getElementById('view-summary-subtotal').textContent || '0.00';
     var vat = document.getElementById('view-summary-vat').textContent || '0.00';
     var total = document.getElementById('view-summary-total').textContent || '0.00';
@@ -1074,6 +1082,20 @@ function generateInvoicePDF() {
     doc.text(payLink, ml, y);
     doc.link(ml, y - 9, doc.getTextWidth(payLink), 12, { url: window.location.origin + '/login.html' });
     y += 24;
+    
+    if (bankContent) {
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(30, 41, 59);
+        doc.text('Payment Details:', ml, y);
+        y += 12;
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 116, 139);
+        var bankLines = doc.splitTextToSize(bankContent, 300);
+        doc.text(bankLines, ml, y);
+        y += bankLines.length * 12 + 10;
+    }
 
     // ==========================================
     // PAYMENT ADVICE SLIP
@@ -1387,7 +1409,8 @@ async function submitComplexInvoice(status) {
         reference: document.getElementById('inv-ref').value,
         line_items: line_items,
         tax_type: (document.getElementById('tax-type') || {}).value || 'exclusive',
-        currency: document.getElementById('inv-currency') ? document.getElementById('inv-currency').value : (_appCurrency || 'GBP')
+        currency: document.getElementById('inv-currency') ? document.getElementById('inv-currency').value : (_appCurrency || 'GBP'),
+        bank_details: document.getElementById('inv-bank-account') ? document.getElementById('inv-bank-account').value : ''
     };
 
     try {
@@ -1568,7 +1591,15 @@ async function saveCompanyDetails() {
         company_address: document.getElementById('settings-company-address') ? document.getElementById('settings-company-address').value : '',
         company_abn: document.getElementById('settings-company-abn') ? document.getElementById('settings-company-abn').value : '',
         company_website: document.getElementById('settings-company-website') ? document.getElementById('settings-company-website').value : '',
-        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'GBP'
+        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'GBP',
+        bank_details: JSON.stringify(Array.from(document.querySelectorAll('.bank-detail-slot')).map(function(slot) {
+            return {
+                bank_name: slot.querySelector('.bank-name').value,
+                account_name: slot.querySelector('.account-name').value,
+                account_number: slot.querySelector('.account-number').value,
+                sort_code: slot.querySelector('.sort-code').value
+            };
+        }).filter(function(b) { return b.bank_name || b.account_number; }))
     };
     _appCurrency = payload.currency || _appCurrency;
     try {
@@ -1636,6 +1667,36 @@ async function loadSettings() {
         if (data.tax_rate !== undefined) { var el = document.getElementById('setting-tax-rate'); if (el) el.value = data.tax_rate; }
         if (data.default_payment_terms !== undefined) { var el = document.getElementById('setting-payment-terms'); if (el) el.value = data.default_payment_terms; }
         if (data.invoice_prefix !== undefined) { var el = document.getElementById('setting-invoice-prefix'); if (el) el.value = data.invoice_prefix; }
+        
+        // Render bank details
+        var bankContainer = document.getElementById('settings-bank-details-container');
+        if (bankContainer) {
+            bankContainer.innerHTML = '';
+            var banks = [];
+            try {
+                if (data.bank_details) banks = JSON.parse(data.bank_details);
+            } catch(e) {}
+            window._savedBankDetails = banks;
+            
+            if (banks.length === 0) {
+                addBankDetailSlot();
+            } else {
+                banks.forEach(function(b) { addBankDetailSlot(b); });
+            }
+            
+            // Populate Create Invoice dropdown if it exists
+            var invBankSelect = document.getElementById('inv-bank-account');
+            if (invBankSelect) {
+                invBankSelect.innerHTML = '<option value="">No bank selected</option>';
+                banks.forEach(function(b) {
+                    var opt = document.createElement('option');
+                    var display = b.bank_name + ' - ' + b.account_number;
+                    opt.value = b.bank_name + '\n' + 'Acc Name: ' + b.account_name + '\n' + 'Acc No: ' + b.account_number + '\n' + 'Sort Code: ' + b.sort_code;
+                    opt.textContent = display;
+                    invBankSelect.appendChild(opt);
+                });
+            }
+        }
     } catch (e) { console.error('Failed to load settings:', e); }
     fetch('/api/client/logo').then(function(r) { return r.json(); }).then(function(data) {
         if (data.logo_url) {
@@ -4808,6 +4869,7 @@ function aiGenerateInvEmail() {
     var number = document.getElementById('view-inv-number-val').textContent || '';
     var total = document.getElementById('view-inv-due-val').textContent || '0';
     var dueDate = document.getElementById('view-inv-due-date').textContent || '';
+    var bankContent = document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '';
     aiPersonalizeEmail(number, contact, parseFloat(total) || 0, dueDate);
 }
 
@@ -5282,7 +5344,7 @@ function renderInvoiceChart(revenue, outstanding, invoices) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, maintainAspectRatio: false,
             plugins: {
                 legend: { labels: { color: '#f8fafc', font: { family: "'Rajdhani', sans-serif", size: 14 } } },
                 tooltip: { backgroundColor: 'rgba(15,23,42,0.9)', titleFont: { family: "'Rajdhani'" }, bodyFont: { family: "'Space Grotesk'" }, borderColor: '#00f0ff', borderWidth: 1 }
@@ -5326,7 +5388,7 @@ function renderHRChart(employees) {
             }]
         },
         options: {
-            responsive: true,
+            responsive: true, maintainAspectRatio: false,
             maintainAspectRatio: false,
             scales: {
                 r: {
@@ -5342,3 +5404,23 @@ function renderHRChart(employees) {
         }
     });
 }
+
+window.addBankDetailSlot = function(data) {
+    data = data || {bank_name:'', account_name:'', account_number:'', sort_code:''};
+    var container = document.getElementById('settings-bank-details-container');
+    if (!container || container.children.length >= 5) return;
+    var slot = document.createElement('div');
+    slot.className = 'bank-detail-slot grid-2 gap-16';
+    slot.style.padding = '16px';
+    slot.style.background = 'rgba(255,255,255,0.02)';
+    slot.style.border = '1px solid var(--border-color)';
+    slot.style.borderRadius = 'var(--radius-md)';
+    slot.innerHTML = `
+        <div class="form-group"><label>Bank Name</label><input type="text" class="form-control bank-name" value="${data.bank_name}" placeholder="e.g. Chase"></div>
+        <div class="form-group"><label>Account Name</label><input type="text" class="form-control account-name" value="${data.account_name}" placeholder="e.g. Company Ltd"></div>
+        <div class="form-group"><label>Account Number</label><input type="text" class="form-control account-number" value="${data.account_number}"></div>
+        <div class="form-group"><label>Sort Code / Routing</label><input type="text" class="form-control sort-code" value="${data.sort_code}"></div>
+        <div style="grid-column:span 2;text-align:right;"><button class="btn btn-outline btn-sm" onclick="this.parentElement.parentElement.remove()">Remove</button></div>
+    `;
+    container.appendChild(slot);
+};

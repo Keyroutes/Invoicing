@@ -478,6 +478,13 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Invoices bank_details
+            try:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS bank_details TEXT DEFAULT ''"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Bills tables
             try:
                 conn.execute(text("""

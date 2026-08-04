@@ -84,7 +84,7 @@
 
                     <!-- Futuristic Chart -->
                     <div class="widget" style="padding:20px; margin-bottom:24px;">
-                        <canvas id="invoiceChart" height="80"></canvas>
+                        <div style="position: relative; height: 250px; width: 100%;"><canvas id="invoiceChart"></canvas></div>
                     </div>
                     <div class="grid-4 mb-24">
                         <section class="widget" style="padding:20px;">
@@ -254,6 +254,12 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <div class="form-group">
+                                        <label>Payment Bank Account</label>
+                                        <select id="inv-bank-account" class="form-control">
+                                            <option value="">No bank selected</option>
+                                        </select>
+                                    </div>
                                 </div>
                                 <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
                                     <table class="line-items-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:900px;">
@@ -331,6 +337,10 @@
                                 <div id="view-inv-company-email"></div>
                                 <div id="view-inv-company-phone"></div>
                                 <div id="view-inv-company-abn"></div>
+                            </div>
+                            <div id="view-inv-bank-details" style="display:none;padding:16px;background:rgba(255,255,255,0.05);border-radius:var(--radius-md);margin-bottom:24px;font-size:0.9rem;color:var(--text-secondary);border-left:3px solid var(--primary-color);">
+                                <div style="font-weight:600;color:var(--text-primary);margin-bottom:8px;">Payment Details</div>
+                                <div id="view-inv-bank-content" style="white-space:pre-wrap;"></div>
                             </div>
                             <div id="view-inv-open-tracking" style="display:none;padding:12px 16px;background:rgba(0,240,255,0.05);border:1px solid rgba(240,240,255,0.15);border-radius:var(--radius-md);margin-bottom:24px;font-size:0.85rem;align-items:center;gap:24px;">
                                 <div>
@@ -637,6 +647,21 @@
                             <button class="btn btn-primary" onclick="saveCompanyDetails()" style="margin-top:16px;">Save Details</button>
                         </div>
                     </div>
+                    
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header">
+                            <h3>Bank Details</h3>
+                            <button class="btn btn-outline btn-sm" onclick="addBankDetailSlot()">+ Add Bank</button>
+                        </div>
+                        <div class="widget-content">
+                            <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px;">Add up to 5 bank accounts. You can select which one to display when creating an invoice.</p>
+                            <div id="settings-bank-details-container" style="display:flex;flex-direction:column;gap:16px;">
+                                <!-- Bank detail slots will be injected here via JS -->
+                            </div>
+                            <button class="btn btn-primary" onclick="saveCompanyDetails()" style="margin-top:16px;">Save Bank Details</button>
+                        </div>
+                    </div>
+                    
                     <div class="glass-widget" id="demo-email-section" style="display:none;">
                         <div class="widget-header"><h3>Send Demo Emails</h3></div>
                         <div class="widget-content">
@@ -1841,5 +1866,6 @@
         }
     </script>
 
+    <div style="position:fixed;bottom:16px;right:16px;font-size:0.75rem;color:var(--text-secondary);opacity:0.6;pointer-events:none;z-index:9999;">Powered by Aniprotech</div>
 </body>
 </html>

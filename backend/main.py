@@ -255,6 +255,7 @@ class InvoiceCreate(BaseModel):
     tax_type: Optional[str] = "exclusive"
     status: Optional[str] = "Draft"
     currency: Optional[str] = ""
+    bank_details: Optional[str] = ""
 
 class SendInvoiceEmail(BaseModel):
     logo_data: Optional[str] = ""
@@ -932,6 +933,7 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
         "sent": inv.sent,
         "tax_type": inv.tax_type,
         "currency": inv.currency or (client.currency if client else ""),
+        "bank_details": inv.bank_details or "",
         "tracking_id": inv.tracking_id,
         "open_count": inv.open_count or 0,
         "last_opened": inv.last_opened or "",
@@ -1028,7 +1030,8 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
         status=invoice.status or "Draft",
         sent="",
         tax_type=invoice.tax_type,
-        currency=(invoice.currency or "").upper() or (client.currency or "")
+        currency=(invoice.currency or "").upper() or (client.currency or ""),
+        bank_details=invoice.bank_details or ""
     )
     db.add(db_invoice)
     db.flush()
@@ -1085,8 +1088,8 @@ def send_invoice_email(number: str, background_tasks: BackgroundTasks, request: 
     cur_symbol = currency_symbol(cur)
 
     sender_name = os.getenv("FROM_NAME", "aniprotech")
-    from_header = f"{sender_name} <{from_email}>"
-    subject = f"Invoice {inv.number} from {sender_name}"
+    from_header = f"{company_name} <{from_email}>"
+    subject = f"Invoice {inv.number} from {company_name}"
 
     logo_html = ""
     logo_data = payload.logo_data or ""
@@ -1149,12 +1152,12 @@ Payment is due by {inv.due_date}. If you have any questions about this invoice, 
 Thank you for your business!
 
 Best regards,
-{company_name or sender_name}
+{company_name}
 {company_address or ''}
 {company_email or ''}
 {company_phone or ''}
 
-To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."""
+Powered by Aniprotech"""
 
     html_body = f"""
     <!DOCTYPE html>
@@ -1236,9 +1239,9 @@ To unsubscribe from these emails, reply with 'unsubscribe' in the subject line."
             <!-- Footer -->
             <div style="padding: 24px 40px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center;">
               <p style="font-size: 13px; color: #94a3b8; margin: 0 0 4px 0;">Thank you for your business!</p>
-              <p style="font-size: 12px; color: #64748b; margin: 0;">{sender_name}</p>
+              <p style="font-size: 12px; color: #64748b; margin: 0;">{company_name}</p>
               {f'<p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0;">{esc(company_address)}</p>' if company_address else ''}
-              <p style="font-size: 11px; color: #94a3b8; margin: 12px 0 0 0;"><a href="mailto:hello@keyroutes.co?subject=unsubscribe" style="color: #94a3b8;">Unsubscribe</a> from these notifications</p>
+              <p style="font-size: 11px; color: #94a3b8; margin: 12px 0 0 0;">Powered by Aniprotech</p>
             </div>
           </div>
         </div>
