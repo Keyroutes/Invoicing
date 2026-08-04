@@ -4,9 +4,12 @@ import uuid
 import smtplib
 import ssl
 import json
+import re
 import html as html_mod
+import threading
 import time
 from collections import defaultdict
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse, StreamingResponse, JSONResponse, Response, HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -28,6 +31,7 @@ from sqladmin import Admin, ModelView
 from sqladmin.authentication import AuthenticationBackend
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from database import engine, get_db, SessionLocal, ensure_columns
 import httpx
 import models
@@ -43,10 +47,21 @@ def hash_password(password: str) -> str:
     return salt.hex() + ':' + pwd_hash.hex()
 
 def verify_password(password: str, stored: str) -> bool:
-    salt_hex, pwd_hash_hex = stored.split(':')
-    salt = bytes.fromhex(salt_hex)
+    """Constant-time check that tolerates legacy/absent hashes instead of
+    raising. An unsplittable value used to blow up with a ValueError and
+    surface as a 500 rather than a failed login."""
+    if not stored or not password:
+        return False
+    if ':' not in stored:
+        # Pre-PBKDF2 records stored a bare sha256 digest.
+        return secrets.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored)
+    try:
+        salt_hex, pwd_hash_hex = stored.split(':', 1)
+        salt = bytes.fromhex(salt_hex)
+    except (ValueError, TypeError):
+        return False
     pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
-    return pwd_hash.hex() == pwd_hash_hex
+    return secrets.compare_digest(pwd_hash.hex(), pwd_hash_hex)
 
 def log_login(db, client_id, email, user_type="client", login_type="password", request=None, status="success"):
     ip = ""
@@ -112,15 +127,44 @@ def ensure_admin_user():
 
 # --- Rate Limiter (in-memory, per-IP) ---
 class RateLimiter:
+    """Fixed-memory sliding window.
+
+    The previous version kept a dict entry for every key it ever saw and never
+    removed them, so a long-running process grew without bound (one entry per
+    distinct client IP, forever). Stale keys are now swept periodically.
+    """
+
+    SWEEP_INTERVAL = 300  # seconds
+    MAX_KEYS = 10000
+
     def __init__(self):
         self._hits = defaultdict(list)
+        self._lock = threading.Lock()
+        self._last_sweep = time.time()
+
+    def _sweep(self, now: float, window: int) -> None:
+        cutoff = now - max(window, 3600)
+        for key in [k for k, hits in self._hits.items() if not hits or hits[-1] < cutoff]:
+            self._hits.pop(key, None)
+        # Hard ceiling in case of a burst of unique keys between sweeps.
+        if len(self._hits) > self.MAX_KEYS:
+            for key in sorted(self._hits, key=lambda k: self._hits[k][-1])[: len(self._hits) - self.MAX_KEYS]:
+                self._hits.pop(key, None)
+        self._last_sweep = now
+
     def is_rate_limited(self, key: str, max_requests: int = 10, window: int = 60) -> bool:
         now = time.time()
-        self._hits[key] = [t for t in self._hits[key] if now - t < window]
-        if len(self._hits[key]) >= max_requests:
-            return True
-        self._hits[key].append(now)
-        return False
+        with self._lock:
+            if now - self._last_sweep > self.SWEEP_INTERVAL:
+                self._sweep(now, window)
+            hits = [t for t in self._hits[key] if now - t < window]
+            if len(hits) >= max_requests:
+                self._hits[key] = hits
+                return True
+            hits.append(now)
+            self._hits[key] = hits
+            return False
+
 
 rate_limiter = RateLimiter()
 
@@ -129,6 +173,112 @@ def esc(val) -> str:
     if val is None:
         return ""
     return html_mod.escape(str(val))
+
+# --- Money / tax helpers ---------------------------------------------------
+# Line items carry a human-readable tax label ("20% VAT", "5% VAT",
+# "0% Zero Rated", "No Tax"). Everything downstream must derive the rate from
+# that label rather than assuming a single blanket rate.
+
+DEFAULT_TAX_RATE = 0.20
+_TAX_PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def parse_tax_rate(label, default: float = DEFAULT_TAX_RATE) -> float:
+    """Turn a tax label into a decimal rate. '5% VAT' -> 0.05, 'No Tax' -> 0.0."""
+    s = str(label or "").strip()
+    if not s:
+        return default
+    m = _TAX_PCT_RE.search(s)
+    if m:
+        try:
+            return max(0.0, float(m.group(1))) / 100.0
+        except ValueError:
+            return default
+    low = s.lower()
+    if any(w in low for w in ("no tax", "none", "zero", "exempt", "outside")):
+        return 0.0
+    return default
+
+
+def money(val) -> float:
+    """Round to 2dp using banker's-free half-up, which is what invoices expect."""
+    try:
+        d = Decimal(str(val or 0))
+    except (InvalidOperation, ValueError, TypeError):
+        return 0.0
+    return float(d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def line_net_amount(qty, price, disc) -> float:
+    """Amount for a single line after its percentage discount."""
+    amount = float(qty or 0) * float(price or 0)
+    d = float(disc or 0)
+    if d:
+        amount *= (1 - d / 100.0)
+    return amount
+
+
+def compute_invoice_totals(line_items, tax_type: str):
+    """Subtotal / tax / total for a set of line items, honouring each line's own
+    tax rate. `tax_type` is 'exclusive' (tax added on top), 'inclusive' (prices
+    already contain tax) or anything else for no tax."""
+    subtotal = 0.0
+    tax = 0.0
+    for item in line_items or []:
+        amount = line_net_amount(
+            getattr(item, "qty", None), getattr(item, "price", None), getattr(item, "disc", None)
+        )
+        rate = parse_tax_rate(getattr(item, "tax_rate", None))
+        if tax_type == "exclusive":
+            subtotal += amount
+            tax += amount * rate
+        elif tax_type == "inclusive":
+            net = amount / (1 + rate) if rate else amount
+            subtotal += net
+            tax += amount - net
+        else:
+            subtotal += amount
+    subtotal = money(subtotal)
+    tax = money(tax)
+    return subtotal, tax, money(subtotal + tax)
+
+
+def _parse_date(value):
+    """Parse a YYYY-MM-DD string, returning None when unusable."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+OPEN_INVOICE_STATUSES = ("Awaiting Payment", "Sent", "Partially Paid", "Overdue")
+
+
+def invoice_overdue_days(inv, today=None) -> int:
+    """Days past the due date for an unsettled invoice; 0 when not overdue."""
+    if inv.status in ("Paid", "Draft", "Void"):
+        return 0
+    if (inv.due or 0) <= 0:
+        return 0
+    due = _parse_date(inv.due_date)
+    if not due:
+        return 0
+    today = today or datetime.now().date()
+    return max(0, (today - due).days)
+
+
+def apply_payment_status(inv):
+    """Keep status/paid/due consistent after a payment changes."""
+    total = money((inv.paid or 0) + (inv.due or 0))
+    if (inv.due or 0) <= 0.005 and total > 0:
+        inv.due = 0.0
+        inv.status = "Paid"
+    elif (inv.paid or 0) > 0.005:
+        inv.status = "Partially Paid"
+    return inv
+
 
 from contextlib import asynccontextmanager
 
@@ -218,7 +368,17 @@ admin.add_view(SettingsAdmin)
 admin.add_view(ContactAdmin)
 admin.add_view(AdminUserAdmin)
 
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, same_site="lax", https_only=True, max_age=86400)
+# Secure cookies are required in production but silently break local http
+# development (the browser refuses to store the session at all). Default to
+# secure, and let a local run opt out with COOKIE_SECURE=false.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").strip().lower() not in ("false", "0", "no")
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    same_site="lax",
+    https_only=COOKIE_SECURE,
+    max_age=int(os.getenv("SESSION_MAX_AGE", "86400")),
+)
 
 oauth = OAuth()
 oauth.register(
@@ -273,6 +433,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    """A unique-constraint clash is a client mistake, not a server fault.
+    Without this it surfaced as an opaque 500."""
+    logger.warning("Integrity error on %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "That record conflicts with one that already exists."},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    """Log the traceback server-side, return a generic message to the client so
+    internals are never echoed back."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred."})
+
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
@@ -614,9 +793,9 @@ def superadmin_delete_client(client_id: int, request: Request, db: Session = Dep
     client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    db.query(models.DBLineItem).filter(models.DBLineItem.invoice_id.in_(
-        db.query(models.DBInvoice.id).filter(models.DBInvoice.client_id == client_id)
-    )).delete(synchronize_session=False)
+    invoice_ids = db.query(models.DBInvoice.id).filter(models.DBInvoice.client_id == client_id)
+    db.query(models.DBLineItem).filter(models.DBLineItem.invoice_id.in_(invoice_ids)).delete(synchronize_session=False)
+    db.query(models.DBPayment).filter(models.DBPayment.invoice_id.in_(invoice_ids)).delete(synchronize_session=False)
     db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client_id).delete()
     db.query(models.DBContact).filter(models.DBContact.client_id == client_id).delete()
     db.query(models.DBSettings).filter(models.DBSettings.client_id == client_id).delete()
@@ -826,12 +1005,15 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     all_invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
 
-    invoices_owed = sum(inv.due or 0 for inv in all_invoices if inv.status in ["Awaiting Payment", "Sent"])
+    today = datetime.now().date()
+    invoices_owed = sum(inv.due or 0 for inv in all_invoices if inv.status in OPEN_INVOICE_STATUSES)
     total_revenue = sum(inv.paid or 0 for inv in all_invoices if inv.status != "Draft")
     total_invoiced = sum((inv.paid or 0) + (inv.due or 0) for inv in all_invoices if inv.status != "Draft")
     paid_count = sum(1 for inv in all_invoices if inv.status == "Paid")
-    pending_count = sum(1 for inv in all_invoices if inv.status in ["Awaiting Payment", "Sent"])
+    pending_count = sum(1 for inv in all_invoices if inv.status in OPEN_INVOICE_STATUSES)
     draft_count = sum(1 for inv in all_invoices if inv.status == "Draft")
+    overdue = [inv for inv in all_invoices if invoice_overdue_days(inv, today) > 0]
+    overdue_amount = sum(inv.due or 0 for inv in overdue)
 
     months = []
     now = datetime.now()
@@ -854,9 +1036,8 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
             month_start = d.replace(day=1)
             next_month = (month_start + timedelta(days=32)).replace(day=1)
             if month_start <= inv_date < next_month:
-                if inv.status == "Paid":
-                    money_in[i] += inv.paid or 0
-                elif inv.status in ["Awaiting Payment", "Sent"]:
+                money_in[i] += inv.paid or 0
+                if inv.status in OPEN_INVOICE_STATUSES:
                     money_out[i] += inv.due or 0
                 break
 
@@ -870,6 +1051,8 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
             "paid_count": paid_count,
             "pending_count": pending_count,
             "draft_count": draft_count,
+            "overdue_count": len(overdue),
+            "overdue_amount": round(overdue_amount, 2),
             "total_count": len(all_invoices)
         },
         "cash_flow": {
@@ -883,23 +1066,31 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
 def get_invoices(request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).order_by(models.DBInvoice.id.desc()).all()
-    return [{
-        "number": inv.number,
-        "ref": inv.ref,
-        "to": inv.to_contact,
-        "email": inv.email,
-        "phone_number": inv.phone_number,
-        "date": inv.issue_date,
-        "due_date": inv.due_date,
-        "paid": inv.paid,
-        "due": inv.due,
-        "status": inv.status,
-        "sent": inv.sent,
-        "tax_type": inv.tax_type,
-        "currency": inv.currency or (client.currency if client else ""),
-        "open_count": inv.open_count or 0,
-        "last_opened": inv.last_opened or "",
-    } for inv in invoices]
+    today = datetime.now().date()
+    result = []
+    for inv in invoices:
+        overdue_days = invoice_overdue_days(inv, today)
+        result.append({
+            "number": inv.number,
+            "ref": inv.ref,
+            "to": inv.to_contact,
+            "email": inv.email,
+            "phone_number": inv.phone_number,
+            "date": inv.issue_date,
+            "due_date": inv.due_date,
+            "paid": inv.paid,
+            "due": inv.due,
+            "total": money((inv.paid or 0) + (inv.due or 0)),
+            "status": inv.status,
+            "sent": inv.sent,
+            "tax_type": inv.tax_type,
+            "currency": inv.currency or (client.currency if client else ""),
+            "open_count": inv.open_count or 0,
+            "last_opened": inv.last_opened or "",
+            "is_overdue": overdue_days > 0,
+            "days_overdue": overdue_days,
+        })
+    return result
 
 @app.get("/api/invoices/{number}")
 def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
@@ -918,6 +1109,11 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
         "abn": settings_map.get("company_abn", "") or (client.abn if client else ""),
         "logo_url": client.logo_url if client else "",
     }
+    subtotal, tax_total, grand_total = compute_invoice_totals(inv.line_items, inv.tax_type)
+    overdue_days = invoice_overdue_days(inv)
+    payments = db.query(models.DBPayment).filter(
+        models.DBPayment.invoice_id == inv.id
+    ).order_by(models.DBPayment.id.asc()).all()
     return {
         "id": inv.id,
         "number": inv.number,
@@ -929,6 +1125,15 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
         "due_date": inv.due_date,
         "paid": inv.paid,
         "due": inv.due,
+        "subtotal": subtotal,
+        "tax_total": tax_total,
+        "total": grand_total,
+        "is_overdue": overdue_days > 0,
+        "days_overdue": overdue_days,
+        "payments": [{
+            "id": p.id, "amount": p.amount, "paid_on": p.paid_on,
+            "method": p.method, "reference": p.reference, "note": p.note,
+        } for p in payments],
         "status": inv.status,
         "sent": inv.sent,
         "tax_type": inv.tax_type,
@@ -945,50 +1150,76 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
             "price": li.price,
             "disc": li.disc,
             "account": li.account,
-            "tax_rate": li.tax_rate
+            "tax_rate": li.tax_rate,
+            "tax_percent": round(parse_tax_rate(li.tax_rate) * 100, 4),
+            "amount": money(line_net_amount(li.qty, li.price, li.disc)),
+            "tax_amount": money(
+                line_net_amount(li.qty, li.price, li.disc) * parse_tax_rate(li.tax_rate)
+                if inv.tax_type == "exclusive" else
+                (line_net_amount(li.qty, li.price, li.disc)
+                 - line_net_amount(li.qty, li.price, li.disc) / (1 + parse_tax_rate(li.tax_rate))
+                 if inv.tax_type == "inclusive" and parse_tax_rate(li.tax_rate) else 0)
+            ),
         } for li in inv.line_items]
     }
 
 @app.get("/api/next-invoice-number")
 def get_next_invoice_number(request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    invoices = db.query(models.DBInvoice.number).filter(models.DBInvoice.client_id == client.id).all()
+    return {"next_number": next_sequence_number(db, models.DBInvoice, client.id, "INV-")}
+
+def validate_line_items(line_items):
+    """Reject payloads that would silently produce a nonsense invoice."""
+    if not line_items:
+        raise HTTPException(status_code=400, detail="An invoice needs at least one line item")
+    if len(line_items) > 200:
+        raise HTTPException(status_code=400, detail="An invoice cannot have more than 200 line items")
+    for idx, item in enumerate(line_items, start=1):
+        if (item.qty or 0) < 0:
+            raise HTTPException(status_code=400, detail=f"Line {idx}: quantity cannot be negative")
+        if (item.price or 0) < 0:
+            raise HTTPException(status_code=400, detail=f"Line {idx}: price cannot be negative")
+        disc = item.disc or 0
+        if disc < 0 or disc > 100:
+            raise HTTPException(status_code=400, detail=f"Line {idx}: discount must be between 0 and 100")
+
+
+def validate_invoice_dates(issue_date, due_date):
+    issue = _parse_date(issue_date)
+    due = _parse_date(due_date)
+    if issue_date and not issue:
+        raise HTTPException(status_code=400, detail="Issue date must be in YYYY-MM-DD format")
+    if due_date and not due:
+        raise HTTPException(status_code=400, detail="Due date must be in YYYY-MM-DD format")
+    if issue and due and due < issue:
+        raise HTTPException(status_code=400, detail="Due date cannot be before the issue date")
+
+
+def next_sequence_number(db, model, client_id, prefix):
+    """Next number in a per-tenant sequence, based on the highest number ever
+    issued. Counting rows breaks as soon as one is deleted."""
+    rows = db.query(model.number).filter(model.client_id == client_id).all()
     max_num = 0
-    for inv in invoices:
-        if inv.number and inv.number.startswith("INV-"):
-            try:
-                num = int(inv.number.split("-")[1])
-                if num > max_num:
-                    max_num = num
-            except (IndexError, ValueError):
-                pass
-    return {"next_number": f"INV-{max_num + 1:04d}"}
+    for row in rows:
+        num_str = row.number or ""
+        if not num_str.startswith(prefix):
+            continue
+        tail = num_str[len(prefix):].split("-")[0].strip()
+        try:
+            max_num = max(max_num, int(tail))
+        except (TypeError, ValueError):
+            continue
+    return f"{prefix}{max_num + 1:04d}"
+
 
 @app.post("/api/invoices")
 def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
 
-    subtotal = 0
-    tax = 0
-    for item in invoice.line_items:
-        raw_amount = item.qty * item.price
-        if item.disc and item.disc > 0:
-            raw_amount = raw_amount * (1 - item.disc / 100)
-        amount = raw_amount
-        item_tax = 0
-        if invoice.tax_type == 'exclusive':
-            item_tax = amount * 0.20
-            subtotal += amount
-            tax += item_tax
-        elif invoice.tax_type == 'inclusive':
-            item_tax = amount - (amount / 1.20)
-            subtotal_net = amount - item_tax
-            subtotal += subtotal_net
-            tax += item_tax
-        else:
-            subtotal += amount
+    validate_line_items(invoice.line_items)
+    validate_invoice_dates(invoice.issue_date, invoice.due_date)
 
-    total = subtotal + tax
+    subtotal, tax, total = compute_invoice_totals(invoice.line_items, invoice.tax_type)
 
     # Auto-save contact (scoped to client)
     if invoice.contact and invoice.contact.strip():
@@ -1002,19 +1233,15 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
             db.add(models.DBContact(name=invoice.contact, email=invoice.email or "", phone_number=invoice.phone_number or "", client_id=client.id))
 
     if invoice.invoice_number and invoice.invoice_number.strip() != "":
-        number = invoice.invoice_number
+        number = invoice.invoice_number.strip()
     else:
-        invoices = db.query(models.DBInvoice.number).filter(models.DBInvoice.client_id == client.id).all()
-        max_num = 0
-        for inv in invoices:
-            if inv.number and inv.number.startswith("INV-"):
-                try:
-                    num = int(inv.number.split("-")[1])
-                    if num > max_num:
-                        max_num = num
-                except (IndexError, ValueError):
-                    pass
-        number = f"INV-{max_num + 1:04d}"
+        number = next_sequence_number(db, models.DBInvoice, client.id, "INV-")
+
+    clash = db.query(models.DBInvoice).filter(
+        models.DBInvoice.client_id == client.id, models.DBInvoice.number == number
+    ).first()
+    if clash:
+        raise HTTPException(status_code=409, detail=f"Invoice number {number} already exists")
 
     db_invoice = models.DBInvoice(
         client_id=client.id,
@@ -1255,7 +1482,9 @@ Powered by Aniprotech"""
 
     background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename, logo_data, client_id=client.id)
 
-    inv.status = "Sent"
+    # Re-sending a receipt must not walk a settled invoice back to unpaid.
+    if inv.status not in ("Paid", "Partially Paid", "Void"):
+        inv.status = "Sent"
     inv.sent = datetime.now().strftime("%Y-%m-%d")
     log_audit(db, client.id, "invoice_sent", "invoice", inv.id, inv.number, f"Sent to {inv.email}", request)
     db.commit()
@@ -1686,8 +1915,20 @@ async def auth_callback(request: Request, db: Session = Depends(get_db)):
     return RedirectResponse(url=target_dashboard)
 
 @app.get("/api/health")
-def health_check():
-    return {"status": "ok"}
+def health_check(db: Session = Depends(get_db)):
+    """Liveness + database readiness.
+
+    This is the path Railway restarts on, so it has to fail when the app cannot
+    actually serve traffic - a bare 'ok' kept a database-less instance in
+    rotation.
+    """
+    from sqlalchemy import text as sql_text
+    try:
+        db.execute(sql_text("SELECT 1"))
+        return {"status": "ok", "database": "ok"}
+    except Exception as exc:
+        logger.error("Health check failed: %s", exc)
+        return JSONResponse(status_code=503, content={"status": "degraded", "database": "unavailable"})
 
 @app.get("/api/auth/me")
 def get_current_user(request: Request, db: Session = Depends(get_db)):
@@ -1763,6 +2004,7 @@ def delete_invoice(number: str, request: Request, db: Session = Depends(get_db))
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     db.query(models.DBLineItem).filter(models.DBLineItem.invoice_id == inv.id).delete()
+    db.query(models.DBPayment).filter(models.DBPayment.invoice_id == inv.id).delete()
     log_audit(db, client.id, "invoice_deleted", "invoice", inv.id, inv.number, f"Contact: {inv.to_contact}", request)
     db.delete(inv)
     db.commit()
@@ -1770,16 +2012,191 @@ def delete_invoice(number: str, request: Request, db: Session = Depends(get_db))
 
 @app.post("/api/invoices/{number}/mark-paid")
 def mark_invoice_paid(number: str, request: Request, db: Session = Depends(get_db)):
+    """Settle the whole outstanding balance in one go, recording it in the ledger."""
     client = get_client_user(request, db)
     inv = db.query(models.DBInvoice).filter(models.DBInvoice.number == number, models.DBInvoice.client_id == client.id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    inv.status = "Paid"
-    inv.paid = inv.due
+    outstanding = money(inv.due or 0)
+    if outstanding > 0:
+        db.add(models.DBPayment(
+            client_id=client.id, invoice_id=inv.id, amount=outstanding,
+            paid_on=datetime.now().strftime("%Y-%m-%d"), method="manual",
+            note="Marked as paid in full",
+        ))
+    inv.paid = money((inv.paid or 0) + outstanding)
     inv.due = 0.0
+    inv.status = "Paid"
     log_audit(db, client.id, "invoice_marked_paid", "invoice", inv.id, inv.number, f"Amount: {inv.paid}", request)
     db.commit()
-    return {"message": "Invoice marked as paid", "status": "Paid"}
+    return {"message": "Invoice marked as paid", "status": "Paid", "paid": inv.paid, "due": inv.due}
+
+
+class PaymentCreate(BaseModel):
+    amount: float
+    paid_on: Optional[str] = ""
+    method: Optional[str] = "bank_transfer"
+    reference: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+@app.post("/api/invoices/{number}/payments")
+def record_invoice_payment(number: str, body: PaymentCreate, request: Request, db: Session = Depends(get_db)):
+    """Record a part payment. Status moves Draft/Sent -> Partially Paid -> Paid."""
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(
+        models.DBInvoice.number == number, models.DBInvoice.client_id == client.id
+    ).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    amount = money(body.amount)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment amount must be greater than zero")
+    outstanding = money(inv.due or 0)
+    if outstanding <= 0:
+        raise HTTPException(status_code=400, detail="This invoice has no outstanding balance")
+    if amount > outstanding + 0.005:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Payment of {amount:.2f} exceeds the outstanding balance of {outstanding:.2f}",
+        )
+    payment = models.DBPayment(
+        client_id=client.id, invoice_id=inv.id, amount=amount,
+        paid_on=body.paid_on or datetime.now().strftime("%Y-%m-%d"),
+        method=body.method or "bank_transfer",
+        reference=body.reference or "", note=body.note or "",
+    )
+    db.add(payment)
+    inv.paid = money((inv.paid or 0) + amount)
+    inv.due = money(outstanding - amount)
+    apply_payment_status(inv)
+    log_audit(db, client.id, "invoice_payment_recorded", "invoice", inv.id, inv.number,
+              f"Amount: {amount:.2f}, remaining: {inv.due:.2f}", request)
+    db.commit()
+    return {
+        "message": "Payment recorded", "status": inv.status,
+        "paid": inv.paid, "due": inv.due, "payment_id": payment.id,
+    }
+
+
+@app.delete("/api/invoices/{number}/payments/{payment_id}")
+def delete_invoice_payment(number: str, payment_id: int, request: Request, db: Session = Depends(get_db)):
+    """Reverse a payment that was entered by mistake."""
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(
+        models.DBInvoice.number == number, models.DBInvoice.client_id == client.id
+    ).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    payment = db.query(models.DBPayment).filter(
+        models.DBPayment.id == payment_id, models.DBPayment.invoice_id == inv.id
+    ).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    inv.paid = money(max(0.0, (inv.paid or 0) - (payment.amount or 0)))
+    inv.due = money((inv.due or 0) + (payment.amount or 0))
+    inv.status = "Partially Paid" if (inv.paid or 0) > 0.005 else ("Sent" if inv.sent else "Draft")
+    db.delete(payment)
+    log_audit(db, client.id, "invoice_payment_reversed", "invoice", inv.id, inv.number,
+              f"Amount: {payment.amount:.2f}", request)
+    db.commit()
+    return {"message": "Payment reversed", "status": inv.status, "paid": inv.paid, "due": inv.due}
+
+
+@app.put("/api/invoices/{number}")
+def update_invoice(number: str, invoice: InvoiceCreate, request: Request, db: Session = Depends(get_db)):
+    """Edit a draft/unsent invoice: replaces line items and recomputes totals."""
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(
+        models.DBInvoice.number == number, models.DBInvoice.client_id == client.id
+    ).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if (inv.paid or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="This invoice already has payments against it. Reverse them before editing.",
+        )
+    validate_line_items(invoice.line_items)
+    validate_invoice_dates(invoice.issue_date, invoice.due_date)
+
+    if invoice.invoice_number and invoice.invoice_number.strip() and invoice.invoice_number.strip() != inv.number:
+        new_number = invoice.invoice_number.strip()
+        clash = db.query(models.DBInvoice).filter(
+            models.DBInvoice.client_id == client.id, models.DBInvoice.number == new_number
+        ).first()
+        if clash:
+            raise HTTPException(status_code=409, detail=f"Invoice number {new_number} already exists")
+        inv.number = new_number
+
+    subtotal, tax, total = compute_invoice_totals(invoice.line_items, invoice.tax_type)
+
+    inv.ref = invoice.reference
+    inv.to_contact = invoice.contact
+    inv.email = invoice.email
+    inv.phone_number = invoice.phone_number
+    inv.issue_date = invoice.issue_date
+    inv.due_date = invoice.due_date
+    inv.tax_type = invoice.tax_type
+    inv.due = total
+    if invoice.currency:
+        inv.currency = invoice.currency.upper()
+    if invoice.bank_details is not None:
+        inv.bank_details = invoice.bank_details
+    if invoice.status:
+        inv.status = invoice.status
+
+    db.query(models.DBLineItem).filter(models.DBLineItem.invoice_id == inv.id).delete()
+    for item in invoice.line_items:
+        db.add(models.DBLineItem(
+            invoice_id=inv.id, name=item.name or "", description=item.description,
+            qty=item.qty, price=item.price, disc=item.disc or 0.0,
+            account=item.account, tax_rate=item.tax_rate,
+        ))
+    log_audit(db, client.id, "invoice_updated", "invoice", inv.id, inv.number, f"Total: {total:.2f}", request)
+    db.commit()
+    return get_invoice(inv.number, request, db)
+
+
+@app.get("/api/reports/aged-receivables")
+def aged_receivables(request: Request, db: Session = Depends(get_db)):
+    """Outstanding balances bucketed by how late they are - the report every
+    finance team asks for first."""
+    client = get_client_user(request, db)
+    invoices = db.query(models.DBInvoice).filter(
+        models.DBInvoice.client_id == client.id,
+        models.DBInvoice.status.notin_(["Draft", "Paid", "Void"]),
+    ).all()
+    today = datetime.now().date()
+    buckets = {"current": 0.0, "1_30": 0.0, "31_60": 0.0, "61_90": 0.0, "over_90": 0.0}
+    rows = []
+    for inv in invoices:
+        outstanding = money(inv.due or 0)
+        if outstanding <= 0:
+            continue
+        days = invoice_overdue_days(inv, today)
+        if days == 0:
+            bucket = "current"
+        elif days <= 30:
+            bucket = "1_30"
+        elif days <= 60:
+            bucket = "31_60"
+        elif days <= 90:
+            bucket = "61_90"
+        else:
+            bucket = "over_90"
+        buckets[bucket] = money(buckets[bucket] + outstanding)
+        rows.append({
+            "number": inv.number, "contact": inv.to_contact, "due_date": inv.due_date,
+            "outstanding": outstanding, "days_overdue": days, "bucket": bucket,
+        })
+    rows.sort(key=lambda r: r["days_overdue"], reverse=True)
+    return {
+        "buckets": buckets,
+        "total_outstanding": money(sum(buckets.values())),
+        "currency": client.currency or "GBP",
+        "invoices": rows,
+    }
 
 # --- Settings API ---
 
@@ -1949,7 +2366,17 @@ def delete_department(dept_id: int, request: Request, db: Session = Depends(get_
     dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
-    db.query(models.DBEmployee).filter(models.DBEmployee.department_id == dept_id).update({"department_id": None})
+    db.query(models.DBEmployee).filter(models.DBEmployee.department_id == dept_id).update(
+        {"department_id": None}, synchronize_session=False
+    )
+    # Goals hang off departments too and would block the delete on Postgres.
+    db.query(models.DBDepartmentGoal).filter(models.DBDepartmentGoal.department_id == dept_id).delete(
+        synchronize_session=False
+    )
+    db.query(models.DBEmployeeGoal).filter(models.DBEmployeeGoal.department_id == dept_id).update(
+        {"department_id": None}, synchronize_session=False
+    )
+    log_audit(db, client.id, "department_deleted", "department", dept.id, dept.name, "", request)
     db.delete(dept)
     db.commit()
     return {"message": "Department deleted"}
@@ -2083,6 +2510,8 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
     return {
         "id": emp.id, "employee_id": emp.employee_id,
         "first_name": emp.first_name, "last_name": emp.last_name,
+        "email": emp.email, "status": emp.status,
+        "department_id": emp.department_id, "reports_to": emp.reports_to,
         "message": "Employee created. Onboarding checklist generated.",
     }
 
@@ -2175,8 +2604,19 @@ def delete_employee(emp_id: int, request: Request, db: Session = Depends(get_db)
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     emp_name = f"{emp.first_name} {emp.last_name}"
-    db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp_id).delete()
-    db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp_id).delete()
+    # Every table that points at employees must be cleared first, otherwise the
+    # delete fails on a foreign key violation. Attendance, goals, leave,
+    # documents, notifications and overtime were all being left behind.
+    for model in (
+        models.DBOnboardingItem, models.DBPayslip, models.DBAttendance,
+        models.DBEmployeeGoal, models.DBLeaveRequest, models.DBDocument,
+        models.DBNotification, models.DBOvertimeLog,
+    ):
+        db.query(model).filter(model.employee_id == emp_id).delete(synchronize_session=False)
+    # Anyone reporting to this person would keep a dangling manager reference.
+    db.query(models.DBEmployee).filter(models.DBEmployee.reports_to == emp_id).update(
+        {"reports_to": None}, synchronize_session=False
+    )
     log_audit(db, client.id, "employee_deleted", "employee", emp.id, emp_name, "", request)
     db.delete(emp)
     db.commit()
@@ -2455,19 +2895,21 @@ def get_employee_pay_details(emp_id: int, request: Request, period_start: str = 
         overtime_hours = round(overtime_hours, 2)
 
     ot_rate = emp.hourly_rate or 0.0
-    if ot_rate == 0 and emp.salary > 0:
+    if ot_rate == 0 and (emp.salary or 0) > 0:
         ot_rate = round(emp.salary / 160 * 1.5, 2)
 
-    basic = emp.salary or 0.0
-    ot_pay = round(overtime_hours * ot_rate, 2) if overtime_hours > 0 else 0
+    # Hourly staff have salary == 0; paying them their (zero) salary produced a
+    # blank payslip. Derive basic from the hours actually worked instead.
+    basic = resolve_basic_pay(emp, None, hours_worked)
+    ot_pay = money(overtime_hours * ot_rate) if overtime_hours > 0 else 0
     bonus = emp.bonus or 0.0
     allowances = emp.allowances or 0.0
-    gross = basic + ot_pay + bonus + allowances
+    gross = money(basic + ot_pay + bonus + allowances)
     tax_rate = emp.tax_rate or 0.0
-    tax_amount = round(gross * (tax_rate / 100), 2) if tax_rate > 0 else 0
+    tax_amount = money(gross * (tax_rate / 100)) if tax_rate > 0 else 0
     deductions = emp.deductions or 0.0
-    total_deductions = tax_amount + deductions
-    net_pay = round(gross - total_deductions, 2)
+    total_deductions = money(tax_amount + deductions)
+    net_pay = money(gross - total_deductions)
 
     return {
         "employee_id": emp.id,
@@ -2479,6 +2921,7 @@ def get_employee_pay_details(emp_id: int, request: Request, period_start: str = 
         "bank_account": emp.bank_account,
         "tax_id": emp.tax_id,
         "salary": basic,
+        "is_hourly": (emp.salary or 0) <= 0 and (emp.hourly_rate or 0) > 0,
         "hourly_rate": emp.hourly_rate or 0.0,
         "tax_rate": tax_rate,
         "deductions": deductions,
@@ -2494,39 +2937,259 @@ def get_employee_pay_details(emp_id: int, request: Request, period_start: str = 
         "net_pay": net_pay,
     }
 
+def resolve_basic_pay(emp, requested_basic, hours_worked):
+    """Work out basic pay for a period.
+
+    An explicit figure from the caller always wins. Otherwise a salaried
+    employee gets their salary; an hourly employee is paid hours x rate.
+    Falling through to `emp.salary` for hourly staff paid them zero.
+    """
+    if requested_basic and requested_basic > 0:
+        return money(requested_basic)
+    if (emp.salary or 0) > 0:
+        return money(emp.salary)
+    if (emp.hourly_rate or 0) > 0 and (hours_worked or 0) > 0:
+        return money(emp.hourly_rate * hours_worked)
+    return 0.0
+
+
+def compute_payslip_figures(emp, data):
+    """Single source of truth for payslip arithmetic, used by create, update and
+    the bulk payroll run so the three can never drift apart.
+
+    `data` is a dict of the editable inputs.
+    """
+    hours = float(data.get("hours_worked") or 0)
+    ot_hours = float(data.get("overtime_hours") or 0)
+    ot_rate = float(data.get("overtime_rate") or 0)
+    if ot_hours > 0 and ot_rate <= 0:
+        # Fall back to a 1.5x rate derived from the employee's own pay.
+        ot_rate = emp.hourly_rate or (round((emp.salary or 0) / 160 * 1.5, 2) if emp.salary else 0)
+
+    basic = resolve_basic_pay(emp, data.get("basic_salary"), hours)
+    ot_pay = money(ot_hours * ot_rate) if ot_hours > 0 else 0.0
+    bonus = money(data.get("bonus") or 0)
+    allowances = money(data.get("allowances") or 0)
+    gross = money(basic + ot_pay + bonus + allowances)
+
+    tax = data.get("tax_amount")
+    if tax is None or float(tax) <= 0:
+        tax = money(gross * ((emp.tax_rate or 0) / 100)) if (emp.tax_rate or 0) > 0 else 0.0
+    else:
+        tax = money(tax)
+
+    insurance = money(data.get("insurance") or 0)
+    retirement = money(data.get("retirement") or 0)
+    other = money(data.get("other_deductions") or 0)
+    standing = money(emp.deductions or 0)
+    total_deductions = money(tax + insurance + retirement + other + standing)
+    net = money(gross - total_deductions)
+
+    return {
+        "hours_worked": hours, "overtime_hours": ot_hours, "overtime_rate": money(ot_rate),
+        "basic_salary": basic, "overtime_pay": ot_pay, "bonus": bonus, "allowances": allowances,
+        "gross_pay": gross, "tax_amount": tax, "insurance": insurance, "retirement": retirement,
+        "other_deductions": other, "total_deductions": total_deductions, "net_pay": net,
+    }
+
+
+def find_overlapping_payslip(db, client_id, employee_id, period_start, period_end, exclude_id=None):
+    """Guard against paying the same person twice for the same period."""
+    start = _parse_date(period_start)
+    end = _parse_date(period_end)
+    if not start or not end:
+        return None
+    query = db.query(models.DBPayslip).filter(
+        models.DBPayslip.client_id == client_id,
+        models.DBPayslip.employee_id == employee_id,
+        models.DBPayslip.status != "Void",
+    )
+    if exclude_id:
+        query = query.filter(models.DBPayslip.id != exclude_id)
+    for existing in query.all():
+        e_start = _parse_date(existing.period_start)
+        e_end = _parse_date(existing.period_end)
+        if e_start and e_end and start <= e_end and e_start <= end:
+            return existing
+    return None
+
+
 @app.post("/api/payslips")
-def create_payslip(request: Request, body: PayslipCreate, db: Session = Depends(get_db)):
+def create_payslip(request: Request, body: PayslipCreate, allow_overlap: bool = False, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == body.employee_id, models.DBEmployee.client_id == client.id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    if body.period_start and body.period_end:
+        p_start, p_end = _parse_date(body.period_start), _parse_date(body.period_end)
+        if p_start and p_end and p_end < p_start:
+            raise HTTPException(status_code=400, detail="Period end cannot be before period start")
+    if not allow_overlap:
+        clash = find_overlapping_payslip(db, client.id, emp.id, body.period_start, body.period_end)
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Payslip {clash.number} already covers {clash.period_start} to {clash.period_end} for this employee",
+            )
 
-    ps_count = db.query(models.DBPayslip).filter(models.DBPayslip.client_id == client.id).count()
-    ps_number = f"PS-{ps_count + 1:04d}"
-
-    basic = body.basic_salary if body.basic_salary > 0 else emp.salary
-    ot_pay = body.overtime_hours * body.overtime_rate if body.overtime_hours > 0 else 0
-    gross = basic + ot_pay + body.bonus + body.allowances
-    tax = body.tax_amount if body.tax_amount > 0 else round(gross * (emp.tax_rate / 100), 2) if emp.tax_rate > 0 else 0
-    total_deductions = tax + body.insurance + body.retirement + body.other_deductions + emp.deductions
-    net = round(gross - total_deductions, 2)
+    ps_number = next_sequence_number(db, models.DBPayslip, client.id, "PS-")
+    figures = compute_payslip_figures(emp, body.model_dump())
 
     ps = models.DBPayslip(
         client_id=client.id, employee_id=body.employee_id, number=ps_number,
         period_start=body.period_start, period_end=body.period_end, pay_date=body.pay_date,
-        hours_worked=body.hours_worked, overtime_hours=body.overtime_hours,
-        overtime_rate=body.overtime_rate,
-        basic_salary=basic, overtime_pay=ot_pay, bonus=body.bonus, allowances=body.allowances,
-        gross_pay=round(gross, 2),
-        tax_amount=round(tax, 2), insurance=body.insurance, retirement=body.retirement,
-        other_deductions=body.other_deductions,
-        total_deductions=round(total_deductions, 2), net_pay=net,
-        status="Draft", notes=body.notes,
+        status="Draft", notes=body.notes, pay_frequency=emp.pay_frequency or "",
+        **figures,
     )
     db.add(ps)
+    log_audit(db, client.id, "payslip_created", "payslip", None, ps_number,
+              f"{emp.first_name} {emp.last_name}: net {figures['net_pay']:.2f}", request)
     db.commit()
     db.refresh(ps)
     return {"id": ps.id, "number": ps.number, "gross_pay": ps.gross_pay, "net_pay": ps.net_pay, "message": "Payslip created"}
+
+
+PAYROLL_EXCLUDED_STATUSES = ("terminated", "inactive")
+
+
+class PayrollRunRequest(BaseModel):
+    period_start: str
+    period_end: str
+    pay_date: str
+    employee_ids: Optional[List[int]] = None
+    include_attendance_hours: Optional[bool] = True
+    skip_existing: Optional[bool] = True
+
+
+@app.post("/api/payroll/run")
+def run_payroll(request: Request, body: PayrollRunRequest, db: Session = Depends(get_db)):
+    """Generate payslips for a whole pay period in one transaction.
+
+    Replaces the browser looping one request per employee, which had no
+    atomicity and silently swallowed per-employee failures.
+    """
+    client = get_client_user(request, db)
+    if not body.period_start or not body.period_end or not body.pay_date:
+        raise HTTPException(status_code=400, detail="Period start, period end and pay date are all required")
+    p_start, p_end = _parse_date(body.period_start), _parse_date(body.period_end)
+    if not p_start or not p_end:
+        raise HTTPException(status_code=400, detail="Dates must be in YYYY-MM-DD format")
+    if p_end < p_start:
+        raise HTTPException(status_code=400, detail="Period end cannot be before period start")
+
+    # Anyone still on the books gets paid. New starters sit in "onboarding" and
+    # leavers in "offboarding" - both are still owed a payslip; only terminated
+    # staff are excluded.
+    query = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status.notin_(PAYROLL_EXCLUDED_STATUSES),
+    )
+    if body.employee_ids:
+        query = query.filter(models.DBEmployee.id.in_(body.employee_ids))
+    employees = query.all()
+    if not employees:
+        raise HTTPException(status_code=400, detail="No payable employees match this payroll run")
+
+    created, skipped, warnings, total_net, total_gross = [], [], [], 0.0, 0.0
+    next_number = next_sequence_number(db, models.DBPayslip, client.id, "PS-")
+    seq = int(next_number.split("-")[1])
+
+    for emp in employees:
+        clash = find_overlapping_payslip(db, client.id, emp.id, body.period_start, body.period_end)
+        if clash:
+            if body.skip_existing:
+                skipped.append({
+                    "employee_id": emp.id, "name": f"{emp.first_name} {emp.last_name}",
+                    "reason": f"already covered by {clash.number}",
+                })
+                continue
+            raise HTTPException(
+                status_code=409,
+                detail=f"{emp.first_name} {emp.last_name} already has payslip {clash.number} for this period",
+            )
+
+        hours = 0.0
+        if body.include_attendance_hours:
+            records = db.query(models.DBAttendance).filter(
+                models.DBAttendance.employee_id == emp.id,
+                models.DBAttendance.client_id == client.id,
+                models.DBAttendance.date >= body.period_start,
+                models.DBAttendance.date <= body.period_end,
+            ).all()
+            hours = round(sum(r.total_hours or 0 for r in records), 2)
+
+        ot_hours = round(sum(
+            log.hours or 0 for log in db.query(models.DBOvertimeLog).filter(
+                models.DBOvertimeLog.employee_id == emp.id,
+                models.DBOvertimeLog.client_id == client.id,
+                models.DBOvertimeLog.date >= body.period_start,
+                models.DBOvertimeLog.date <= body.period_end,
+                models.DBOvertimeLog.status == "announced",
+            ).all()
+        ), 2)
+
+        figures = compute_payslip_figures(emp, {
+            "hours_worked": hours, "overtime_hours": ot_hours,
+            "bonus": emp.bonus or 0, "allowances": emp.allowances or 0,
+        })
+        ps = models.DBPayslip(
+            client_id=client.id, employee_id=emp.id, number=f"PS-{seq:04d}",
+            period_start=body.period_start, period_end=body.period_end, pay_date=body.pay_date,
+            status="Draft", pay_frequency=emp.pay_frequency or "", **figures,
+        )
+        seq += 1
+        db.add(ps)
+        total_net += figures["net_pay"]
+        total_gross += figures["gross_pay"]
+        created.append({
+            "employee_id": emp.id, "name": f"{emp.first_name} {emp.last_name}",
+            "number": ps.number, "gross_pay": figures["gross_pay"], "net_pay": figures["net_pay"],
+        })
+        # A zero-value payslip is almost always missing data (an hourly worker
+        # with no attendance logged) rather than a genuine nil payment. Surface
+        # it instead of quietly paying someone nothing.
+        if figures["gross_pay"] <= 0:
+            warnings.append({
+                "employee_id": emp.id, "name": f"{emp.first_name} {emp.last_name}",
+                "number": ps.number,
+                "reason": "no salary and no hours recorded for this period - payslip is zero",
+            })
+
+    log_audit(db, client.id, "payroll_run", "payslip", None, f"{body.period_start}..{body.period_end}",
+              f"{len(created)} payslips, net {total_net:.2f}", request)
+    db.commit()
+    return {
+        "message": f"Generated {len(created)} payslip(s)",
+        "created": created, "skipped": skipped, "warnings": warnings,
+        "total_gross": money(total_gross), "total_net": money(total_net),
+        "period_start": body.period_start, "period_end": body.period_end, "pay_date": body.pay_date,
+    }
+
+
+@app.get("/api/employees/{emp_id}/ytd")
+def employee_ytd(emp_id: int, request: Request, year: str = "", db: Session = Depends(get_db)):
+    """Year-to-date totals - required on most statutory payslip formats."""
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    year = year or datetime.now().strftime("%Y")
+    slips = db.query(models.DBPayslip).filter(
+        models.DBPayslip.client_id == client.id,
+        models.DBPayslip.employee_id == emp_id,
+        models.DBPayslip.status != "Void",
+    ).all()
+    in_year = [s for s in slips if (s.period_end or s.pay_date or "").startswith(year)]
+    return {
+        "year": year,
+        "payslip_count": len(in_year),
+        "gross_pay": money(sum(s.gross_pay or 0 for s in in_year)),
+        "tax_amount": money(sum(s.tax_amount or 0 for s in in_year)),
+        "total_deductions": money(sum(s.total_deductions or 0 for s in in_year)),
+        "net_pay": money(sum(s.net_pay or 0 for s in in_year)),
+    }
 
 @app.get("/api/payslips/{ps_id}")
 def get_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
@@ -2537,15 +3200,21 @@ def get_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == ps.employee_id).first()
     settings_rows = db.query(models.DBSettings).filter(models.DBSettings.client_id == client.id).all()
     settings_map = {s.key: s.value for s in settings_rows}
+    dept_name = ""
+    if emp and emp.department_id:
+        dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == emp.department_id).first()
+        dept_name = dept.name if dept else ""
+    ytd = employee_ytd(ps.employee_id, request, (ps.period_end or ps.pay_date or "")[:4], db) if emp else {}
     return {
         "id": ps.id, "number": ps.number,
         "employee_id": ps.employee_id,
+        "ytd": ytd,
         "employee": {
             "full_name": f"{emp.first_name} {emp.last_name}" if emp else "",
             "employee_id": emp.employee_id if emp else "",
             "email": emp.email if emp else "",
             "job_title": emp.job_title if emp else "",
-            "department_name": "", "bank_name": emp.bank_name if emp else "",
+            "department_name": dept_name, "bank_name": emp.bank_name if emp else "",
             "bank_account": emp.bank_account if emp else "", "tax_id": emp.tax_id if emp else "",
             "pay_frequency": emp.pay_frequency if emp else "",
         } if emp else {},
@@ -2566,18 +3235,49 @@ def get_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
         },
     }
 
+PAYSLIP_PAY_INPUTS = (
+    "hours_worked", "overtime_hours", "overtime_rate", "basic_salary",
+    "bonus", "allowances", "tax_amount", "insurance", "retirement", "other_deductions",
+)
+PAYSLIP_META_FIELDS = ("period_start", "period_end", "pay_date", "notes", "status")
+
+
 @app.put("/api/payslips/{ps_id}")
 def update_payslip(ps_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Edit a payslip and re-derive gross/net.
+
+    Previously the totals were frozen while the components were editable, so an
+    edited payslip reported a net figure that no longer matched its own lines.
+    """
     client = get_client_user(request, db)
     ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
     if not ps:
         raise HTTPException(status_code=404, detail="Payslip not found")
-    if body:
-        for key, val in body.items():
-            if hasattr(ps, key) and key not in ("id", "client_id", "created_at", "tracking_id", "net_pay", "gross_pay", "employee_id", "number"):
-                setattr(ps, key, val)
+    if ps.status == "Paid":
+        raise HTTPException(status_code=409, detail="A paid payslip cannot be edited")
+    body = body or {}
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == ps.employee_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    for key in PAYSLIP_META_FIELDS:
+        if key in body and body[key] is not None:
+            setattr(ps, key, body[key])
+
+    inputs = {key: getattr(ps, key) for key in PAYSLIP_PAY_INPUTS}
+    for key in PAYSLIP_PAY_INPUTS:
+        if key in body and body[key] is not None:
+            inputs[key] = body[key]
+
+    for key, val in compute_payslip_figures(emp, inputs).items():
+        setattr(ps, key, val)
+
+    log_audit(db, client.id, "payslip_updated", "payslip", ps.id, ps.number, f"Net: {ps.net_pay:.2f}", request)
     db.commit()
-    return {"message": "Payslip updated"}
+    return {
+        "message": "Payslip updated",
+        "gross_pay": ps.gross_pay, "total_deductions": ps.total_deductions, "net_pay": ps.net_pay,
+    }
 
 @app.post("/api/payslips/{ps_id}/mark-paid")
 def mark_payslip_paid(ps_id: int, request: Request, db: Session = Depends(get_db)):
@@ -2591,12 +3291,31 @@ def mark_payslip_paid(ps_id: int, request: Request, db: Session = Depends(get_db
     db.commit()
     return {"message": "Payslip marked as paid"}
 
-@app.delete("/api/payslips/{ps_id}")
-def delete_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
+@app.post("/api/payslips/{ps_id}/unmark-paid")
+def unmark_payslip_paid(ps_id: int, request: Request, db: Session = Depends(get_db)):
+    """Undo a mark-as-paid entered by mistake."""
     client = get_client_user(request, db)
     ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
     if not ps:
         raise HTTPException(status_code=404, detail="Payslip not found")
+    ps.status = "Sent" if ps.sent else "Draft"
+    log_audit(db, client.id, "payslip_unmarked_paid", "payslip", ps.id, ps.number, "", request)
+    db.commit()
+    return {"message": "Payslip reopened", "status": ps.status}
+
+
+@app.delete("/api/payslips/{ps_id}")
+def delete_payslip(ps_id: int, request: Request, force: bool = False, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    ps = db.query(models.DBPayslip).filter(models.DBPayslip.id == ps_id, models.DBPayslip.client_id == client.id).first()
+    if not ps:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+    if ps.status == "Paid" and not force:
+        raise HTTPException(
+            status_code=409,
+            detail="This payslip is marked as paid. Reopen it first, or pass force=true to delete anyway.",
+        )
+    log_audit(db, client.id, "payslip_deleted", "payslip", ps.id, ps.number, f"Net: {ps.net_pay}", request)
     db.delete(ps)
     db.commit()
     return {"message": "Payslip deleted"}
@@ -3289,15 +4008,51 @@ def employee_clock_in(request: Request, body: dict = None, db: Session = Depends
                 check_type = "office"
             else:
                 check_type = "field"
-    att = models.DBAttendance(
-        client_id=client_id, employee_id=emp_id, date=today,
-        clock_in=now_str, status="present", check_type=check_type,
-        ip_address=ip, device_info=device,
-        location_lat=lat, location_lng=lng, location_label=loc_label,
-    )
-    db.add(att)
+
+    # Flag lateness against the configured start time + grace period. The
+    # settings already existed but nothing ever read them.
+    status = "present"
+    minutes_late = 0
+    att_settings = db.query(models.DBAttendanceSettings).filter(
+        models.DBAttendanceSettings.client_id == client_id
+    ).first()
+    if att_settings and att_settings.work_start:
+        try:
+            expected = datetime.strptime(f"{today} {att_settings.work_start}", "%Y-%m-%d %H:%M")
+            actual = datetime.strptime(f"{today} {now_str}", "%Y-%m-%d %H:%M:%S")
+            grace = att_settings.grace_minutes or 0
+            late_by = (actual - expected).total_seconds() / 60
+            if late_by > grace:
+                status = "late"
+                minutes_late = int(round(late_by))
+        except (ValueError, TypeError):
+            pass
+
+    if existing:
+        # A row may already exist for today (e.g. marked absent); reuse it
+        # rather than creating a duplicate for the same employee and date.
+        existing.clock_in = now_str
+        existing.status = status
+        existing.check_type = check_type
+        existing.ip_address = ip
+        existing.device_info = device
+        existing.location_lat = lat
+        existing.location_lng = lng
+        existing.location_label = loc_label
+        att = existing
+    else:
+        att = models.DBAttendance(
+            client_id=client_id, employee_id=emp_id, date=today,
+            clock_in=now_str, status=status, check_type=check_type,
+            ip_address=ip, device_info=device,
+            location_lat=lat, location_lng=lng, location_label=loc_label,
+        )
+        db.add(att)
     db.commit()
-    return {"message": "Clocked in", "clock_in": now_str, "check_type": check_type}
+    return {
+        "message": "Clocked in", "clock_in": now_str, "check_type": check_type,
+        "status": status, "minutes_late": minutes_late,
+    }
 
 @app.post("/api/employee/attendance/clock-out")
 def employee_clock_out(request: Request, db: Session = Depends(get_db)):
@@ -3328,11 +4083,17 @@ def employee_clock_out(request: Request, db: Session = Depends(get_db)):
         att.break_start = ""
     att.clock_out = now_str
     try:
+        from datetime import timedelta
         cin = datetime.strptime(today + " " + att.clock_in, "%Y-%m-%d %H:%M:%S")
         cout = datetime.strptime(today + " " + now_str, "%Y-%m-%d %H:%M:%S")
+        # A clock-out earlier than the clock-in means the shift ran past
+        # midnight. Without this, total_hours went negative and silently
+        # corrupted the hours that payroll reads.
+        if cout < cin:
+            cout += timedelta(days=1)
         raw_hours = (cout - cin).total_seconds() / 3600
         break_hours = (att.break_minutes or 0) / 60
-        att.total_hours = round(raw_hours - break_hours, 2)
+        att.total_hours = max(0.0, round(raw_hours - break_hours, 2))
         settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == client_id).first()
         if settings:
             try:
@@ -3342,10 +4103,14 @@ def employee_clock_out(request: Request, db: Session = Depends(get_db)):
             except Exception:
                 work_hours = 8.0
             if att.total_hours > work_hours:
-                att.overtime_hours = round(att.total_hours - work_hours, 2)
+                overtime = round(att.total_hours - work_hours, 2)
+                # Respect the configured overtime ceiling so a forgotten
+                # clock-out cannot book an unbounded overtime claim.
+                cap = settings.max_overtime_hours or 0
+                att.overtime_hours = min(overtime, cap) if cap > 0 else overtime
         att.status = "completed"
     except Exception:
-        pass
+        logger.exception("Failed to compute hours for attendance %s", att.id)
     db.commit()
     return {"message": "Clocked out", "total_hours": att.total_hours, "overtime_hours": att.overtime_hours, "break_minutes": att.break_minutes}
 
@@ -3760,45 +4525,124 @@ def mark_all_notifications_read(request: Request, db: Session = Depends(get_db))
     return {"message": "All notifications marked as read"}
 
 
-@app.get("/api/employee/leave")
-def get_employee_leave(request: Request, db: Session = Depends(get_db)):
-    emp_id = request.session.get('employee_id')
-    if not emp_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
-    approved = sum(l.days for l in leaves if l.status == "approved" and l.leave_type == "annual")
-    sick_taken = sum(l.days for l in leaves if l.status == "approved" and l.leave_type == "sick")
+def working_days_between(start_date, end_date) -> float:
+    """Inclusive weekday count. Leave is booked in working days, so a Mon-Fri
+    request is 5 days, not the 7 a raw date subtraction would give."""
+    start = _parse_date(start_date)
+    end = _parse_date(end_date)
+    if not start or not end or end < start:
+        return 0.0
+    from datetime import timedelta
+    days = 0
+    cursor = start
+    while cursor <= end:
+        if cursor.weekday() < 5:
+            days += 1
+        cursor += timedelta(days=1)
+    return float(days)
+
+
+def leave_balance_for(db, emp) -> dict:
+    """Entitlement and usage per leave type for one employee."""
+    leaves = db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.employee_id == emp.id
+    ).all()
+
+    def taken(kind, statuses):
+        return round(sum(l.days or 0 for l in leaves if l.leave_type == kind and l.status in statuses), 2)
+
+    annual_total = emp.annual_leave_entitlement if emp.annual_leave_entitlement is not None else 25.0
+    sick_total = emp.sick_leave_entitlement if emp.sick_leave_entitlement is not None else 10.0
+    annual_taken = taken("annual", ("approved",))
+    annual_pending = taken("annual", ("pending",))
+    sick_taken = taken("sick", ("approved",))
     return {
-        "requests": [{"id": l.id, "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date, "days": l.days, "reason": l.reason, "status": l.status, "approved_by": l.approved_by, "created_at": l.created_at} for l in leaves],
-        "balance": {"annual_total": 25, "annual_taken": approved, "sick_total": 10, "sick_taken": sick_taken}
+        "annual_total": annual_total,
+        "annual_taken": annual_taken,
+        "annual_pending": annual_pending,
+        "annual_remaining": round(annual_total - annual_taken - annual_pending, 2),
+        "sick_total": sick_total,
+        "sick_taken": sick_taken,
+        "sick_remaining": round(sick_total - sick_taken, 2),
     }
 
 
-@app.post("/api/employee/leave")
-def request_leave(request: Request, body: dict, db: Session = Depends(get_db)):
+@app.get("/api/employee/leave")
+def get_employee_leave(request: Request, db: Session = Depends(get_db)):
     emp_id = request.session.get('employee_id')
     if not emp_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
+    leaves = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.employee_id == emp_id).order_by(models.DBLeaveRequest.created_at.desc()).all()
+    return {
+        "requests": [{"id": l.id, "leave_type": l.leave_type, "start_date": l.start_date, "end_date": l.end_date, "days": l.days, "reason": l.reason, "status": l.status, "approved_by": l.approved_by, "created_at": l.created_at} for l in leaves],
+        "balance": leave_balance_for(db, emp),
+    }
+
+
+@app.post("/api/employee/leave")
+def request_leave(request: Request, body: dict, db: Session = Depends(get_db)):
+    """Book leave. Days are computed server-side and checked against the
+    remaining balance and existing bookings rather than trusted from the form."""
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    leave_type = (body.get("leave_type") or "annual").strip().lower()
+    start_date = body.get("start_date", "")
+    end_date = body.get("end_date", "")
+    start, end = _parse_date(start_date), _parse_date(end_date)
+    if not start or not end:
+        raise HTTPException(status_code=400, detail="Start and end dates are required (YYYY-MM-DD)")
+    if end < start:
+        raise HTTPException(status_code=400, detail="End date cannot be before the start date")
+
+    days = working_days_between(start_date, end_date)
+    if days <= 0:
+        raise HTTPException(status_code=400, detail="That range contains no working days")
+
+    for existing in db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.employee_id == emp_id,
+        models.DBLeaveRequest.status.in_(["pending", "approved"]),
+    ).all():
+        e_start, e_end = _parse_date(existing.start_date), _parse_date(existing.end_date)
+        if e_start and e_end and start <= e_end and e_start <= end:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This overlaps an existing {existing.status} request ({existing.start_date} to {existing.end_date})",
+            )
+
+    balance = leave_balance_for(db, emp)
+    if leave_type == "annual" and days > balance["annual_remaining"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {balance['annual_remaining']:g} day(s) of annual leave remaining; you requested {days:g}",
+        )
+    if leave_type == "sick" and days > balance["sick_remaining"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {balance['sick_remaining']:g} day(s) of sick leave remaining; you requested {days:g}",
+        )
+
     leave = models.DBLeaveRequest(
         client_id=emp.client_id, employee_id=emp_id,
-        leave_type=body.get("leave_type", "annual"),
-        start_date=body.get("start_date", ""),
-        end_date=body.get("end_date", ""),
-        days=body.get("days", 0),
-        reason=body.get("reason", ""),
+        leave_type=leave_type, start_date=start_date, end_date=end_date,
+        days=days, reason=body.get("reason", ""),
     )
     db.add(leave)
-    note = models.DBNotification(
+    db.add(models.DBNotification(
         client_id=emp.client_id, employee_id=emp_id,
-        title="Leave Request Submitted", message=f"Your {leave.leave_type} leave request for {leave.days} day(s) has been submitted.",
+        title="Leave Request Submitted",
+        message=f"Your {leave_type} leave request for {days:g} day(s) has been submitted.",
         type="info",
-    )
-    db.add(note)
+    ))
     db.commit()
-    return {"message": "Leave request submitted"}
+    return {"message": "Leave request submitted", "days": days, "balance": leave_balance_for(db, emp)}
 
 
 @app.get("/api/employee/documents")
@@ -4059,18 +4903,77 @@ def action_leave_simple(leave_id: int, request: Request, body: dict = None, db: 
     leave = db.query(models.DBLeaveRequest).filter(models.DBLeaveRequest.id == leave_id, models.DBLeaveRequest.client_id == client.id).first()
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
-    action = body.get("action", "")
+    action = (body.get("action") or "").strip().lower()
+    if action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'")
+    if leave.status != "pending":
+        raise HTTPException(status_code=409, detail=f"This request has already been {leave.status}")
+
+    if action == "approve":
+        emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == leave.employee_id).first()
+        if emp:
+            balance = leave_balance_for(db, emp)
+            # Pending days include this request, so compare against taken only.
+            if leave.leave_type == "annual" and (leave.days or 0) > (balance["annual_total"] - balance["annual_taken"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Approving this would exceed the annual entitlement ({balance['annual_total']:g} days)",
+                )
+            if leave.leave_type == "sick" and (leave.days or 0) > (balance["sick_total"] - balance["sick_taken"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Approving this would exceed the sick leave entitlement ({balance['sick_total']:g} days)",
+                )
+
     leave.status = "approved" if action == "approve" else "rejected"
     leave.approved_by = body.get("approved_by", "HR")
-    note = models.DBNotification(
+    leave.decided_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.add(models.DBNotification(
         client_id=client.id, employee_id=leave.employee_id,
-        title=f"Leave Request {leave.status.title()}", message=f"Your {leave.leave_type} leave request has been {leave.status}.",
+        title=f"Leave Request {leave.status.title()}",
+        message=f"Your {leave.leave_type} leave request for {leave.start_date} to {leave.end_date} has been {leave.status}.",
         type="success" if leave.status == "approved" else "warning",
-    )
-    db.add(note)
+    ))
     log_audit(db, client.id, f"leave_{leave.status}", "leave", leave.id, f"{leave.leave_type} ({leave.days}d)", f"Employee ID: {leave.employee_id}", request)
     db.commit()
-    return {"message": f"Leave {leave.status}"}
+    return {"message": f"Leave {leave.status}", "status": leave.status}
+
+
+@app.get("/api/employees/{emp_id}/leave-balance")
+def get_employee_leave_balance(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    """Entitlement vs. usage, for the HR-side employee record."""
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return leave_balance_for(db, emp)
+
+
+@app.put("/api/employees/{emp_id}/leave-entitlement")
+def set_employee_leave_entitlement(emp_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Entitlements were hard-coded at 25/10 for everyone; make them per-person."""
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    body = body or {}
+    for field, attr in (("annual_days", "annual_leave_entitlement"), ("sick_days", "sick_leave_entitlement")):
+        if body.get(field) is not None:
+            try:
+                value = float(body[field])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{field} must be a number")
+            if value < 0 or value > 365:
+                raise HTTPException(status_code=400, detail=f"{field} must be between 0 and 365")
+            setattr(emp, attr, value)
+    log_audit(db, client.id, "leave_entitlement_updated", "employee", emp.id,
+              f"{emp.first_name} {emp.last_name}", "", request)
+    db.commit()
+    return leave_balance_for(db, emp)
 
 
 @app.get("/api/employees/{emp_id}/goals")

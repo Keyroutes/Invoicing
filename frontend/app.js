@@ -487,7 +487,13 @@ function renderInvoices(invoices) {
         var statusClass = (inv.status || '').toLowerCase().replace(/\s+/g, '-');
         var opens = inv.open_count || 0;
         var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + esc(inv.number) + '\')">' + esc(inv.number) + '</a></td><td>' + esc(inv.ref || '-') + '</td><td>' + esc(inv.to) + '</td><td>' + esc(inv.date) + '</td><td>' + esc(inv.due_date) + '</td><td class="text-right">' + formatCurrency(inv.paid, inv.currency) + '</td><td class="text-right">' + formatCurrency(inv.due, inv.currency) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(inv.status) + '</span></td><td class="text-right">' + openBadge + '</td><td>' + esc(inv.sent || '-') + '</td></tr>');
+        // An overdue invoice is the one thing a user must not miss in this list.
+        var dueCell = esc(inv.due_date);
+        if (inv.is_overdue) {
+            dueCell = '<span style="color:var(--danger-color);font-weight:600;" title="' + inv.days_overdue +
+                      ' days overdue">' + esc(inv.due_date) + ' &#9888;</span>';
+        }
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewInvoice(\'' + esc(inv.number) + '\')">' + esc(inv.number) + '</a></td><td>' + esc(inv.ref || '-') + '</td><td>' + esc(inv.to) + '</td><td>' + esc(inv.date) + '</td><td>' + dueCell + '</td><td class="text-right">' + formatCurrency(inv.paid, inv.currency) + '</td><td class="text-right">' + formatCurrency(inv.due, inv.currency) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(inv.status) + '</span></td><td class="text-right">' + openBadge + '</td><td>' + esc(inv.sent || '-') + '</td></tr>');
     });
 }
 
@@ -495,7 +501,11 @@ function filterInvoices(status, btn) {
     currentFilter = status;
     document.querySelectorAll('.invoices-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
     if (btn) btn.classList.add('active');
-    var filtered = status === 'all' ? allInvoices : allInvoices.filter(function(inv) { return (inv.status || '').toLowerCase() === status; });
+    var filtered;
+    if (status === 'all') filtered = allInvoices;
+    // "overdue" is derived from the due date, not stored as a status.
+    else if (status === 'overdue') filtered = allInvoices.filter(function(inv) { return inv.is_overdue; });
+    else filtered = allInvoices.filter(function(inv) { return (inv.status || '').toLowerCase() === status; });
     renderInvoices(filtered);
 }
 window.filterInvoices = filterInvoices;
@@ -669,6 +679,45 @@ function setupLogoUpload() {
     }
 }
 
+var _viewOutstanding = 0;
+
+// Payment history + overdue banner, injected above the invoice actions so the
+// state of an invoice is obvious without opening a report.
+function renderInvoicePayments(inv) {
+    var host = document.getElementById('view-inv-payments');
+    if (!host) return;
+    var payments = inv.payments || [];
+    var sym = getCurrencySymbol();
+    var html = '';
+    if (inv.is_overdue) {
+        html += '<div style="padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.12);' +
+                'border:1px solid rgba(239,68,68,0.35);color:var(--danger-color);font-size:0.85rem;' +
+                'font-weight:600;margin-bottom:10px;">Overdue by ' + inv.days_overdue +
+                ' day' + (inv.days_overdue === 1 ? '' : 's') + ' — ' + sym + (inv.due || 0).toFixed(2) + ' outstanding</div>';
+    }
+    if (payments.length) {
+        html += '<div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;' +
+                'color:var(--text-secondary);margin-bottom:6px;">Payments received</div>';
+        html += '<table style="width:100%;font-size:0.85rem;border-collapse:collapse;">';
+        payments.forEach(function(p) {
+            html += '<tr style="border-bottom:1px solid var(--border-color);">' +
+                    '<td style="padding:6px 0;">' + esc(p.paid_on || '') + '</td>' +
+                    '<td style="padding:6px 0;color:var(--text-secondary);">' + esc(p.method || '') +
+                    (p.reference ? ' &middot; ' + esc(p.reference) : '') + '</td>' +
+                    '<td style="padding:6px 0;text-align:right;font-weight:600;">' + sym + (p.amount || 0).toFixed(2) + '</td>' +
+                    '<td style="padding:6px 0;text-align:right;width:32px;">' +
+                    '<button type="button" title="Reverse payment" style="background:none;border:none;cursor:pointer;color:var(--danger-color);" ' +
+                    'onclick="reversePayment(\'' + esc(inv.number) + '\',' + p.id + ')">&times;</button></td></tr>';
+        });
+        html += '<tr><td colspan="2" style="padding:6px 0;font-weight:700;">Outstanding</td>' +
+                '<td colspan="2" style="padding:6px 0;text-align:right;font-weight:700;">' + sym + (inv.due || 0).toFixed(2) + '</td></tr>';
+        html += '</table>';
+    }
+    host.innerHTML = html;
+    host.style.display = html ? 'block' : 'none';
+}
+window.renderInvoicePayments = renderInvoicePayments;
+
 // --- View Invoice ---
 async function viewInvoice(number) {
     try {
@@ -676,6 +725,8 @@ async function viewInvoice(number) {
         if (!response.ok) throw new Error('Failed');
         var inv = await response.json();
         _viewCurrency = inv.currency || '';
+        _viewOutstanding = inv.due || 0;
+        renderInvoicePayments(inv);
         document.getElementById('view-inv-title').textContent = 'Invoice ' + inv.number;
         document.getElementById('view-inv-number-val').textContent = inv.number;
     document.getElementById('view-inv-ref').textContent = inv.reference || '-';
@@ -735,15 +786,11 @@ async function viewInvoice(number) {
         tbody.innerHTML = '';
         var subtotal = 0, vat = 0;
         if (inv.line_items) {
+            var taxType = inv.tax_type || 'exclusive';
             inv.line_items.forEach(function(item) {
-                var amount = item.qty * item.price;
-                if (item.disc && item.disc > 0) amount *= (1 - item.disc / 100);
-                var itemVat = 0;
-                var taxType = inv.tax_type || 'exclusive';
-                if (taxType === 'exclusive') { itemVat = amount * 0.20; }
-                else if (taxType === 'inclusive') { itemVat = amount - (amount / 1.20); amount -= itemVat; }
-                subtotal += amount; vat += itemVat;
-                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:200px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
+                var t = lineTotals(item.qty, item.price, item.disc, item.tax_rate, taxType);
+                subtotal += t.net; vat += t.vat;
+                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:200px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">' + esc(item.tax_rate || 'No Tax') + '</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + t.net.toFixed(2) + '</td></tr>');
             });
         }
         var bankView = document.getElementById('view-inv-bank-details');
@@ -759,6 +806,12 @@ async function viewInvoice(number) {
 
         document.getElementById('view-invoice-delete-btn').dataset.number = inv.number;
         document.getElementById('view-invoice-paid-btn').dataset.number = inv.number;
+        var payBtn = document.getElementById('view-invoice-payment-btn');
+        if (payBtn) {
+            payBtn.dataset.number = inv.number;
+            payBtn.disabled = (inv.due || 0) <= 0;
+            payBtn.style.opacity = payBtn.disabled ? '0.45' : '1';
+        }
 
         var backBtn = document.getElementById('preview-back-btn');
         if (backBtn) backBtn.style.display = 'none';
@@ -1357,7 +1410,7 @@ function generateInvoicePDF(isDummy) {
     }
 
     tRow('Subtotal', subtotal);
-    tRow('TOTAL  NO VAT', vatAmt);
+    tRow('VAT / Tax', vatAmt);
     lh(tLabelX - 60, tValX, y - 2, 0.5);
     y += 4;
     tRow('TOTAL  ' + currLabel, total, true);
@@ -1515,25 +1568,95 @@ async function markAsPaid(number) {
 }
 window.markAsPaid = markAsPaid;
 
+// --- Part payments ---
+// Invoices are rarely settled in one hit; this records a receipt against the
+// outstanding balance and lets the server move the status.
+async function recordPayment(number) {
+    number = number || (document.getElementById('view-inv-number-val') || {}).textContent;
+    if (!number) return;
+    var outstanding = _viewOutstanding || 0;
+    var raw = prompt('Payment amount' + (outstanding ? ' (outstanding: ' + outstanding.toFixed(2) + ')' : '') + ':',
+                     outstanding ? outstanding.toFixed(2) : '');
+    if (raw === null) return;
+    var amount = parseFloat(raw);
+    if (isNaN(amount) || amount <= 0) { showToast('Enter a valid amount', 'error'); return; }
+    var reference = prompt('Reference (optional):', '') || '';
+    try {
+        var res = await fetch('/api/invoices/' + encodeURIComponent(number) + '/payments', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: amount, reference: reference })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Payment recorded — ' + data.status, 'success');
+        fetchInvoices();
+        viewInvoice(number);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.recordPayment = recordPayment;
+
+async function reversePayment(number, paymentId) {
+    if (!confirm('Reverse this payment?')) return;
+    try {
+        var res = await fetch('/api/invoices/' + encodeURIComponent(number) + '/payments/' + paymentId, { method: 'DELETE' });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Payment reversed', 'success');
+        fetchInvoices();
+        viewInvoice(number);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.reversePayment = reversePayment;
+
 // --- Invoice Calculations ---
+// Mirror of backend parse_tax_rate: derive the rate from the line's own label
+// ("20% VAT", "5% VAT", "0% Zero Rated", "No Tax") instead of assuming 20%.
+function parseTaxRate(label, fallback) {
+    if (fallback === undefined) fallback = 0.20;
+    var s = String(label == null ? '' : label).trim();
+    if (!s) return fallback;
+    var m = s.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (m) { var v = parseFloat(m[1]); return isNaN(v) ? fallback : Math.max(0, v) / 100; }
+    var low = s.toLowerCase();
+    if (low.indexOf('no tax') >= 0 || low.indexOf('none') >= 0 || low.indexOf('zero') >= 0 ||
+        low.indexOf('exempt') >= 0 || low.indexOf('outside') >= 0) return 0;
+    return fallback;
+}
+window.parseTaxRate = parseTaxRate;
+
+// Net amount and tax for one line, given the invoice-level tax treatment.
+function lineTotals(qty, price, disc, taxLabel, taxType) {
+    var amount = (parseFloat(qty) || 0) * (parseFloat(price) || 0);
+    var d = parseFloat(disc) || 0;
+    if (d > 0) amount *= (1 - d / 100);
+    var rate = parseTaxRate(taxLabel);
+    var vat = 0;
+    if (taxType === 'exclusive') {
+        vat = amount * rate;
+    } else if (taxType === 'inclusive') {
+        var net = rate ? amount / (1 + rate) : amount;
+        vat = amount - net;
+        amount = net;
+    }
+    return { net: amount, vat: vat, rate: rate };
+}
+window.lineTotals = lineTotals;
+
 function calculateTotals() {
     var subtotal = 0, totalVat = 0;
     var taxType = (document.getElementById('tax-type') || {}).value || 'exclusive';
     document.querySelectorAll('.line-item-row').forEach(function(row) {
-        var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
-        var price = parseFloat(row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0) || 0;
-        var disc = parseFloat(row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0) || 0;
-        var amount = qty * price;
-        if (disc > 0) amount *= (1 - disc / 100);
-        var vat = 0;
-        if (taxType === 'exclusive') { vat = amount * 0.20; }
-        else if (taxType === 'inclusive') { vat = amount - (amount / 1.20); amount -= vat; }
+        var qty = row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0;
+        var price = row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0;
+        var disc = row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0;
+        var taxLabel = row.querySelector('.item-tax-rate') ? row.querySelector('.item-tax-rate').value : '';
+        var t = lineTotals(qty, price, disc, taxLabel, taxType);
         var amountEl = row.querySelector('.item-amount');
         var taxEl = row.querySelector('.item-tax-amount');
-        if (amountEl) amountEl.textContent = amount.toFixed(2);
-        if (taxEl) taxEl.textContent = vat.toFixed(2);
-        subtotal += amount;
-        totalVat += vat;
+        if (amountEl) amountEl.textContent = t.net.toFixed(2);
+        if (taxEl) taxEl.textContent = t.vat.toFixed(2);
+        subtotal += t.net;
+        totalVat += t.vat;
     });
     var subEl = document.getElementById('summary-subtotal');
     var vatEl = document.getElementById('summary-vat');
@@ -1620,13 +1743,10 @@ function previewInvoice() {
         var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
         var price = parseFloat(row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0) || 0;
         var disc = parseFloat(row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0) || 0;
+        var taxLabel = row.querySelector('.item-tax-rate') ? row.querySelector('.item-tax-rate').value : '';
         if (name || desc || qty > 0 || price > 0) {
-            var amount = qty * price;
-            if (disc > 0) amount *= (1 - disc / 100);
-            var vat = 0;
-            if (taxType === 'exclusive') { vat = amount * 0.20; }
-            else if (taxType === 'inclusive') { vat = amount - (amount / 1.20); amount -= vat; }
-            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(name) + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(desc) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + disc + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
+            var t = lineTotals(qty, price, disc, taxLabel, taxType);
+            tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(name) + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(desc) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + disc + '%</td><td style="padding:12px 16px;vertical-align:top;">' + esc(taxLabel || 'No Tax') + '</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + t.net.toFixed(2) + '</td></tr>');
         }
     });
 
@@ -1672,6 +1792,7 @@ async function submitComplexInvoice(status) {
         reference: document.getElementById('inv-ref').value,
         line_items: line_items,
         tax_type: (document.getElementById('tax-type') || {}).value || 'exclusive',
+        status: status,
         currency: document.getElementById('inv-currency') ? document.getElementById('inv-currency').value : (_appCurrency || 'GBP'),
         bank_details: document.getElementById('inv-bank-account') ? document.getElementById('inv-bank-account').value : ''
     };
@@ -3083,36 +3204,41 @@ function searchPayslips() {
 }
 window.searchPayslips = searchPayslips;
 
+// Runs the whole pay period server-side in one transaction. The old version
+// looped one HTTP request per employee from the browser, which had no
+// atomicity, ignored worked hours, and reported failures only as a count.
 async function batchGeneratePayslips() {
     var today = new Date().toISOString().split('T')[0];
-    var periodStart = prompt('Period start date (YYYY-MM-DD):', today);
+    var firstOfMonth = today.slice(0, 8) + '01';
+    var periodStart = prompt('Period start date (YYYY-MM-DD):', firstOfMonth);
     if (!periodStart) return;
     var periodEnd = prompt('Period end date (YYYY-MM-DD):', today);
     if (!periodEnd) return;
     var payDate = prompt('Pay date (YYYY-MM-DD):', today);
     if (!payDate) return;
-    if (!confirm('Generate payslips for ALL active employees for ' + periodStart + ' to ' + periodEnd + '?')) return;
-    showToast('Generating payslips...', 'info');
+    if (!confirm('Run payroll for all active employees, ' + periodStart + ' to ' + periodEnd + '?')) return;
+    showToast('Running payroll...', 'info');
     try {
-        var empRes = await fetch('/api/employees?status=active');
-        var emps = await empRes.json();
-        var created = 0, failed = 0;
-        for (var i = 0; i < emps.length; i++) {
-            var e = emps[i];
-            try {
-                var res = await fetch('/api/payslips', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        employee_id: e.id, period_start: periodStart, period_end: periodEnd, pay_date: payDate,
-                        basic_salary: e.salary || 0, tax_rate: e.tax_rate || 0,
-                    })
-                });
-                if (res.ok) created++; else failed++;
-            } catch(err) { failed++; }
+        var res = await fetch('/api/payroll/run', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                period_start: periodStart, period_end: periodEnd, pay_date: payDate,
+                include_attendance_hours: true, skip_existing: true
+            })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Payroll run failed');
+        var msg = data.created.length + ' payslip(s) created, net ' + getCurrencySymbol() + data.total_net.toFixed(2);
+        if (data.skipped.length) msg += ' — ' + data.skipped.length + ' skipped (already paid for this period)';
+        showToast(msg, data.created.length ? 'success' : 'warning');
+        // Zero-value payslips nearly always mean missing hours, so make the
+        // operator acknowledge them rather than shipping a silent nil payment.
+        if (data.warnings && data.warnings.length) {
+            alert('Check these payslips before approving:\n\n' +
+                  data.warnings.map(function(w) { return '• ' + w.name + ' (' + w.number + '): ' + w.reason; }).join('\n'));
         }
-        showToast('Generated ' + created + ' payslips' + (failed ? ' (' + failed + ' failed)' : ''), created > 0 ? 'success' : 'error');
         fetchPayslips(currentPsFilter);
-    } catch(e) { showToast('Batch generation failed', 'error'); }
+    } catch (e) { showToast('Payroll run failed: ' + e.message, 'error'); }
 }
 window.batchGeneratePayslips = batchGeneratePayslips;
 
@@ -3317,19 +3443,29 @@ async function submitGeneratePayslip() {
         other_deductions: parseFloat(document.getElementById('ps-other-ded').value) || 0,
         notes: document.getElementById('ps-notes').value,
     };
-    try {
-        var res = await fetch('/api/payslips', {
+    async function post(allowOverlap) {
+        var url = '/api/payslips' + (allowOverlap ? '?allow_overlap=true' : '');
+        var res = await fetch(url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        var data = await res.json();
-        if (res.ok) {
-            showToast(data.message || 'Payslip created', 'success');
+        return { res: res, data: await res.json() };
+    }
+    try {
+        var out = await post(false);
+        // 409 means an existing payslip already covers this period - let the
+        // user knowingly override rather than silently double-paying.
+        if (out.res.status === 409) {
+            if (!confirm((out.data.detail || 'A payslip already covers this period.') + '\n\nCreate it anyway?')) return;
+            out = await post(true);
+        }
+        if (out.res.ok) {
+            showToast(out.data.message || 'Payslip created', 'success');
             closeGeneratePayslipModal();
             if (currentEmployeeId) viewEmployee(currentEmployeeId);
             fetchPayslips(currentPsFilter);
         } else {
-            showToast('Failed: ' + (data.detail || 'Error'), 'error');
+            showToast('Failed: ' + (out.data.detail || 'Error'), 'error');
         }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }

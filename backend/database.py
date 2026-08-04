@@ -563,6 +563,44 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Invoice payment ledger
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS payments (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        invoice_id INTEGER REFERENCES invoices(id) NOT NULL,
+                        amount DOUBLE PRECISION DEFAULT 0,
+                        paid_on VARCHAR DEFAULT '',
+                        method VARCHAR DEFAULT 'bank_transfer',
+                        reference VARCHAR DEFAULT '',
+                        note VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_client_id ON payments (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_invoice_id ON payments (invoice_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Leave entitlement / balance tracking
+            try:
+                conn.execute(text("ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS decided_at VARCHAR DEFAULT ''"))
+                conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS annual_leave_entitlement DOUBLE PRECISION DEFAULT 25"))
+                conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS sick_leave_entitlement DOUBLE PRECISION DEFAULT 10"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Payslip period guard + YTD support
+            try:
+                conn.execute(text("ALTER TABLE payslips ADD COLUMN IF NOT EXISTS pay_frequency VARCHAR DEFAULT ''"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_payslips_period ON payslips (employee_id, period_start, period_end)"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Audit logs table
             try:
                 conn.execute(text("""

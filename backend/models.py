@@ -82,6 +82,22 @@ class DBInvoice(Base):
     client = relationship("DBClient", back_populates="invoices")
 
 
+class DBPayment(Base):
+    """A single receipt against an invoice. Invoices keep running `paid`/`due`
+    totals; this table is the ledger that explains how they got there."""
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False, index=True)
+    amount = Column(Float, default=0.0)
+    paid_on = Column(String, default="")
+    method = Column(String, default="bank_transfer")
+    reference = Column(String, default="")
+    note = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 class DBLineItem(Base):
     __tablename__ = "line_items"
 
@@ -189,6 +205,9 @@ class DBEmployee(Base):
     emergency_contact = Column(String, default="")
     emergency_phone = Column(String, default="")
 
+    annual_leave_entitlement = Column(Float, default=25.0)
+    sick_leave_entitlement = Column(Float, default=10.0)
+
     password_hash = Column(String, default="")
     work_location = Column(String, default="")
     latitude = Column(Float, default=0.0)
@@ -246,6 +265,7 @@ class DBPayslip(Base):
     status = Column(String, default="Draft", index=True)
     sent = Column(String, default="")
     notes = Column(String, default="")
+    pay_frequency = Column(String, default="")
 
     tracking_id = Column(String, unique=True, index=True, default=lambda: str(uuid.uuid4()))
     open_count = Column(Integer, default=0)
@@ -482,6 +502,7 @@ class DBLeaveRequest(Base):
     reason = Column(String, default="")
     status = Column(String, default="pending")
     approved_by = Column(String, default="")
+    decided_at = Column(String, default="")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     employee = relationship("DBEmployee")
