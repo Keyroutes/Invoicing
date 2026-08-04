@@ -977,6 +977,30 @@ function generateInvoicePDF(isDummy) {
     var pageBottom = h - 60;
     var pageNum = 1;
 
+    // Currency symbol sanitizer — jsPDF built-in fonts only support Latin-1.
+    // Map any non-Latin symbol to a safe ASCII/Latin equivalent.
+    function pdfSym(sym) {
+        var map = {
+            '\u20B9': 'Rs.',  // Indian Rupee ₹
+            '\u20A9': 'KRW ', // South Korean Won ₩
+            '\u20AA': 'ILS ', // Israeli Shekel ₪
+            '\u20A6': 'NGN ', // Nigerian Naira ₦
+            '\u20AB': 'VND ', // Vietnamese Dong ₫
+            '\u20AD': 'LAK ', // Lao Kip ₭
+            '\u20AE': 'MNT ', // Mongolian Togrog ₮
+            '\u20B1': 'PHP ', // Philippine Peso ₱
+            '\u20B2': 'PYG ', // Guarani ₲
+            '\u20B4': 'UAH ', // Ukrainian Hryvnia ₴
+            '\u20B5': 'GHS ', // Ghanaian Cedi ₵
+            '\u20B8': 'KZT ', // Kazakhstani Tenge ₸
+            '\u20BA': 'TRY ', // Turkish Lira ₺
+            '\u20BC': 'AZN ', // Azerbaijani Manat ₼
+            '\u20BD': 'RUB ', // Russian Ruble ₽
+        };
+        return map[sym] !== undefined ? map[sym] : sym;
+    }
+
+
     // ── Color palette ──────────────────────────────────────────────
     var C = {
         bg:        [255, 255, 255],
@@ -1045,7 +1069,7 @@ function generateInvoicePDF(isDummy) {
     var bankContent= isDummy ? 'Bank: First National Bank\nAccount Name: Aniprotech Ltd\nAccount No: 12345678\nSort Code: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
     var refText    = isDummy ? 'PO-98765' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
     if (refText === '-') refText = '';
-    var currencySym= isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '');
+    var currencySym= pdfSym(isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : ''));
     var subtotal   = isDummy ? '5000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
     var vat        = isDummy ? '1000.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
     var total      = isDummy ? '6000.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
@@ -1125,7 +1149,7 @@ function generateInvoicePDF(isDummy) {
     doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
     doc.text('AMOUNT DUE', labelX + 8, detY + 11);
     doc.setFontSize(13); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-    doc.text(currencySym + total, valX - 8, detY + 19, { align: 'right' });
+    doc.text(pdfSym(currencySym) + total, valX - 8, detY + 19, { align: 'right' });
     detY += 32;
 
     y = Math.max(y, detY) + 20;
@@ -1194,13 +1218,13 @@ function generateInvoicePDF(isDummy) {
         doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
         doc.text(String(row.qty), col.qty + 8, y + 13, { align: 'center' });
         // Price
-        doc.text(currencySym + row.price, col.price + 8, y + 13, { align: 'center' });
+        doc.text(pdfSym(currencySym) + row.price, col.price + 8, y + 13, { align: 'center' });
         // Disc
         var discVal = parseFloat(row.disc) > 0 ? row.disc + '%' : '-';
         doc.text(discVal, col.disc + 8, y + 13, { align: 'center' });
         // Amount
         doc.setFont('helvetica', 'bold'); setColor(C.text);
-        doc.text(currencySym + row.amount, col.amt - 8, y + 13, { align: 'right' });
+        doc.text(pdfSym(currencySym) + row.amount, col.amt - 8, y + 13, { align: 'right' });
 
         // Row bottom border
         setDraw(C.border); hline(ml, mr, y + rowHeight, 0.3);
@@ -1231,15 +1255,15 @@ function generateInvoicePDF(isDummy) {
         y += 18;
     }
 
-    totRow('Subtotal', currencySym + subtotal);
-    totRow('Tax (VAT)', currencySym + vat);
+    totRow('Subtotal', pdfSym(currencySym) + subtotal);
+    totRow('Tax (VAT)', pdfSym(currencySym) + vat);
 
     // Total row with colored background
     checkPageBreak(30);
     setFill(C.accent); doc.rect(totLabelX - 8, y, totValX - totLabelX + 8, 26, 'F');
     doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(C.white);
     doc.text('TOTAL DUE', totLabelX, y + 18);
-    doc.text(currencySym + total, totValX - 8, y + 18, { align: 'right' });
+    doc.text(pdfSym(currencySym) + total, totValX - 8, y + 18, { align: 'right' });
     y += 36;
 
     y += 20;
