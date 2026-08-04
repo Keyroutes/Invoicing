@@ -1057,7 +1057,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             var compY = y;
             if (company) {
                 doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 240, 255);
-                doc.text(company.substring(0, 44).toUpperCase(), mr, compY, { align: 'right' });
+                doc.text(company.substring(0, 30).toUpperCase(), mr, compY, { align: 'right' }); // Strict clip
                 compY += 16;
             }
             doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
@@ -1079,7 +1079,7 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
             if (contact) {
                 contact.split(',').forEach(function(p) {
-                    p = p.trim(); if (p) { doc.text(p.substring(0, 48).toUpperCase(), ml, custY); custY += 14; }
+                    p = p.trim(); if (p) { doc.text(p.substring(0, 35).toUpperCase(), ml, custY); custY += 14; } // Strict clip
                 });
             }
             doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
@@ -1099,6 +1099,9 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             var detW = (mr - ml) / 4;
             var detLabels = ['TIMESTAMP', 'DEADLINE', 'ID', 'REF'];
             var detValues = [issueDate || '-', dueDate || '-', numberText, refText || '-'];
+            // Strictly enforce fixed area
+            detValues = detValues.map(function(v) { return v.length > 15 ? v.substring(0, 13) + '..' : v; });
+
             detLabels.forEach(function(label, i) {
                 var dx = ml + detW * i;
                 doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
@@ -1137,21 +1140,52 @@ Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.g
             
             rows.forEach(function(row, idx) {
                 checkPageBreak(40);
-                if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F'); }
-                doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-                var n = doc.splitTextToSize(row.name || '-', 150);
-                if (n.length > 4) { n = n.slice(0, 4); n[3] = n[3].substring(0, n[3].length - 3) + '...'; }
-                doc.text(n, ml + 8, y + 16);
-                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
                 
-                var lineDetails = row.qty + ' x ' + currencySym + row.price;
-                if (parseFloat(row.disc) > 0) lineDetails += ' | -' + row.disc + '%';
-                if (parseFloat(row.tax) > 0) lineDetails += ' | +' + row.tax + '% TAX';
-                doc.text(lineDetails, ml + 170, y + 16);
+                // Enforce strict column widths to prevent overlapping
+                var col1W = 200; // Name & Desc
+                var col2W = 180; // Qty & Price
+                var col3W = 100; // Amount
+                
+                doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+                var n = doc.splitTextToSize(row.name || '-', col1W);
+                if (n.length > 2) { n = n.slice(0, 2); n[1] += '...'; } // Max 2 lines for name
+                
+                doc.setFontSize(8); doc.setFont('helvetica', 'normal');
+                var d = [];
+                if (row.desc) {
+                    d = doc.splitTextToSize(row.desc, col1W);
+                    if (d.length > 2) { d = d.slice(0, 2); d[1] += '...'; } // Max 2 lines for desc
+                }
+                
+                var lineDetailsText = row.qty + ' x ' + currencySym + row.price;
+                if (parseFloat(row.disc) > 0) lineDetailsText += ' | -' + row.disc + '%';
+                if (parseFloat(row.tax) > 0) lineDetailsText += ' | +' + row.tax + '% TAX';
+                doc.setFontSize(9); doc.setFont('courier', 'normal');
+                var detailsLines = doc.splitTextToSize(lineDetailsText, col2W);
+                
+                var totalHeight = Math.max(24, (n.length + d.length) * 12 + 10, detailsLines.length * 12 + 10);
+                
+                if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, totalHeight, 'F'); }
+                
+                // Print Col 1 (Name & Desc)
+                doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
+                doc.text(n, ml + 8, y + 16);
+                if (d.length > 0) {
+                    doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 180);
+                    doc.text(d, ml + 8, y + 16 + (n.length * 12));
+                }
+                
+                // Print Col 2 (Details)
+                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
+                doc.text(detailsLines, ml + col1W + 16, y + 16);
 
-                doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-                doc.text(currencySym + row.amount, mr - 8, y + 16, { align: 'right' });
-                y += Math.max(24, n.length * 14 + 10);
+                // Print Col 3 (Amount)
+                doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+                var amountStr = currencySym + row.amount;
+                if (amountStr.length > 12) amountStr = amountStr.substring(0, 10) + '..'; // strict clip
+                doc.text(amountStr, mr - 8, y + 16, { align: 'right' });
+                
+                y += totalHeight;
             });
             if (rows.length === 0) {
                 doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F');
