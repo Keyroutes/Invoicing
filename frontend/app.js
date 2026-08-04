@@ -743,7 +743,7 @@ async function viewInvoice(number) {
                 if (taxType === 'exclusive') { itemVat = amount * 0.20; }
                 else if (taxType === 'inclusive') { itemVat = amount - (amount / 1.20); amount -= itemVat; }
                 subtotal += amount; vat += itemVat;
-                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
+                tbody.insertAdjacentHTML('beforeend', '<tr><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:200px;vertical-align:top;">' + esc(item.name || '') + '</td><td style="padding:12px 16px;word-wrap:break-word;overflow-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(item.description) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.qty + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + item.price.toFixed(2) + '</td><td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (item.disc || 0) + '%</td><td style="padding:12px 16px;vertical-align:top;">20% VAT</td><td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + amount.toFixed(2) + '</td></tr>');
             });
         }
         var bankView = document.getElementById('view-inv-bank-details');
@@ -1279,17 +1279,25 @@ function generateInvoicePDF(isDummy) {
 // --- Send Email ---
 async function sendEmail() {
     var number = document.getElementById('view-inv-number-val').textContent;
-    if (!number) return;
+    if (!number) { showToast('No invoice loaded', 'error'); return; }
 
     var logoData = localStorage.getItem('company_logo') || '';
 
     var pdfB64 = '';
     try {
-        var doc = generateInvoicePDF();
-        pdfB64 = doc.output('datauristring').split('base64,')[1];
-    } catch (e) { console.error('PDF generation failed:', e); }
+        var doc = generateInvoicePDF(false);
+        var dataUri = doc.output('datauristring');
+        pdfB64 = dataUri.split('base64,')[1] || '';
+        if (!pdfB64) console.warn('sendEmail: PDF base64 extraction failed, dataUri prefix:', dataUri.substring(0, 60));
+        else console.log('sendEmail: PDF ready, size ~' + Math.round(pdfB64.length / 1024) + 'KB');
+    } catch (e) {
+        console.error('PDF generation failed:', e);
+        showToast('PDF generation failed: ' + e.message, 'error');
+        return;
+    }
 
     try {
+        showToast('Sending email...', 'info');
         var res = await fetch('/api/invoices/' + encodeURIComponent(number) + '/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1539,10 +1547,20 @@ window.downloadPDF = downloadPDF;
 
 // --- PDF Preview ---
 function previewPDF() {
-    var doc = generateInvoicePDF();
-    var pdfBlob = doc.output('blob');
-    var pdfUrl = URL.createObjectURL(pdfBlob);
-    window.open(pdfUrl, '_blank');
+    try {
+        var doc = generateInvoicePDF(false);
+        var pdfDataUri = doc.output('datauristring');
+        var win = window.open('', '_blank');
+        if (win) {
+            win.document.write('<!DOCTYPE html><html><head><title>Invoice Preview</title><style>body,html{margin:0;padding:0;height:100%;background:#000;}</style></head><body><iframe src="' + pdfDataUri + '" frameborder="0" style="border:0;top:0;left:0;bottom:0;right:0;width:100%;height:100%;min-height:100vh;" allowfullscreen></iframe></body></html>');
+            win.document.close();
+        } else {
+            showToast('Popup blocked — please allow popups for this site', 'error');
+        }
+    } catch(e) {
+        console.error('previewPDF error:', e);
+        showToast('Preview failed: ' + e.message, 'error');
+    }
 }
 window.previewPDF = previewPDF;
 
