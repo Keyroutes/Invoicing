@@ -1001,6 +1001,13 @@ function generateInvoicePDF(isDummy) {
     // Track whether we are inside the line-items table
     var _inTable = false;
 
+    // Check _invoiceLayout visibility for a section (defaults true if not found)
+    function isVisible(blockId) {
+        if (!window._invoiceLayout || !Array.isArray(window._invoiceLayout)) return true;
+        var block = window._invoiceLayout.find(function(b) { return b.id === blockId; });
+        return block ? block.visible !== false : true;
+    }
+
     function drawTableHeader() {
         doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
         lh(ml, mr, y, 0.8); y += 8;
@@ -1215,7 +1222,7 @@ function generateInvoicePDF(isDummy) {
     }
 
     // Bank / account details note (below rows, before totals line)
-    if (bankContent) {
+    if (bankContent && isVisible('bank_details')) {
         y += 4;
         doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(50,50,50);
         var bkLines = doc.splitTextToSize('Account Details for payment: ' + bankContent.replace(/\n/g, ', '), mr - ml - 10);
@@ -1260,7 +1267,7 @@ function generateInvoicePDF(isDummy) {
         y += 18;
     }
 
-    if (savedTerms) {
+    if (savedTerms && isVisible('terms_conditions')) {
         var termLines = doc.splitTextToSize(savedTerms.trim(), mr - ml);
         checkPageBreak(termLines.length * 11 + 10);
         doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60);
@@ -1269,7 +1276,7 @@ function generateInvoicePDF(isDummy) {
     }
 
     // Signature
-    if (savedSignature) {
+    if (savedSignature && isVisible('signature')) {
         checkPageBreak(70);
         y += 10;
         try { doc.addImage(savedSignature, 'PNG', mr - 140, y, 140, 45); } catch(e) {}
@@ -1284,6 +1291,7 @@ function generateInvoicePDF(isDummy) {
     // ════════════════════════════════════════════════════════
     //  PAYMENT ADVICE  (dashed cut-here section)
     // ════════════════════════════════════════════════════════
+    if (!isVisible('payment_stub')) { drawFooter(); return doc; }
     checkPageBreak(90);
     doc.setDrawColor(0,0,0); doc.setLineWidth(0.5);
     doc.setLineDashPattern([4, 3], 0);
