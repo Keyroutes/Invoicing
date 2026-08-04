@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>aniprotech - Dashboard</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#0b0f19">
@@ -11,8 +11,10 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
+    <a class="skip-link" href="#main-content-region">Skip to main content</a>
     <div id="toast-container"></div>
 
     <div id="superadmin-impersonate-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:1000;background:linear-gradient(135deg,#7877c6,#00f0ff);color:#0b0f19;padding:8px 16px;font-size:0.85rem;font-weight:600;display:none;align-items:center;justify-content:space-between;gap:12px;">
@@ -72,7 +74,7 @@
         </header>
 
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" id="main-content-region" tabindex="-1">
             <div class="views-container">
 
                 <!-- ========== DASHBOARD ========== -->
@@ -82,36 +84,40 @@
                         <p class="subtitle">Here's what's happening with your invoicing today.</p>
                     </header>
                     <div class="grid-4 mb-24">
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoiced</div>
-                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-invoiced">0.00</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Revenue Collected</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="dash-total-revenue">0.00</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Outstanding</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="dash-invoices-owed">0.00</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Invoices</div>
-                            <div style="font-size:1.5rem;font-weight:700;" id="dash-total-count">0</div>
-                        </section>
+                        <button type="button" class="stat-card" onclick="goToInvoices('all')" aria-label="Total invoiced. View all invoices.">
+                            <span class="stat-label">Total Invoiced</span>
+                            <span class="stat-value" id="dash-total-invoiced">0.00</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToInvoices('paid')" aria-label="Revenue collected. View paid invoices.">
+                            <span class="stat-label">Revenue Collected</span>
+                            <span class="stat-value" style="color:var(--success-color);" id="dash-total-revenue">0.00</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToInvoices('awaiting payment')" aria-label="Outstanding balance. View invoices awaiting payment.">
+                            <span class="stat-label">Outstanding</span>
+                            <span class="stat-value" style="color:var(--warning-color);" id="dash-invoices-owed">0.00</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToInvoices('overdue')" aria-label="Overdue amount. View overdue invoices.">
+                            <span class="stat-label">Overdue</span>
+                            <span class="stat-value" style="color:var(--danger-color);" id="dash-overdue-amount">0.00</span>
+                        </button>
                     </div>
-                    <div class="grid-3 mb-24">
-                        <section class="widget" style="padding:20px;text-align:center;">
-                            <div style="font-size:2rem;font-weight:700;color:var(--success-color);" id="dash-paid-count">0</div>
-                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Paid</div>
-                        </section>
-                        <section class="widget" style="padding:20px;text-align:center;">
-                            <div style="font-size:2rem;font-weight:700;color:var(--warning-color);" id="dash-pending-count">0</div>
-                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Awaiting Payment</div>
-                        </section>
-                        <section class="widget" style="padding:20px;text-align:center;">
-                            <div style="font-size:2rem;font-weight:700;color:var(--text-secondary);" id="dash-draft-count">0</div>
-                            <div style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">Drafts</div>
-                        </section>
+                    <div class="grid-4 mb-24">
+                        <button type="button" class="stat-card is-centered" onclick="goToInvoices('all')" aria-label="View all invoices.">
+                            <span class="stat-value lg" id="dash-total-count">0</span>
+                            <span class="stat-label">Total Invoices</span>
+                        </button>
+                        <button type="button" class="stat-card is-centered" onclick="goToInvoices('paid')" aria-label="View paid invoices.">
+                            <span class="stat-value lg" style="color:var(--success-color);" id="dash-paid-count">0</span>
+                            <span class="stat-label">Paid</span>
+                        </button>
+                        <button type="button" class="stat-card is-centered" onclick="goToInvoices('awaiting payment')" aria-label="View invoices awaiting payment.">
+                            <span class="stat-value lg" style="color:var(--warning-color);" id="dash-pending-count">0</span>
+                            <span class="stat-label">Awaiting Payment</span>
+                        </button>
+                        <button type="button" class="stat-card is-centered" onclick="goToInvoices('draft')" aria-label="View draft invoices.">
+                            <span class="stat-value lg" style="color:var(--text-secondary);" id="dash-draft-count">0</span>
+                            <span class="stat-label">Drafts</span>
+                        </button>
                     </div>
                     <div class="grid-layout">
                         <section class="widget span-2" id="cash-flow-widget">
@@ -672,26 +678,26 @@
                         </div>
                     </div>
                     <div class="grid-5 mb-24" id="hr-stats-grid">
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Total Staff</div>
-                            <div style="font-size:1.5rem;font-weight:700;" id="hr-total">0</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Active</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--success-color);" id="hr-active">0</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Onboarding</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--warning-color);" id="hr-onboarding">0</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Offboarding</div>
-                            <div style="font-size:1.5rem;font-weight:700;color:var(--danger-color);" id="hr-offboarding">0</div>
-                        </section>
-                        <section class="widget" style="padding:20px;">
-                            <div style="color:var(--text-secondary);font-size:0.82rem;margin-bottom:8px;">Departments</div>
-                            <div style="font-size:1.5rem;font-weight:700;" id="hr-depts">0</div>
-                        </section>
+                        <button type="button" class="stat-card" onclick="goToEmployees('')" aria-label="Total staff. View all employees.">
+                            <span class="stat-label">Total Staff</span>
+                            <span class="stat-value" id="hr-total">0</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToEmployees('active')" aria-label="View active employees.">
+                            <span class="stat-label">Active</span>
+                            <span class="stat-value" style="color:var(--success-color);" id="hr-active">0</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToEmployees('onboarding')" aria-label="View employees who are onboarding.">
+                            <span class="stat-label">Onboarding</span>
+                            <span class="stat-value" style="color:var(--warning-color);" id="hr-onboarding">0</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="goToEmployees('offboarding')" aria-label="View employees who are offboarding.">
+                            <span class="stat-label">Offboarding</span>
+                            <span class="stat-value" style="color:var(--danger-color);" id="hr-offboarding">0</span>
+                        </button>
+                        <button type="button" class="stat-card" onclick="showView('departments-view')" aria-label="View departments.">
+                            <span class="stat-label">Departments</span>
+                            <span class="stat-value" id="hr-depts">0</span>
+                        </button>
                     </div>
                     <div class="invoices-tabs" id="employee-tabs">
                         <button class="tab active" onclick="filterEmployees('', this)">All</button>
@@ -1560,7 +1566,7 @@
                         <div class="glass-widget">
                             <div class="widget-header"><h3>Application Forms</h3></div>
                             <div class="widget-content" style="padding:0;">
-                                <table class="data-table">
+                                <div class="table-responsive"><table class="data-table">
                                     <thead>
                                         <tr>
                                             <th>Form Title</th>
@@ -1574,7 +1580,7 @@
                                     <tbody id="rec-forms-tbody">
                                         <tr><td colspan="6" class="loading">Loading forms...</td></tr>
                                     </tbody>
-                                </table>
+                                </table></div>
                             </div>
                         </div>
                     </div>
@@ -1593,7 +1599,7 @@
                         <div id="rec-table-view">
                             <div class="glass-widget">
                                 <div class="widget-content" style="padding:0;">
-                                    <table class="data-table">
+                                    <div class="table-responsive"><table class="data-table">
                                         <thead>
                                             <tr>
                                                 <th>Candidate</th>
@@ -1607,7 +1613,7 @@
                                         <tbody id="rec-subs-tbody">
                                             <tr><td colspan="6" class="loading">Loading submissions...</td></tr>
                                         </tbody>
-                                    </table>
+                                    </table></div>
                                 </div>
                             </div>
                         </div>

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Super Admin - aniprotech</title>
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#0b0f19">
@@ -292,12 +292,32 @@
             font-size: 0.85rem;
             border-bottom: 1px solid rgba(255,255,255,0.04);
         }
+        /* Wide tables scroll inside their own box rather than widening the page. */
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         @media (max-width: 768px) {
             .stats-grid { grid-template-columns: repeat(2, 1fr); }
-            .admin-body { padding: 20px; }
+            .admin-body { padding: 16px; }
             .detail-grid { grid-template-columns: 1fr; }
+            .clients-table { min-width: 720px; }
+            .admin-header { flex-wrap: wrap; gap: 10px; height: auto; padding: 12px 16px; }
+            .user-area { width: 100%; justify-content: flex-end; }
+        }
+        @media (max-width: 480px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .brand h1 { font-size: 1.1rem; }
+        }
+        /* Stop iOS zooming the page when a small field takes focus. */
+        @media (max-width: 1024px) {
+            input, select, textarea, .search-box { font-size: 16px; }
+        }
+        @media (hover: none) and (pointer: coarse) {
+            button, .btn-logout { min-height: 44px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
         }
     </style>
+    <link rel="stylesheet" href="mobile.css">
 </head>
 <body>
     <div class="admin-header">
@@ -394,7 +414,7 @@
             <h2>Login Activity</h2>
             <input type="text" class="search-box" placeholder="Search logs..." oninput="filterLogs(this.value)">
         </div>
-        <table class="clients-table">
+        <div class="table-responsive"><table class="clients-table">
             <thead>
                 <tr>
                     <th>Email</th>
@@ -408,7 +428,7 @@
             <tbody id="login-logs-tbody">
                 <tr><td colspan="6" class="empty-state"><h3>Loading...</h3></td></tr>
             </tbody>
-        </table>
+        </table></div>
 
         <div class="section-header" style="margin-top:32px;">
             <h2>All Clients</h2>
@@ -440,10 +460,10 @@
             <h2 id="modal-client-name">Client Details</h2>
             <div class="detail-grid" id="modal-details"></div>
             <h3 style="margin-top:24px;font-size:0.9rem;color:#94a3b8;">Invoices</h3>
-            <table class="invoices-mini-table">
+            <div class="table-responsive"><table class="invoices-mini-table">
                 <thead><tr><th>Number</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead>
                 <tbody id="modal-invoices"></tbody>
-            </table>
+            </table></div>
         </div>
     </div>
 

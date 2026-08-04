@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>aniprotech - Employee Portal</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0b0f19">
@@ -45,6 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
+    <link rel="stylesheet" href="mobile.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -197,38 +198,38 @@
 
       <!-- Stats Grid -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300">
+        <button type="button" onclick="switchTab('attendance')" aria-label="View attendance: hours worked today" class="text-left w-full bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300 cursor-pointer hover:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center"><svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
             <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Today</span>
           </div>
           <div id="todayHours" class="text-2xl font-bold text-gray-900">0h 0m</div>
           <div class="text-xs text-gray-400 mt-1">Hours worked</div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300">
+        </button>
+        <button type="button" onclick="switchTab('attendance')" aria-label="View attendance: break time today" class="text-left w-full bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300 cursor-pointer hover:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center"><svg class="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
             <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Break</span>
           </div>
           <div id="todayBreak" class="text-2xl font-bold text-amber-500">0m</div>
           <div class="text-xs text-gray-400 mt-1">Break time</div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300">
+        </button>
+        <button type="button" onclick="switchTab('attendance')" aria-label="View attendance: hours this month" class="text-left w-full bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300 cursor-pointer hover:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center"><svg class="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div>
             <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Month</span>
           </div>
           <div id="monthHours" class="text-2xl font-bold text-gray-900">0h</div>
           <div class="text-xs text-gray-400 mt-1">This month</div>
-        </div>
-        <div class="bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300">
+        </button>
+        <button type="button" onclick="switchTab('attendance')" aria-label="View attendance: days present this month" class="text-left w-full bg-white rounded-2xl p-5 border border-gray-100 stat-glow transition-all duration-300 cursor-pointer hover:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center"><svg class="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
             <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Present</span>
           </div>
           <div id="daysPresent" class="text-2xl font-bold text-gray-900">0</div>
           <div class="text-xs text-gray-400 mt-1">Days this month</div>
-        </div>
+        </button>
       </div>
 
       <!-- Weekly Chart + Quick Actions -->

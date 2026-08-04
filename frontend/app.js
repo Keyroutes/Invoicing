@@ -336,6 +336,39 @@ function showView(viewId) {
 }
 window.showView = showView;
 
+// --- Dashboard drill-down -------------------------------------------------
+// Every headline figure on the dashboard is a question ("who owes me?"), so
+// each card navigates to the list that answers it, pre-filtered.
+
+// Activates the tab button whose onclick targets the given filter, so the
+// list view's own tab strip stays in sync with where we navigated from.
+function activateTabForFilter(containerSelector, filterValue) {
+    var container = document.querySelector(containerSelector);
+    if (!container) return;
+    var buttons = container.querySelectorAll('.tab');
+    for (var i = 0; i < buttons.length; i++) {
+        var attr = buttons[i].getAttribute('onclick') || '';
+        if (attr.indexOf("'" + filterValue + "'") >= 0) {
+            buttons[i].click();
+            return;
+        }
+    }
+}
+
+function goToInvoices(filter) {
+    showView('invoices-view');
+    if (!filter || filter === 'all') return;
+    // fetchInvoices() is kicked off by showView; wait for it before filtering.
+    setTimeout(function () { activateTabForFilter('.invoices-tabs', filter); }, 250);
+}
+window.goToInvoices = goToInvoices;
+
+function goToEmployees(statusFilter) {
+    showView('employees-view');
+    activateTabForFilter('#employee-tabs', statusFilter || '');
+}
+window.goToEmployees = goToEmployees;
+
 function enforcePortalSeparation() {
     var isHrPortal = window.location.pathname.includes('hr.html');
     var targetPortal = isHrPortal ? 'hr' : 'invoicing';
@@ -427,21 +460,30 @@ async function fetchDashboardData() {
     }
 }
 
+// Small helper so a missing element on one portal's dashboard never aborts the
+// rest of the render (app.html and hr.html share this code but differ slightly).
+function setText(id, value) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
 function renderDashboard(data) {
     var s = data.summary || {};
-    document.getElementById('dash-total-invoiced').textContent = formatCurrency(s.total_invoiced);
-    document.getElementById('dash-total-revenue').textContent = formatCurrency(s.total_revenue);
-    document.getElementById('dash-invoices-owed').textContent = formatCurrency(s.invoices_owed);
-    document.getElementById('dash-total-count').textContent = s.total_count || 0;
+    setText('dash-total-invoiced', formatCurrency(s.total_invoiced));
+    setText('dash-total-revenue', formatCurrency(s.total_revenue));
+    setText('dash-invoices-owed', formatCurrency(s.invoices_owed));
+    setText('dash-overdue-amount', formatCurrency(s.overdue_amount || 0));
+    setText('dash-overdue-count', s.overdue_count || 0);
+    setText('dash-total-count', s.total_count || 0);
     if (typeof renderInvoiceChart === 'function') {
         renderInvoiceChart(s.total_revenue || 0, s.invoices_owed || 0, s.total_count || 0);
     }
     
     
 
-    document.getElementById('dash-paid-count').textContent = s.paid_count || 0;
-    document.getElementById('dash-pending-count').textContent = s.pending_count || 0;
-    document.getElementById('dash-draft-count').textContent = s.draft_count || 0;
+    setText('dash-paid-count', s.paid_count || 0);
+    setText('dash-pending-count', s.pending_count || 0);
+    setText('dash-draft-count', s.draft_count || 0);
     renderCashFlowChart(data.cash_flow);
 }
 
