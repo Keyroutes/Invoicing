@@ -970,313 +970,331 @@ function generateInvoicePDF(isDummy) {
     var _jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     if (!_jsPDF) { console.error('jsPDF not loaded'); throw new Error('jsPDF is not loaded'); }
     var doc = new _jsPDF('p', 'pt', 'a4');
-    var w = doc.internal.pageSize.width;
-    var h = doc.internal.pageSize.height;
+    var w = doc.internal.pageSize.width;   // 595
+    var h = doc.internal.pageSize.height;  // 842
     var ml = 40, mr = w - 40;
-    var y = 40;
+    var y = 0;
     var pageBottom = h - 60;
-    var number = 1;
+    var pageNum = 1;
 
-    // Background Color (Cyber Black)
-    function drawCyberBackground(doc) {
-        doc.setFillColor(10, 15, 26);
-        doc.rect(0, 0, w, h, 'F');
+    // ── Color palette ──────────────────────────────────────────────
+    var C = {
+        bg:        [255, 255, 255],
+        accent:    [30,  64, 175],   // brand blue
+        accentLt:  [219, 234, 254],  // light blue bg
+        text:      [15,  23,  42],   // near-black
+        subText:   [100, 116, 139],  // slate-500
+        border:    [226, 232, 240],  // slate-200
+        rowAlt:    [248, 250, 252],  // slate-50
+        white:     [255, 255, 255],
+        green:     [22, 163, 74],
+        totalRow:  [30,  64, 175],
+    };
+
+    // ── Helpers ────────────────────────────────────────────────────
+    function setColor(arr) { doc.setTextColor(arr[0], arr[1], arr[2]); }
+    function setFill(arr)  { doc.setFillColor(arr[0], arr[1], arr[2]); }
+    function setDraw(arr)  { doc.setDrawColor(arr[0], arr[1], arr[2]); }
+    function hline(x1, x2, yy, lw) {
+        doc.setLineWidth(lw || 0.5);
+        doc.line(x1, yy, x2, yy);
     }
-    drawCyberBackground(doc);
-
-    // Data Extraction
-    var contact = isDummy ? 'John Doe, Tech Corp' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
-    var email = isDummy ? 'john@techcorp.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
-    var phone = isDummy ? '555-0199' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
-    var issueDate = isDummy ? '04 Aug 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
-    var dueDate = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
-    var numberText = isDummy ? 'INV-2050' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
-    var bankContent = isDummy ? 'Bank: CyberBank\nAcc: 99887766\nSort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
-    var refText = isDummy ? 'PO-12345' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
-    if (refText === '-') refText = '';
-    var currencySym = isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '');
-    var subtotal = isDummy ? '1000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
-    var vat = isDummy ? '200.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
-    var total = isDummy ? '1200.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
-    
-    var company = isDummy ? 'Aniprotech Ltd' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
-    var compAddr = isDummy ? '456 Business Rd, Tech City' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
-    var compEmail = isDummy ? 'billing@aniprotech.com' : (document.getElementById('view-inv-company-email') ? document.getElementById('view-inv-company-email').textContent.replace('Email: ', '') : '');
-    var compPhone = isDummy ? '888-0000' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ', '') : '');
-    var compAbn = isDummy ? 'ABN-12345' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ', '') : '');
-
-    var savedLogo = localStorage.getItem('company_logo') || '';
-    var savedSignature = localStorage.getItem('company_signature') || '';
-    var savedTerms = localStorage.getItem('company_terms') || 'Payment is due within 30 days. Late payments may incur fees.';
-
-    // Common Helpers
-    function drawPageNum(doc) {
-        doc.setFontSize(8);
-        doc.setFont('courier', 'normal');
-        doc.setTextColor(0, 240, 255); // Neon Cyan
-        doc.text('PAGE [' + number + '] // ' + (company || 'SYS').toUpperCase(), ml, h - 20);
+    function rect(x, yy, rw, rh, fill) {
+        if (fill) { setFill(fill); doc.rect(x, yy, rw, rh, 'F'); }
+        else doc.rect(x, yy, rw, rh);
     }
-    
-    function checkPageBreak(requiredHeight) {
-        if (y + requiredHeight > pageBottom) {
-            drawPageNum(doc);
+
+    function checkPageBreak(needed) {
+        if (y + needed > pageBottom) {
+            // footer on current page
+            drawFooter();
             doc.addPage();
-            drawCyberBackground(doc);
+            // white background
+            setFill(C.bg); doc.rect(0, 0, w, h, 'F');
+            pageNum++;
             y = 40;
-            number++;
         }
     }
 
-    var layout = window._invoiceLayout || defaultInvoiceLayout;
-    
-    layout.forEach(function(block) {
-        if (!block.visible) return;
-        
-        if (block.id === 'header') {
-            checkPageBreak(80);
-            
-            // Cyber accent bar
-            doc.setFillColor(0, 240, 255);
-            doc.rect(0, 10, w, 4, 'F');
-            doc.setFillColor(188, 19, 254);
-            doc.rect(0, 14, w/3, 2, 'F');
+    function drawFooter() {
+        var fy = h - 38;
+        setDraw(C.border); hline(ml, mr, fy, 0.5);
+        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+        doc.text('Page ' + pageNum, w / 2, fy + 14, { align: 'center' });
+        if (compAddr) doc.text(compAddr, ml, fy + 14);
+        if (compAbn)  doc.text('ABN: ' + compAbn, mr, fy + 14, { align: 'right' });
+    }
 
-            doc.setFont('courier', 'bold');
-            doc.setFontSize(36);
-            doc.setTextColor(255, 255, 255);
-            doc.text('INVOICE', ml, y + 30);
-            
-            doc.setFontSize(10);
-            doc.setTextColor(0, 240, 255);
-            doc.text('[ DOC_TYPE: DIGITAL_BILLING ]', ml, y + 45);
+    function breakLongWords(txt, maxLen) {
+        if (!txt) return '';
+        return txt.split(' ').map(function(w) {
+            return w.length > maxLen ? w.match(new RegExp('.{1,' + maxLen + '}', 'g')).join(' ') : w;
+        }).join(' ');
+    }
 
-            if (savedLogo) {
-                try { doc.addImage(savedLogo, 'PNG', mr - 100, y - 5, 100, 36); } catch(e) {}
-            }
-            y += 70;
-        }
-        else if (block.id === 'company_info') {
-            checkPageBreak(80);
-            var compY = y;
-            if (company) {
-                doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 240, 255);
-                doc.text(company.substring(0, 30).toUpperCase(), mr, compY, { align: 'right' }); // Strict clip
-                compY += 16;
-            }
-            doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
-            if (compAddr) {
-                compAddr.split(',').forEach(function(p) {
-                    p = p.trim(); if (p) { doc.text(p.substring(0, 42), mr, compY, { align: 'right' }); compY += 12; }
-                });
-            }
-            if (compPhone) { doc.text('COM: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
-            if (compEmail) { doc.text('NET: ' + compEmail, mr, compY, { align: 'right' }); compY += 12; }
-            y = Math.max(y, compY) + 15;
-        }
-        else if (block.id === 'customer_info') {
-            checkPageBreak(80);
-            var custY = y;
-            doc.setFontSize(9); doc.setFont('courier', 'bold'); doc.setTextColor(188, 19, 254);
-            doc.text('> TARGET_ENTITY', ml, custY);
-            custY += 16;
-            doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-            if (contact) {
-                contact.split(',').forEach(function(p) {
-                    p = p.trim(); if (p) { doc.text(p.substring(0, 35).toUpperCase(), ml, custY); custY += 14; } // Strict clip
-                });
-            }
-            doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
-            if (email && email !== 'No email') { doc.text('ID: ' + email, ml, custY); custY += 12; }
-            if (phone && phone !== 'No phone') { doc.text('CH: ' + phone, ml, custY); custY += 12; }
-            y = Math.max(y, custY) + 15;
-        }
-        else if (block.id === 'invoice_details') {
-            checkPageBreak(60);
-            // Cyber Box for Details
-            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1);
-            doc.rect(ml, y, mr - ml, 40);
-            doc.setFillColor(15, 25, 40);
-            doc.rect(ml, y, mr - ml, 40, 'F');
-            doc.rect(ml, y, mr - ml, 40, 'S');
+    // ── White background ───────────────────────────────────────────
+    setFill(C.bg); doc.rect(0, 0, w, h, 'F');
 
-            var detW = (mr - ml) / 4;
-            var detLabels = ['TIMESTAMP', 'DEADLINE', 'ID', 'REF'];
-            var detValues = [issueDate || '-', dueDate || '-', numberText, refText || '-'];
-            // Strictly enforce fixed area
-            detValues = detValues.map(function(v) { return v.length > 15 ? v.substring(0, 13) + '..' : v; });
+    // ── Data Extraction ────────────────────────────────────────────
+    var contact    = isDummy ? 'Acme Corporation' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
+    var email      = isDummy ? 'accounts@acme.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
+    var phone      = isDummy ? '+1 800 555 0100' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
+    var issueDate  = isDummy ? '04 Aug 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
+    var dueDate    = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
+    var numberText = isDummy ? 'INV-0001' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
+    var bankContent= isDummy ? 'Bank: First National Bank\nAccount Name: Aniprotech Ltd\nAccount No: 12345678\nSort Code: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
+    var refText    = isDummy ? 'PO-98765' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
+    if (refText === '-') refText = '';
+    var currencySym= isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '');
+    var subtotal   = isDummy ? '5000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
+    var vat        = isDummy ? '1000.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
+    var total      = isDummy ? '6000.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
+    var company    = isDummy ? 'Aniprotech Ltd' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
+    var compAddr   = isDummy ? '456 Business Road, Melbourne VIC 3000' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
+    var compEmail  = isDummy ? 'billing@aniprotech.com' : (document.getElementById('view-inv-company-email') ? document.getElementById('view-inv-company-email').textContent.replace('Email: ', '') : '');
+    var compPhone  = isDummy ? '+61 3 9000 0000' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ', '') : '');
+    var compAbn    = isDummy ? '12 345 678 901' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ', '') : '');
+    var savedLogo      = localStorage.getItem('company_logo') || '';
+    var savedSignature = localStorage.getItem('company_signature') || '';
+    var savedTerms     = localStorage.getItem('company_terms') || 'Payment is due within the period stated. Please include the invoice number on your payment. Thank you for your business.';
 
-            detLabels.forEach(function(label, i) {
-                var dx = ml + detW * i;
-                doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-                doc.text(label, dx + 12, y + 16);
-                doc.setFontSize(11); doc.setTextColor(255, 255, 255);
-                doc.text(detValues[i], dx + 12, y + 30);
-            });
-            y += 60;
-        }
-        else if (block.id === 'line_items') {
-            checkPageBreak(100);
-            // Header
-            doc.setFillColor(20, 30, 45); doc.rect(ml, y, mr - ml, 24, 'F');
-            doc.setFontSize(9); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-            doc.text('RESOURCE', ml + 8, y + 16);
-            doc.text('CREDITS', mr - 8, y + 16, { align: 'right' });
-            y += 28;
-            
-            var rows = [];
-            if (isDummy) {
-                rows = [{name: 'Cybernetic Enhancement Model X', desc: '-', qty: '1', price: '4500.00', disc: '0', tax: '20', amount: '5400.00'}];
-            } else {
-                document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
-                    var cells = tr.querySelectorAll('td');
-                    if (cells.length >= 7) {
-                        rows.push({
-                            name: cells[0].textContent,
-                            desc: cells[1].textContent,
-                            qty: cells[2].textContent,
-                            price: cells[3].textContent,
-                            disc: (cells[4].textContent || '0').replace('%', '').trim(), tax: (cells[5] ? cells[5].textContent : '0').replace('%', '').trim(), amount: cells[6].textContent
-                        });
-                    }
-                });
-            }
-            
-            rows.forEach(function(row, idx) {
-                  // 1. Calculate boundaries and line arrays FIRST
-                  var col1W = 200; // Name & Desc
-                  var col2W = 180; // Qty & Price
-                  
-                  // Helper function to force-break unspaced words
-                  function breakLongWords(txt, maxLen) {
-                      if (!txt) return '';
-                      return txt.split(' ').map(function(w) { return w.length > maxLen ? w.match(new RegExp('.{1,' + maxLen + '}', 'g')).join(' ') : w; }).join(' ');
-                  }
-                  
-                  doc.setFontSize(10); doc.setFont('helvetica', 'bold');
-                  var n = doc.splitTextToSize(breakLongWords(row.name || '-', 40), col1W);
-                  
-                  doc.setFontSize(8); doc.setFont('helvetica', 'normal');
-                  var d = [];
-                  if (row.desc) {
-                      d = doc.splitTextToSize(breakLongWords(row.desc, 50), col1W);
-                  }
-                  
-                  var lineDetailsText = row.qty + ' x ' + currencySym + row.price;
-                  if (parseFloat(row.disc) > 0) lineDetailsText += ' | -' + row.disc + '%';
-                  if (parseFloat(row.tax) > 0) lineDetailsText += ' | +' + row.tax + '% TAX';
-                  doc.setFontSize(9); doc.setFont('courier', 'normal');
-                  var detailsLines = doc.splitTextToSize(breakLongWords(lineDetailsText, 45), col2W);
-                  
-                  var totalHeight = Math.max(24, (n.length + d.length) * 12 + 10, detailsLines.length * 12 + 10);
-                  
-                  // 2. NOW check page break using the precise required height!
-                  checkPageBreak(totalHeight);
-                  
-                  // 3. Draw the row
-                  if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, totalHeight, 'F'); }
-                  
-                  // Print Col 1 (Name & Desc)
-                  doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
-                  doc.text(n, ml + 8, y + 16);
-                  if (d.length > 0) {
-                      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 180);
-                      doc.text(d, ml + 8, y + 16 + (n.length * 12));
-                  }
-                  
-                  // Print Col 2 (Details)
-                  doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
-                  doc.text(detailsLines, ml + col1W + 16, y + 16);
+    // ══════════════════════════════════════════════════════════════
+    //  HEADER BAND
+    // ══════════════════════════════════════════════════════════════
+    var headerH = 90;
+    setFill(C.accent); doc.rect(0, 0, w, headerH, 'F');
 
-                  // Print Col 3 (Amount)
-                  doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-                  doc.text(currencySym + row.amount, mr - 8, y + 16, { align: 'right' });
-                  
-                  y += totalHeight;
-              });
-            if (rows.length === 0) {
-                doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F');
-                doc.setFontSize(10); doc.setTextColor(100, 110, 130);
-                doc.text('NO RESOURCES ALLOCATED', ml + 8, y + 16); y += 24;
-            }
-            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.line(ml, y, mr, y); y += 20;
-        }
-        else if (block.id === 'totals') {
-            checkPageBreak(100);
-            var totLabelX = mr - 300; var totValX = mr - 8;
-            
-            // Cyber box for totals
-            doc.setFillColor(15, 25, 40);
-            doc.rect(totLabelX - 20, y - 10, mr - (totLabelX - 20), 80, 'F');
-            doc.setDrawColor(188, 19, 254); // Purple border right
-            doc.setLineWidth(2);
-            doc.line(mr, y - 10, mr, y + 70);
+    // Logo or company name
+    y = 28;
+    if (savedLogo) {
+        try { doc.addImage(savedLogo, undefined, ml, 14, 60, 60); } catch(e) {}
+        doc.setFontSize(18); doc.setFont('helvetica', 'bold'); setColor(C.white);
+        doc.text(company || 'Company Name', ml + 68, y + 10);
+    } else {
+        doc.setFontSize(20); doc.setFont('helvetica', 'bold'); setColor(C.white);
+        doc.text(company || 'Company Name', ml, y + 12);
+    }
 
-            doc.setFontSize(10); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
-            doc.text('SUB_REQ', totLabelX, y + 10); doc.setTextColor(255, 255, 255); doc.text(currencySym + subtotal, totValX - 10, y + 10, { align: 'right' }); y += 18;
-            doc.setTextColor(180, 190, 200); doc.text('TAX_SYS', totLabelX, y + 10); doc.setTextColor(255, 255, 255); doc.text(currencySym + vat, totValX - 10, y + 10, { align: 'right' }); y += 18;
-            
-            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.line(totLabelX, y + 5, totValX - 10, y + 5); y += 22;
-            
-            doc.setFontSize(14); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-            doc.text('TOTAL_AUTH', totLabelX, y + 5); doc.text(currencySym + total, totValX - 10, y + 5, { align: 'right' }); y += 30;
-        }
-        else if (block.id === 'bank_details') {
-            if (bankContent) {
-                var bankLines = doc.splitTextToSize(bankContent, 300);
-                checkPageBreak(30 + bankLines.length * 14);
-                doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(188, 19, 254);
-                doc.text('> TRANSFER_COORDINATES', ml, y); y += 16;
-                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(220, 230, 240);
-                  
-                doc.text(bankLines, ml, y); y += bankLines.length * 14 + 10;
-            }
-        }
-        else if (block.id === 'terms_conditions') {
-            var termLines = doc.splitTextToSize(savedTerms, mr - ml);
-            checkPageBreak(30 + termLines.length * 12);
-            doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(100, 110, 130);
-            doc.text('TERMS & PROTOCOLS', ml, y); y += 14;
-            doc.setFontSize(8); doc.setFont('courier', 'normal'); doc.setTextColor(140, 150, 170);
-              
-            doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
-        }
-        else if (block.id === 'signature') {
-            checkPageBreak(100);
-            if (savedSignature) {
-                try { doc.addImage(savedSignature, 'PNG', mr - 160, y, 160, 50); } catch(e) {}
-            } else {
-                doc.setDrawColor(0, 240, 255); doc.setLineWidth(1);
-                doc.line(mr - 160, y + 50, mr, y + 50);
-            }
-            doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
-            doc.text('// DIGITAL_AUTHORIZATION_VERIFIED', mr, y + 64, { align: 'right' });
-            y += 80;
-        }
-        else if (block.id === 'payment_stub') {
-            checkPageBreak(150);
-            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.setLineDashPattern([4, 4], 0);
-            doc.line(ml, y, mr, y); doc.setLineDashPattern([], 0);
-            doc.setFontSize(12); doc.setTextColor(0, 240, 255); doc.text('8<--', ml - 2, y - 3); y += 20;
-            
-            doc.setFillColor(15, 25, 40); doc.rect(ml, y, mr - ml, 40, 'F');
-            doc.setFont('courier', 'bold'); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
-            doc.text('PAYMENT ADVICE', ml + 12, y + 24);
-            doc.setFontSize(9); doc.setTextColor(180, 190, 200); doc.text('TARGET: ' + (typeof company !== 'undefined' && company ? company.substring(0, 30) : 'SYS'), mr - 200, y + 16);
-            doc.setFontSize(9); doc.setTextColor(0, 240, 255); doc.text('AMT: ___________', mr - 200, y + 30);
-            y += 60;
-        }
+    // "INVOICE" label top-right
+    doc.setFontSize(28); doc.setFont('helvetica', 'bold'); setColor(C.white);
+    doc.text('INVOICE', mr, 56, { align: 'right' });
+
+    y = headerH + 24;
+
+    // ══════════════════════════════════════════════════════════════
+    //  INVOICE META  (two-column: Bill To | Invoice Details)
+    // ══════════════════════════════════════════════════════════════
+    var col2X = w / 2 + 30;
+
+    // Left — Bill To
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
+    doc.text('BILL TO', ml, y);
+    y += 14;
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(C.text);
+    var billLines = doc.splitTextToSize(breakLongWords(contact || 'Customer Name', 35), col2X - ml - 10);
+    doc.text(billLines, ml, y);
+    y += billLines.length * 13;
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+    if (email && email !== 'No email') { doc.text(email, ml, y); y += 12; }
+    if (phone && phone !== 'No phone') { doc.text(phone, ml, y); y += 12; }
+
+    // Right column — Invoice details table
+    var detY = headerH + 24;
+    var labelX = col2X;
+    var valX = mr;
+    var rowH = 18;
+
+    var details = [
+        ['Invoice No.', numberText || '-'],
+        ['Issue Date',  issueDate  || '-'],
+        ['Due Date',    dueDate    || '-'],
+    ];
+    if (refText) details.push(['Reference', refText]);
+
+    details.forEach(function(row) {
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.subText);
+        doc.text(row[0].toUpperCase(), labelX, detY + 11);
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
+        doc.text(row[1], valX, detY + 11, { align: 'right' });
+        detY += rowH;
     });
-    
-    // Add Footer on last page
-    doc.setDrawColor(188, 19, 254); doc.setLineWidth(1);
-    doc.line(ml, h - 40, mr, h - 40);
-    doc.setFontSize(7); doc.setFont('courier', 'normal'); doc.setTextColor(100, 110, 130);
-    doc.text('REG_NO: ' + (compAbn || 'N/A') + ' | NODE: ' + (compAddr || 'N/A'), ml, h - 26);
-    
-    drawPageNum(doc);
+
+    // Amount Due highlight box
+    detY += 4;
+    setFill(C.accentLt); doc.rect(labelX, detY, mr - labelX, 28, 'F');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
+    doc.text('AMOUNT DUE', labelX + 8, detY + 11);
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold'); setColor(C.accent);
+    doc.text(currencySym + total, valX - 8, detY + 19, { align: 'right' });
+    detY += 32;
+
+    y = Math.max(y, detY) + 20;
+
+    // Divider
+    setDraw(C.border); hline(ml, mr, y, 0.5); y += 20;
+
+    // ══════════════════════════════════════════════════════════════
+    //  LINE ITEMS TABLE
+    // ══════════════════════════════════════════════════════════════
+    checkPageBreak(60);
+
+    // Table Header
+    var col = { desc: ml, qty: 310, price: 380, disc: 440, amt: mr };
+    setFill(C.accent); doc.rect(ml, y, mr - ml, 22, 'F');
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.white);
+    doc.text('DESCRIPTION',    col.desc  + 8, y + 15);
+    doc.text('QTY',            col.qty   + 8, y + 15, { align: 'center' });
+    doc.text('UNIT PRICE',     col.price + 8, y + 15, { align: 'center' });
+    doc.text('DISC',           col.disc  + 8, y + 15, { align: 'center' });
+    doc.text('AMOUNT',         col.amt   - 8, y + 15, { align: 'right' });
+    y += 22;
+
+    // Rows
+    var rows = [];
+    if (isDummy) {
+        rows = [
+            { name: 'Professional Services', desc: 'Monthly consulting and development services', qty: '1', price: '5000.00', disc: '0', tax: '20', amount: '5000.00' }
+        ];
+    } else {
+        document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
+            var cells = tr.querySelectorAll('td');
+            if (cells.length >= 7) {
+                rows.push({
+                    name:   cells[0].textContent.trim(),
+                    desc:   cells[1].textContent.trim(),
+                    qty:    cells[2].textContent.trim(),
+                    price:  cells[3].textContent.trim(),
+                    disc:   (cells[4].textContent || '0').replace('%', '').trim(),
+                    tax:    (cells[5] ? cells[5].textContent : '0').replace('%', '').trim(),
+                    amount: cells[6].textContent.trim()
+                });
+            }
+        });
+    }
+
+    rows.forEach(function(row, idx) {
+        var nameLines = doc.splitTextToSize(breakLongWords(row.name || '-', 35), col.qty - col.desc - 16);
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+        var descLines = row.desc ? doc.splitTextToSize(breakLongWords(row.desc, 45), col.qty - col.desc - 16) : [];
+
+        var rowHeight = Math.max(26, (nameLines.length + descLines.length) * 12 + 10);
+        checkPageBreak(rowHeight);
+
+        if (idx % 2 === 0) { setFill(C.rowAlt); doc.rect(ml, y, mr - ml, rowHeight, 'F'); }
+
+        // Name
+        doc.setFontSize(9); doc.setFont('helvetica', 'bold'); setColor(C.text);
+        doc.text(nameLines, col.desc + 8, y + 13);
+        // Description
+        if (descLines.length > 0) {
+            doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+            doc.text(descLines, col.desc + 8, y + 13 + nameLines.length * 12);
+        }
+        // Qty
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
+        doc.text(String(row.qty), col.qty + 8, y + 13, { align: 'center' });
+        // Price
+        doc.text(currencySym + row.price, col.price + 8, y + 13, { align: 'center' });
+        // Disc
+        var discVal = parseFloat(row.disc) > 0 ? row.disc + '%' : '-';
+        doc.text(discVal, col.disc + 8, y + 13, { align: 'center' });
+        // Amount
+        doc.setFont('helvetica', 'bold'); setColor(C.text);
+        doc.text(currencySym + row.amount, col.amt - 8, y + 13, { align: 'right' });
+
+        // Row bottom border
+        setDraw(C.border); hline(ml, mr, y + rowHeight, 0.3);
+        y += rowHeight;
+    });
+
+    if (rows.length === 0) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'italic'); setColor(C.subText);
+        doc.text('No line items', ml + 8, y + 16); y += 26;
+    }
+
+    y += 16;
+
+    // ══════════════════════════════════════════════════════════════
+    //  TOTALS
+    // ══════════════════════════════════════════════════════════════
+    checkPageBreak(90);
+    var totLabelX = col.price;
+    var totValX   = mr;
+
+    function totRow(label, val, bold) {
+        doc.setFontSize(9);
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        setColor(bold ? C.text : C.subText);
+        doc.text(label, totLabelX, y + 11);
+        setColor(C.text);
+        doc.text(val, totValX - 8, y + 11, { align: 'right' });
+        y += 18;
+    }
+
+    totRow('Subtotal', currencySym + subtotal);
+    totRow('Tax (VAT)', currencySym + vat);
+
+    // Total row with colored background
+    checkPageBreak(30);
+    setFill(C.accent); doc.rect(totLabelX - 8, y, totValX - totLabelX + 8, 26, 'F');
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(C.white);
+    doc.text('TOTAL DUE', totLabelX, y + 18);
+    doc.text(currencySym + total, totValX - 8, y + 18, { align: 'right' });
+    y += 36;
+
+    y += 20;
+
+    // ══════════════════════════════════════════════════════════════
+    //  BANK DETAILS
+    // ══════════════════════════════════════════════════════════════
+    if (bankContent) {
+        var bankLines = doc.splitTextToSize(bankContent.trim(), (mr - ml) / 2 - 10);
+        checkPageBreak(30 + bankLines.length * 13);
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
+        doc.text('PAYMENT DETAILS', ml, y); y += 13;
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
+        doc.text(bankLines, ml, y); y += bankLines.length * 13 + 10;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  TERMS & CONDITIONS
+    // ══════════════════════════════════════════════════════════════
+    if (savedTerms) {
+        var termLines = doc.splitTextToSize(savedTerms.trim(), mr - ml);
+        checkPageBreak(30 + termLines.length * 12);
+        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
+        doc.text('TERMS & CONDITIONS', ml, y); y += 13;
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+        doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  SIGNATURE
+    // ══════════════════════════════════════════════════════════════
+    if (savedSignature) {
+        checkPageBreak(80);
+        y += 10;
+        try { doc.addImage(savedSignature, 'PNG', mr - 150, y, 150, 45); } catch(e) {}
+        setDraw(C.subText); hline(mr - 150, mr, y + 48, 0.5);
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+        doc.text('Authorised Signature', mr - 150, y + 60);
+        y += 70;
+    } else {
+        checkPageBreak(70);
+        y += 10;
+        setDraw(C.subText); hline(mr - 150, mr, y + 40, 0.5);
+        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
+        doc.text('Authorised Signature', mr - 150, y + 52);
+        y += 62;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  FOOTER
+    // ══════════════════════════════════════════════════════════════
+    drawFooter();
+
     return doc;
 }
-
 
 // --- Send Email ---
 async function sendEmail() {
