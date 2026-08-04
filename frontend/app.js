@@ -968,217 +968,195 @@ window.previewInvoiceTemplate = previewInvoiceTemplate;
 // --- DYNAMIC GENERATE INVOICE PDF ---
 function generateInvoicePDF(isDummy) {
     var _jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-    if (!_jsPDF) { console.error('jsPDF not loaded'); throw new Error('jsPDF is not loaded'); }
+    if (!_jsPDF) { throw new Error('jsPDF is not loaded'); }
     var doc = new _jsPDF('p', 'pt', 'a4');
-    var w = doc.internal.pageSize.width;   // 595
-    var h = doc.internal.pageSize.height;  // 842
-    var ml = 40, mr = w - 40;
+    var w = doc.internal.pageSize.width;   // 595.28
+    var h = doc.internal.pageSize.height;  // 841.89
+    var ml = 45, mr = w - 45;
     var y = 0;
-    var pageBottom = h - 60;
+    var pageBottom = h - 80;
     var pageNum = 1;
 
-    // Currency symbol sanitizer — jsPDF built-in fonts only support Latin-1.
-    // Map any non-Latin symbol to a safe ASCII/Latin equivalent.
+    // ── Currency sanitizer (Latin-1 only fonts) ─────────────────
     function pdfSym(sym) {
         var map = {
-            '\u20B9': 'Rs.',  // Indian Rupee ₹
-            '\u20A9': 'KRW ', // South Korean Won ₩
-            '\u20AA': 'ILS ', // Israeli Shekel ₪
-            '\u20A6': 'NGN ', // Nigerian Naira ₦
-            '\u20AB': 'VND ', // Vietnamese Dong ₫
-            '\u20AD': 'LAK ', // Lao Kip ₭
-            '\u20AE': 'MNT ', // Mongolian Togrog ₮
-            '\u20B1': 'PHP ', // Philippine Peso ₱
-            '\u20B2': 'PYG ', // Guarani ₲
-            '\u20B4': 'UAH ', // Ukrainian Hryvnia ₴
-            '\u20B5': 'GHS ', // Ghanaian Cedi ₵
-            '\u20B8': 'KZT ', // Kazakhstani Tenge ₸
-            '\u20BA': 'TRY ', // Turkish Lira ₺
-            '\u20BC': 'AZN ', // Azerbaijani Manat ₼
-            '\u20BD': 'RUB ', // Russian Ruble ₽
+            '\u20B9': 'Rs.', '\u20A9': 'W', '\u20AA': 'ILS',
+            '\u20A6': 'N',   '\u20AB': 'D', '\u20AD': 'K',
+            '\u20AE': 'T',   '\u20B1': 'P', '\u20B2': 'G',
+            '\u20B4': 'grn', '\u20B5': 'GH','\u20B8': 'T',
+            '\u20BA': 'TL',  '\u20BC': 'M', '\u20BD': 'R',
         };
         return map[sym] !== undefined ? map[sym] : sym;
     }
 
-
-    // ── Color palette ──────────────────────────────────────────────
-    var C = {
-        bg:        [255, 255, 255],
-        accent:    [30,  64, 175],   // brand blue
-        accentLt:  [219, 234, 254],  // light blue bg
-        text:      [15,  23,  42],   // near-black
-        subText:   [100, 116, 139],  // slate-500
-        border:    [226, 232, 240],  // slate-200
-        rowAlt:    [248, 250, 252],  // slate-50
-        white:     [255, 255, 255],
-        green:     [22, 163, 74],
-        totalRow:  [30,  64, 175],
-    };
-
-    // ── Helpers ────────────────────────────────────────────────────
-    function setColor(arr) { doc.setTextColor(arr[0], arr[1], arr[2]); }
-    function setFill(arr)  { doc.setFillColor(arr[0], arr[1], arr[2]); }
-    function setDraw(arr)  { doc.setDrawColor(arr[0], arr[1], arr[2]); }
-    function hline(x1, x2, yy, lw) {
-        doc.setLineWidth(lw || 0.5);
-        doc.line(x1, yy, x2, yy);
-    }
-    function rect(x, yy, rw, rh, fill) {
-        if (fill) { setFill(fill); doc.rect(x, yy, rw, rh, 'F'); }
-        else doc.rect(x, yy, rw, rh);
-    }
-
-    function checkPageBreak(needed) {
-        if (y + needed > pageBottom) {
-            // footer on current page
-            drawFooter();
-            doc.addPage();
-            // white background
-            setFill(C.bg); doc.rect(0, 0, w, h, 'F');
-            pageNum++;
-            y = 40;
-        }
-    }
-
-    function drawFooter() {
-        var fy = h - 38;
-        setDraw(C.border); hline(ml, mr, fy, 0.5);
-        doc.setFontSize(7); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-        doc.text('Page ' + pageNum, w / 2, fy + 14, { align: 'center' });
-        if (compAddr) doc.text(compAddr, ml, fy + 14);
-        if (compAbn)  doc.text('ABN: ' + compAbn, mr, fy + 14, { align: 'right' });
-    }
-
-    function breakLongWords(txt, maxLen) {
+    // ── Helpers ──────────────────────────────────────────────────
+    function lh(x1, x2, yy, w2) { doc.setLineWidth(w2||0.5); doc.line(x1, yy, x2, yy); }
+    function breakLong(txt, max) {
         if (!txt) return '';
-        return txt.split(' ').map(function(w) {
-            return w.length > maxLen ? w.match(new RegExp('.{1,' + maxLen + '}', 'g')).join(' ') : w;
+        return txt.split(' ').map(function(w2) {
+            return w2.length > max ? w2.match(new RegExp('.{1,'+max+'}','g')).join(' ') : w2;
         }).join(' ');
     }
 
-    // ── White background ───────────────────────────────────────────
-    setFill(C.bg); doc.rect(0, 0, w, h, 'F');
-
-    // ── Data Extraction ────────────────────────────────────────────
-    var contact    = isDummy ? 'Acme Corporation' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
-    var email      = isDummy ? 'accounts@acme.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
-    var phone      = isDummy ? '+1 800 555 0100' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
-    var issueDate  = isDummy ? '04 Aug 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
-    var dueDate    = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
-    var numberText = isDummy ? 'INV-0001' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
-    var bankContent= isDummy ? 'Bank: First National Bank\nAccount Name: Aniprotech Ltd\nAccount No: 12345678\nSort Code: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
-    var refText    = isDummy ? 'PO-98765' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
-    if (refText === '-') refText = '';
-    var currencySym= pdfSym(isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : ''));
-    var subtotal   = isDummy ? '5000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
-    var vat        = isDummy ? '1000.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
-    var total      = isDummy ? '6000.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
-    var company    = isDummy ? 'Aniprotech Ltd' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
-    var compAddr   = isDummy ? '456 Business Road, Melbourne VIC 3000' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
-    var compEmail  = isDummy ? 'billing@aniprotech.com' : (document.getElementById('view-inv-company-email') ? document.getElementById('view-inv-company-email').textContent.replace('Email: ', '') : '');
-    var compPhone  = isDummy ? '+61 3 9000 0000' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ', '') : '');
-    var compAbn    = isDummy ? '12 345 678 901' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ', '') : '');
-    var savedLogo      = localStorage.getItem('company_logo') || '';
-    var savedSignature = localStorage.getItem('company_signature') || '';
-    var savedTerms     = localStorage.getItem('company_terms') || 'Payment is due within the period stated. Please include the invoice number on your payment. Thank you for your business.';
-
-    // ══════════════════════════════════════════════════════════════
-    //  HEADER BAND
-    // ══════════════════════════════════════════════════════════════
-    var headerH = 90;
-    setFill(C.accent); doc.rect(0, 0, w, headerH, 'F');
-
-    // Logo or company name
-    y = 28;
-    if (savedLogo) {
-        try { doc.addImage(savedLogo, undefined, ml, 14, 60, 60); } catch(e) {}
-        doc.setFontSize(18); doc.setFont('helvetica', 'bold'); setColor(C.white);
-        doc.text(company || 'Company Name', ml + 68, y + 10);
-    } else {
-        doc.setFontSize(20); doc.setFont('helvetica', 'bold'); setColor(C.white);
-        doc.text(company || 'Company Name', ml, y + 12);
+    function checkPageBreak(need) {
+        if (y + need > pageBottom) {
+            drawFooter();
+            doc.addPage();
+            doc.setFillColor(255,255,255); doc.rect(0,0,w,h,'F');
+            pageNum++;
+            y = 45;
+        }
+    }
+    function drawFooter() {
+        doc.setFontSize(8); doc.setFont('helvetica','normal');
+        doc.setTextColor(150,150,150);
+        doc.text('Page ' + pageNum, w/2, h - 25, { align:'center' });
     }
 
-    // "INVOICE" label top-right
-    doc.setFontSize(28); doc.setFont('helvetica', 'bold'); setColor(C.white);
-    doc.text('INVOICE', mr, 56, { align: 'right' });
+    // ── White page ───────────────────────────────────────────────
+    doc.setFillColor(255,255,255); doc.rect(0,0,w,h,'F');
 
-    y = headerH + 24;
+    // ── Data Extraction ──────────────────────────────────────────
+    var contact    = isDummy ? 'Mr Frederick William Harris\n54 Cheshire Field Close\nWest Heath, Birmingham, B31 3TR' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
+    var custEmail  = isDummy ? 'demo@example.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
+    var custPhone  = isDummy ? '+44 121 000 0000' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
+    var issueDate  = isDummy ? '26 May 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
+    var dueDate    = isDummy ? '2 Jun 2026'  : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
+    var numberText = isDummy ? 'INV-0273' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
+    var bankContent= isDummy ? 'Account No: 00096345, sort code: 77-07-08' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
+    var refText    = isDummy ? '' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
+    if (refText === '-') refText = '';
+    var rawSym     = isDummy ? '\u00A3' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '\u00A3');
+    var cs         = pdfSym(rawSym);
+    var subtotal   = isDummy ? '168.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
+    var vatAmt     = isDummy ? '0.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
+    var total      = isDummy ? '168.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
+    var company    = isDummy ? 'Be care LTD T/S British Elderly Care' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
+    var compAddr   = isDummy ? '53 Newbridge Cres\nWolverhampton, West Midlands\nWV6 6LH, UNITED KINGDOM' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
+    var compEmail  = isDummy ? '' : (document.getElementById('view-inv-company-email') ? document.getElementById('view-inv-company-email').textContent.replace('Email: ','') : '');
+    var compPhone  = isDummy ? 'Tel: 01902521476' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ','') : '');
+    var compAbn    = isDummy ? '' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ','') : '');
+    var savedLogo      = localStorage.getItem('company_logo') || '';
+    var savedSignature = localStorage.getItem('company_signature') || '';
+    var savedTerms     = localStorage.getItem('company_terms') || '';
+    var currencyCode   = rawSym === cs ? '' : rawSym; // e.g. for "INR" label in Amount column header
 
-    // ══════════════════════════════════════════════════════════════
-    //  INVOICE META  (two-column: Bill To | Invoice Details)
-    // ══════════════════════════════════════════════════════════════
-    var col2X = w / 2 + 30;
+    // Determine column currency label for table header (e.g. "Amount GBP")
+    var _viewCur = typeof _viewCurrency !== 'undefined' ? _viewCurrency : (typeof _appCurrency !== 'undefined' ? _appCurrency : '');
+    var currLabel = _viewCur || 'GBP';
 
-    // Left — Bill To
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-    doc.text('BILL TO', ml, y);
-    y += 14;
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(C.text);
-    var billLines = doc.splitTextToSize(breakLongWords(contact || 'Customer Name', 35), col2X - ml - 10);
-    doc.text(billLines, ml, y);
-    y += billLines.length * 13;
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-    if (email && email !== 'No email') { doc.text(email, ml, y); y += 12; }
-    if (phone && phone !== 'No phone') { doc.text(phone, ml, y); y += 12; }
+    // ════════════════════════════════════════════════════════
+    //  HEADER — three columns
+    //  Left: TAX INVOICE + customer address
+    //  Centre: Invoice Date / Invoice Number
+    //  Right: Logo + Company details
+    // ════════════════════════════════════════════════════════
+    y = 45;
 
-    // Right column — Invoice details table
-    var detY = headerH + 24;
-    var labelX = col2X;
-    var valX = mr;
-    var rowH = 18;
+    // ── Right column: Logo ──
+    var logoX = mr - 65, logoY = y - 5, logoW = 65, logoH = 65;
+    if (savedLogo) {
+        try { doc.addImage(savedLogo, undefined, logoX, logoY, logoW, logoH); } catch(e) {}
+    } else {
+        // placeholder box
+        doc.setDrawColor(100,150,200); doc.setLineWidth(1);
+        doc.rect(logoX, logoY, logoW, logoH);
+        doc.setFontSize(7); doc.setFont('helvetica','normal'); doc.setTextColor(120,150,180);
+        doc.text('LOGO', logoX + logoW/2, logoY + logoH/2 + 3, { align:'center' });
+    }
 
-    var details = [
-        ['Invoice No.', numberText || '-'],
-        ['Issue Date',  issueDate  || '-'],
-        ['Due Date',    dueDate    || '-'],
-    ];
-    if (refText) details.push(['Reference', refText]);
+    // ── Right column: Company details (below logo) ──
+    var compX = logoX;
+    var compRightY = logoY + logoH + 8;
+    var compLines = [];
+    if (company) compLines.push(company);
+    if (compAddr) compAddr.split('\n').forEach(function(l) { if(l.trim()) compLines.push(l.trim()); });
+    if (compPhone) compLines.push(compPhone.startsWith('Tel') ? compPhone : 'Tel: ' + compPhone);
+    if (compEmail) compLines.push(compEmail);
+    if (compAbn)   compLines.push('ABN: ' + compAbn);
 
-    details.forEach(function(row) {
-        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.subText);
-        doc.text(row[0].toUpperCase(), labelX, detY + 11);
-        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
-        doc.text(row[1], valX, detY + 11, { align: 'right' });
-        detY += rowH;
+    doc.setFontSize(7.5); doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+    compLines.forEach(function(line) {
+        // wrap long lines
+        var wrapped = doc.splitTextToSize(line, logoW + 10);
+        wrapped.forEach(function(wl) {
+            doc.text(wl, mr, compRightY, { align:'right' });
+            compRightY += 10;
+        });
     });
 
-    // Amount Due highlight box
-    detY += 4;
-    setFill(C.accentLt); doc.rect(labelX, detY, mr - labelX, 28, 'F');
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-    doc.text('AMOUNT DUE', labelX + 8, detY + 11);
-    doc.setFontSize(13); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-    doc.text(pdfSym(currencySym) + total, valX - 8, detY + 19, { align: 'right' });
-    detY += 32;
+    // ── Left column: TAX INVOICE heading ──
+    doc.setFontSize(26); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('TAX INVOICE', ml, y + 18);
 
-    y = Math.max(y, detY) + 20;
+    // ── Centre column: Invoice meta ──
+    var centreX = w / 2 - 40;
+    var metaY = y;
+    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+    doc.text('Invoice Date', centreX, metaY + 8);
+    doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+    doc.text(issueDate || '-', centreX, metaY + 19);
+    metaY += 28;
+    doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+    doc.text('Invoice Number', centreX, metaY + 8);
+    doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+    doc.text(numberText || '-', centreX, metaY + 19);
+    if (refText) {
+        metaY += 28;
+        doc.setFontSize(8); doc.setTextColor(80,80,80); doc.text('Reference', centreX, metaY + 8);
+        doc.setFontSize(9); doc.setTextColor(0,0,0); doc.text(refText, centreX, metaY + 19);
+    }
 
-    // Divider
-    setDraw(C.border); hline(ml, mr, y, 0.5); y += 20;
+    // ── Customer address (below heading) ──
+    var custY = y + 32;
+    var custLines = [];
+    if (contact) {
+        contact.split('\n').forEach(function(l) { if(l.trim()) custLines.push(l.trim()); });
+        if (custLines.length === 1) {
+            // single line — try to display as-is
+        }
+    }
+    if (custEmail && custEmail !== 'No email') custLines.push(custEmail);
+    if (custPhone && custPhone !== 'No phone') custLines.push(custPhone);
 
-    // ══════════════════════════════════════════════════════════════
+    doc.setFontSize(8.5); doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+    custLines.forEach(function(line) {
+        var wl = doc.splitTextToSize(breakLong(line, 45), centreX - ml - 10);
+        wl.forEach(function(ll) {
+            doc.text(ll, ml, custY);
+            custY += 11;
+        });
+    });
+
+    y = Math.max(custY, compRightY) + 18;
+
+    // ════════════════════════════════════════════════════════
     //  LINE ITEMS TABLE
-    // ══════════════════════════════════════════════════════════════
-    checkPageBreak(60);
+    // ════════════════════════════════════════════════════════
+    doc.setTextColor(0,0,0); doc.setDrawColor(0,0,0);
+    lh(ml, mr, y, 0.8); y += 8;
 
-    // Table Header
-    var col = { desc: ml, qty: 310, price: 380, disc: 440, amt: mr };
-    setFill(C.accent); doc.rect(ml, y, mr - ml, 22, 'F');
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.white);
-    doc.text('DESCRIPTION',    col.desc  + 8, y + 15);
-    doc.text('QTY',            col.qty   + 8, y + 15, { align: 'center' });
-    doc.text('UNIT PRICE',     col.price + 8, y + 15, { align: 'center' });
-    doc.text('DISC',           col.disc  + 8, y + 15, { align: 'center' });
-    doc.text('AMOUNT',         col.amt   - 8, y + 15, { align: 'right' });
-    y += 22;
+    // Table header
+    var col = {
+        desc:  ml,
+        qty:   w - 230,
+        price: w - 150,
+        amt:   mr
+    };
+    doc.setFontSize(8.5); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('Description',            col.desc,  y + 10);
+    doc.text('Quantity',               col.qty,   y + 10, { align:'right' });
+    doc.text('Unit Price',             col.price, y + 10, { align:'right' });
+    doc.text('Amount ' + currLabel,    col.amt,   y + 10, { align:'right' });
+    y += 14;
+    lh(ml, mr, y, 0.8); y += 6;
 
     // Rows
     var rows = [];
     if (isDummy) {
-        rows = [
-            { name: 'Professional Services', desc: 'Monthly consulting and development services', qty: '1', price: '5000.00', disc: '0', tax: '20', amount: '5000.00' }
-        ];
+        rows = [{
+            name:'Client Service', desc:'', qty:'8.00', price:'21.00', disc:'0', tax:'0', amount:'168.00'
+        }];
     } else {
         document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
             var cells = tr.querySelectorAll('td');
@@ -1188,135 +1166,147 @@ function generateInvoicePDF(isDummy) {
                     desc:   cells[1].textContent.trim(),
                     qty:    cells[2].textContent.trim(),
                     price:  cells[3].textContent.trim(),
-                    disc:   (cells[4].textContent || '0').replace('%', '').trim(),
-                    tax:    (cells[5] ? cells[5].textContent : '0').replace('%', '').trim(),
+                    disc:   (cells[4].textContent||'0').replace('%','').trim(),
+                    tax:    (cells[5]?cells[5].textContent:'0').replace('%','').trim(),
                     amount: cells[6].textContent.trim()
                 });
             }
         });
     }
 
-    rows.forEach(function(row, idx) {
-        var nameLines = doc.splitTextToSize(breakLongWords(row.name || '-', 35), col.qty - col.desc - 16);
-        doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-        var descLines = row.desc ? doc.splitTextToSize(breakLongWords(row.desc, 45), col.qty - col.desc - 16) : [];
+    rows.forEach(function(row) {
+        var nameLines = doc.splitTextToSize(breakLong(row.name||'-', 50), col.qty - col.desc - 10);
+        doc.setFontSize(8.5); doc.setFont('helvetica','normal');
+        var descLines = row.desc ? doc.splitTextToSize(breakLong(row.desc, 60), col.qty - col.desc - 10) : [];
+        var rowH = Math.max(16, (nameLines.length + descLines.length) * 11 + 6);
+        checkPageBreak(rowH + 10);
 
-        var rowHeight = Math.max(26, (nameLines.length + descLines.length) * 12 + 10);
-        checkPageBreak(rowHeight);
-
-        if (idx % 2 === 0) { setFill(C.rowAlt); doc.rect(ml, y, mr - ml, rowHeight, 'F'); }
-
-        // Name
-        doc.setFontSize(9); doc.setFont('helvetica', 'bold'); setColor(C.text);
-        doc.text(nameLines, col.desc + 8, y + 13);
-        // Description
+        doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+        doc.text(nameLines, col.desc, y + 11);
         if (descLines.length > 0) {
-            doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-            doc.text(descLines, col.desc + 8, y + 13 + nameLines.length * 12);
+            doc.setTextColor(80,80,80);
+            doc.text(descLines, col.desc, y + 11 + nameLines.length * 11);
+            doc.setTextColor(0,0,0);
         }
-        // Qty
-        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
-        doc.text(String(row.qty), col.qty + 8, y + 13, { align: 'center' });
-        // Price
-        doc.text(pdfSym(currencySym) + row.price, col.price + 8, y + 13, { align: 'center' });
-        // Disc
-        var discVal = parseFloat(row.disc) > 0 ? row.disc + '%' : '-';
-        doc.text(discVal, col.disc + 8, y + 13, { align: 'center' });
-        // Amount
-        doc.setFont('helvetica', 'bold'); setColor(C.text);
-        doc.text(pdfSym(currencySym) + row.amount, col.amt - 8, y + 13, { align: 'right' });
-
-        // Row bottom border
-        setDraw(C.border); hline(ml, mr, y + rowHeight, 0.3);
-        y += rowHeight;
+        doc.text(row.qty,   col.qty,   y + 11, { align:'right' });
+        doc.text(row.price, col.price, y + 11, { align:'right' });
+        doc.text(row.amount, col.amt,  y + 11, { align:'right' });
+        y += rowH;
     });
 
     if (rows.length === 0) {
-        doc.setFontSize(9); doc.setFont('helvetica', 'italic'); setColor(C.subText);
-        doc.text('No line items', ml + 8, y + 16); y += 26;
+        doc.setFontSize(8.5); doc.setTextColor(120,120,120);
+        doc.text('No items.', col.desc, y + 11); y += 18;
     }
 
-    y += 16;
+    // Bank / account details note (below rows, before totals line)
+    if (bankContent) {
+        y += 4;
+        doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(50,50,50);
+        var bkLines = doc.splitTextToSize('Account Details for payment: ' + bankContent.replace(/\n/g, ', '), mr - ml - 10);
+        checkPageBreak(bkLines.length * 11 + 8);
+        doc.text(bkLines, col.desc, y + 10);
+        y += bkLines.length * 11 + 8;
+    }
 
-    // ══════════════════════════════════════════════════════════════
-    //  TOTALS
-    // ══════════════════════════════════════════════════════════════
-    checkPageBreak(90);
-    var totLabelX = col.price;
-    var totValX   = mr;
+    // Separator line before totals
+    lh(ml, mr, y, 0.5); y += 10;
 
-    function totRow(label, val, bold) {
-        doc.setFontSize(9);
+    // ════════════════════════════════════════════════════════
+    //  TOTALS — right-aligned
+    // ════════════════════════════════════════════════════════
+    checkPageBreak(70);
+    var tLabelX = col.price;
+    var tValX   = mr;
+
+    function tRow(label, val, bold) {
+        doc.setFontSize(8.5);
         doc.setFont('helvetica', bold ? 'bold' : 'normal');
-        setColor(bold ? C.text : C.subText);
-        doc.text(label, totLabelX, y + 11);
-        setColor(C.text);
-        doc.text(val, totValX - 8, y + 11, { align: 'right' });
+        doc.setTextColor(0,0,0);
+        doc.text(label, tLabelX, y + 10, { align:'right' });
+        doc.text(val,   tValX,   y + 10, { align:'right' });
+        y += 14;
+    }
+
+    tRow('Subtotal', subtotal);
+    tRow('TOTAL  NO VAT', vatAmt);
+    lh(tLabelX - 60, tValX, y - 2, 0.5);
+    y += 4;
+    tRow('TOTAL  ' + currLabel, total, true);
+    y += 10;
+
+    // ════════════════════════════════════════════════════════
+    //  DUE DATE + TERMS
+    // ════════════════════════════════════════════════════════
+    if (dueDate) {
+        checkPageBreak(30);
+        doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+        doc.text('Due Date: ' + dueDate, ml, y + 12);
         y += 18;
     }
 
-    totRow('Subtotal', pdfSym(currencySym) + subtotal);
-    totRow('Tax (VAT)', pdfSym(currencySym) + vat);
+    if (savedTerms) {
+        var termLines = doc.splitTextToSize(savedTerms.trim(), mr - ml);
+        checkPageBreak(termLines.length * 11 + 10);
+        doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60);
+        doc.text(termLines, ml, y + 11);
+        y += termLines.length * 11 + 10;
+    }
 
-    // Total row with colored background
-    checkPageBreak(30);
-    setFill(C.accent); doc.rect(totLabelX - 8, y, totValX - totLabelX + 8, 26, 'F');
-    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(C.white);
-    doc.text('TOTAL DUE', totLabelX, y + 18);
-    doc.text(pdfSym(currencySym) + total, totValX - 8, y + 18, { align: 'right' });
-    y += 36;
+    // Signature
+    if (savedSignature) {
+        checkPageBreak(70);
+        y += 10;
+        try { doc.addImage(savedSignature, 'PNG', mr - 140, y, 140, 45); } catch(e) {}
+        lh(mr - 140, mr, y + 48, 0.5);
+        doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+        doc.text('Authorised Signature', mr - 140, y + 58);
+        y += 68;
+    }
 
     y += 20;
 
-    // ══════════════════════════════════════════════════════════════
-    //  BANK DETAILS
-    // ══════════════════════════════════════════════════════════════
-    if (bankContent) {
-        var bankLines = doc.splitTextToSize(bankContent.trim(), (mr - ml) / 2 - 10);
-        checkPageBreak(30 + bankLines.length * 13);
-        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-        doc.text('PAYMENT DETAILS', ml, y); y += 13;
-        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); setColor(C.text);
-        doc.text(bankLines, ml, y); y += bankLines.length * 13 + 10;
-    }
+    // ════════════════════════════════════════════════════════
+    //  PAYMENT ADVICE  (dashed cut-here section)
+    // ════════════════════════════════════════════════════════
+    checkPageBreak(90);
+    doc.setDrawColor(0,0,0); doc.setLineWidth(0.5);
+    doc.setLineDashPattern([4, 3], 0);
+    doc.line(ml, y, mr, y);
+    doc.setLineDashPattern([], 0);
+    // Scissors icon (text approximation)
+    doc.setFontSize(12); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
+    doc.text('-X-', ml - 2, y - 3);
+    y += 16;
 
-    // ══════════════════════════════════════════════════════════════
-    //  TERMS & CONDITIONS
-    // ══════════════════════════════════════════════════════════════
-    if (savedTerms) {
-        var termLines = doc.splitTextToSize(savedTerms.trim(), mr - ml);
-        checkPageBreak(30 + termLines.length * 12);
-        doc.setFontSize(8); doc.setFont('helvetica', 'bold'); setColor(C.accent);
-        doc.text('TERMS & CONDITIONS', ml, y); y += 13;
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-        doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
-    }
+    doc.setFontSize(18); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('PAYMENT ADVICE', ml, y + 14);
+    y += 24;
 
-    // ══════════════════════════════════════════════════════════════
-    //  SIGNATURE
-    // ══════════════════════════════════════════════════════════════
-    if (savedSignature) {
-        checkPageBreak(80);
-        y += 10;
-        try { doc.addImage(savedSignature, 'PNG', mr - 150, y, 150, 45); } catch(e) {}
-        setDraw(C.subText); hline(mr - 150, mr, y + 48, 0.5);
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-        doc.text('Authorised Signature', mr - 150, y + 60);
-        y += 70;
-    } else {
-        checkPageBreak(70);
-        y += 10;
-        setDraw(C.subText); hline(mr - 150, mr, y + 40, 0.5);
-        doc.setFontSize(8); doc.setFont('helvetica', 'normal'); setColor(C.subText);
-        doc.text('Authorised Signature', mr - 150, y + 52);
-        y += 62;
-    }
+    // Two-column payment advice detail
+    var paRight = w / 2 + 10;
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('Customer',       ml,      y + 11);
+    doc.text('Invoice Number', paRight, y + 11);
+    y += 13;
+    doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+    var paAddrLines = doc.splitTextToSize(contact || '-', paRight - ml - 20);
+    doc.text(paAddrLines,  ml,      y + 10);
+    doc.text(numberText || '-',     paRight, y + 10);
+    var paAddrH = paAddrLines.length * 11;
+    y += paAddrH + 8;
 
-    // ══════════════════════════════════════════════════════════════
-    //  FOOTER
-    // ══════════════════════════════════════════════════════════════
+    doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text('Amount Due',  ml,      y + 11);
+    doc.text('Due Date',    paRight, y + 11);
+    y += 13;
+    doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
+    doc.text(cs + total,    ml,      y + 11);
+    doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text(dueDate || '-', paRight, y + 11);
+    y += 20;
+
     drawFooter();
-
     return doc;
 }
 
