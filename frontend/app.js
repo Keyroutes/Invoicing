@@ -434,10 +434,7 @@ function renderDashboard(data) {
     document.getElementById('dash-invoices-owed').textContent = formatCurrency(s.invoices_owed);
     document.getElementById('dash-total-count').textContent = s.total_count || 0;
     
-    // Inject futuristic chart rendering here:
-    if (typeof renderInvoiceChart === 'function') {
-        renderInvoiceChart(s.total_revenue || 0, s.invoices_owed || 0, s.total_count || 0);
-    }
+    
 
     document.getElementById('dash-paid-count').textContent = s.paid_count || 0;
     document.getElementById('dash-pending-count').textContent = s.pending_count || 0;
@@ -989,9 +986,7 @@ function generateInvoicePDF(isDummy) {
     var issueDate = isDummy ? '04 Aug 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
     var dueDate = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
     var numberText = isDummy ? 'INV-2050' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
-    var bankContent = isDummy ? 'Bank: CyberBank
-Acc: 99887766
-Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
+    var bankContent = isDummy ? 'Bank: CyberBank\nAcc: 99887766\nSort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
     var subtotal = isDummy ? '1000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
     var vat = isDummy ? '200.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
     var total = isDummy ? '1200.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
