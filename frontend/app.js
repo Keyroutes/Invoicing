@@ -1113,7 +1113,7 @@ function generateInvoicePDF(isDummy = false) {
         }
         else if (block.id === 'totals') {
             checkPageBreak(80);
-            var totLabelX = mr - 170; var totValX = mr - 8;
+            var totLabelX = mr - 220; var totValX = mr - 8;
             doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
             doc.text('Subtotal', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(subtotal, totValX, y, { align: 'right' }); y += 16;
             doc.setTextColor(100, 116, 139); doc.text('VAT', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(vat, totValX, y, { align: 'right' }); y += 6;
@@ -1640,6 +1640,7 @@ async function loadSettings() {
         var res = await fetch('/api/settings');
         if (!res.ok) return;
         var data = await res.json();
+        if (data.invoice_layout !== undefined) { initTemplateBuilder(data.invoice_layout); }
         if (data.company_name !== undefined) { var el = document.getElementById('settings-company-name'); if (el) el.value = data.company_name; }
         if (data.email !== undefined) { var el = document.getElementById('settings-company-email'); if (el) el.value = data.email; }
         if (data.phone_number !== undefined) { var el = document.getElementById('settings-company-phone'); if (el) el.value = data.phone_number; }
@@ -3689,6 +3690,7 @@ window.exportAttendance = exportAttendance;
 // --- Event Listeners ---
 document.addEventListener('DOMContentLoaded', function() {
     checkAuthStatus();
+    loadSettings();
     fetchDashboardData();
     fetchInvoices();
     preloadSearchData();
