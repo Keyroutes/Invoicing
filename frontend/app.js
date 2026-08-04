@@ -990,6 +990,9 @@ function generateInvoicePDF(isDummy) {
     var dueDate = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
     var numberText = isDummy ? 'INV-2050' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
     var bankContent = isDummy ? 'Bank: CyberBank\nAcc: 99887766\nSort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
+    var refText = isDummy ? 'PO-12345' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
+    if (refText === '-') refText = '';
+    var currencySym = isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '');
     var subtotal = isDummy ? '1000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
     var vat = isDummy ? '200.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
     var total = isDummy ? '1200.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
@@ -1217,21 +1220,21 @@ function generateInvoicePDF(isDummy) {
         }
         else if (block.id === 'bank_details') {
             if (bankContent) {
-                checkPageBreak(100);
+                var bankLines = doc.splitTextToSize(bankContent, 300);
+                checkPageBreak(30 + bankLines.length * 14);
                 doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(188, 19, 254);
                 doc.text('> TRANSFER_COORDINATES', ml, y); y += 16;
                 doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(220, 230, 240);
-                var bankLines = doc.splitTextToSize(bankContent, 300);
                   
                 doc.text(bankLines, ml, y); y += bankLines.length * 14 + 10;
             }
         }
         else if (block.id === 'terms_conditions') {
-            checkPageBreak(60);
+            var termLines = doc.splitTextToSize(savedTerms, mr - ml);
+            checkPageBreak(30 + termLines.length * 12);
             doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(100, 110, 130);
             doc.text('TERMS & PROTOCOLS', ml, y); y += 14;
             doc.setFontSize(8); doc.setFont('courier', 'normal'); doc.setTextColor(140, 150, 170);
-            var termLines = doc.splitTextToSize(savedTerms, mr - ml);
               
             doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
         }
@@ -1256,7 +1259,7 @@ function generateInvoicePDF(isDummy) {
             doc.setFillColor(15, 25, 40); doc.rect(ml, y, mr - ml, 40, 'F');
             doc.setFont('courier', 'bold'); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
             doc.text('PAYMENT ADVICE', ml + 12, y + 24);
-            doc.setFontSize(9); doc.setTextColor(180, 190, 200); doc.text('TARGET: ' + (company ? company.substring(0, 30) : 'SYS'), mr - 200, y + 16);
+            doc.setFontSize(9); doc.setTextColor(180, 190, 200); doc.text('TARGET: ' + (typeof company !== 'undefined' && company ? company.substring(0, 30) : 'SYS'), mr - 200, y + 16);
             doc.setFontSize(9); doc.setTextColor(0, 240, 255); doc.text('AMT: ___________', mr - 200, y + 30);
             y += 60;
         }
@@ -1283,7 +1286,7 @@ async function sendEmail() {
     var pdfB64 = '';
     try {
         var doc = generateInvoicePDF();
-        pdfB64 = doc.output('datauristring').split(',')[1];
+        pdfB64 = doc.output('datauristring').split('base64,')[1];
     } catch (e) { console.error('PDF generation failed:', e); }
 
     try {
@@ -3158,7 +3161,7 @@ async function sendPayslipEmail() {
     var pdfB64 = '';
     try {
         var doc = generatePayslipPDF();
-        pdfB64 = doc.output('datauristring').split(',')[1];
+        pdfB64 = doc.output('datauristring').split('base64,')[1];
     } catch (e) { console.error('PDF generation failed:', e); }
     try {
         var res = await fetch('/api/payslips/' + currentPayslipId + '/send', {
@@ -4960,10 +4963,6 @@ function aiGenerateInvEmail() {
     var number = document.getElementById('view-inv-number-val').textContent || '';
     var total = document.getElementById('view-inv-due-val').textContent || '0';
     var dueDate = document.getElementById('view-inv-due-date').textContent || '';
-    var bankContent = document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '';
-    var refText = isDummy ? 'PO-12345' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
-    if (refText === '-') refText = '';
-    var currencySym = isDummy ? '$' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '');
 
     aiPersonalizeEmail(number, contact, parseFloat(total) || 0, dueDate);
 }
