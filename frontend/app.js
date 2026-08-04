@@ -963,26 +963,35 @@ function previewInvoiceTemplate() {
 window.previewInvoiceTemplate = previewInvoiceTemplate;
 
 // --- DYNAMIC GENERATE INVOICE PDF ---
-function generateInvoicePDF(isDummy = false) {
-    var jsPDF = window.jspdf.jsPDF;
-    var doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    var w = 612, h = 792;
-    var ml = 50, mr = w - 50;
-    var pageBottom = h - 40;
-    var y = 36;
-    
+function generateInvoicePDF(isDummy) {
+    var doc = new jsPDF('p', 'pt', 'a4');
+    var w = doc.internal.pageSize.width;
+    var h = doc.internal.pageSize.height;
+    var ml = 40, mr = w - 40;
+    var y = 40;
+    var pageBottom = h - 60;
+    var number = 1;
+
+    // Background Color (Cyber Black)
+    function drawCyberBackground(doc) {
+        doc.setFillColor(10, 15, 26);
+        doc.rect(0, 0, w, h, 'F');
+    }
+    drawCyberBackground(doc);
+
     // Data Extraction
-    var number = isDummy ? 'INV-PREVIEW' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : 'Invoice');
-    var contact = isDummy ? 'John Doe, 123 Main St' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
-    var email = isDummy ? 'john@example.com' : (document.getElementById('view-inv-email-display') ? document.getElementById('view-inv-email-display').textContent : '');
-    var phone = isDummy ? '555-0199' : (document.getElementById('view-inv-phone-display') ? document.getElementById('view-inv-phone-display').textContent : '');
+    var contact = isDummy ? 'John Doe, Tech Corp' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
+    var email = isDummy ? 'john@techcorp.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
+    var phone = isDummy ? '555-0199' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
     var issueDate = isDummy ? '04 Aug 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
-    var dueDate = isDummy ? '11 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
-    var bankContent = isDummy ? 'Bank: Demo Bank\nAcc: 12345678\nSort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
+    var dueDate = isDummy ? '18 Aug 2026' : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
+    var numberText = isDummy ? 'INV-2050' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
+    var bankContent = isDummy ? 'Bank: CyberBank
+Acc: 99887766
+Sort: 12-34-56' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
     var subtotal = isDummy ? '1000.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
     var vat = isDummy ? '200.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
     var total = isDummy ? '1200.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
-    var savedLogo = localStorage.getItem('company_logo') || '';
     
     var company = isDummy ? 'Aniprotech Ltd' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
     var compAddr = isDummy ? '456 Business Rd, Tech City' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
@@ -990,19 +999,25 @@ function generateInvoicePDF(isDummy = false) {
     var compPhone = isDummy ? '888-0000' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ', '') : '');
     var compAbn = isDummy ? 'ABN-12345' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ', '') : '');
 
+    var savedLogo = localStorage.getItem('company_logo') || '';
+    var savedSignature = localStorage.getItem('company_signature') || '';
+    var savedTerms = localStorage.getItem('company_terms') || 'Payment is due within 30 days. Late payments may incur fees.';
+
     // Common Helpers
     function drawPageNum(doc) {
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(148, 163, 184);
-        doc.text(number + ' | ' + (company || 'aniprotech'), ml, h - 14);
+        doc.setFontSize(8);
+        doc.setFont('courier', 'normal');
+        doc.setTextColor(0, 240, 255); // Neon Cyan
+        doc.text('PAGE [' + number + '] // ' + (company || 'SYS').toUpperCase(), ml, h - 20);
     }
     
     function checkPageBreak(requiredHeight) {
         if (y + requiredHeight > pageBottom) {
             drawPageNum(doc);
             doc.addPage();
+            drawCyberBackground(doc);
             y = 40;
+            number++;
         }
     }
 
@@ -1013,79 +1028,95 @@ function generateInvoicePDF(isDummy = false) {
         
         if (block.id === 'header') {
             checkPageBreak(80);
-            doc.setFillColor(30, 41, 59);
-            doc.rect(0, 0, w, 4, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(28);
-            doc.setTextColor(30, 41, 59);
-            doc.text('TAX INVOICE', ml, y + 20);
+            
+            // Cyber accent bar
+            doc.setFillColor(0, 240, 255);
+            doc.rect(0, 10, w, 4, 'F');
+            doc.setFillColor(188, 19, 254);
+            doc.rect(0, 14, w/3, 2, 'F');
+
+            doc.setFont('courier', 'bold');
+            doc.setFontSize(36);
+            doc.setTextColor(255, 255, 255);
+            doc.text('INVOICE', ml, y + 30);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(0, 240, 255);
+            doc.text('[ DOC_TYPE: DIGITAL_BILLING ]', ml, y + 45);
+
             if (savedLogo) {
-                try { doc.addImage(savedLogo, 'PNG', mr - 100, y - 10, 100, 36); } catch(e) {}
+                try { doc.addImage(savedLogo, 'PNG', mr - 100, y - 5, 100, 36); } catch(e) {}
             }
-            y += 50;
+            y += 70;
         }
         else if (block.id === 'company_info') {
             checkPageBreak(80);
             var compY = y;
             if (company) {
-                doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-                doc.text(company.substring(0, 44), mr, compY, { align: 'right' });
-                compY += 14;
+                doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0, 240, 255);
+                doc.text(company.substring(0, 44).toUpperCase(), mr, compY, { align: 'right' });
+                compY += 16;
             }
-            doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
+            doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
             if (compAddr) {
                 compAddr.split(',').forEach(function(p) {
                     p = p.trim(); if (p) { doc.text(p.substring(0, 42), mr, compY, { align: 'right' }); compY += 12; }
                 });
             }
-            if (compPhone) { doc.text('Tel: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
-            if (compEmail) { doc.text(compEmail, mr, compY, { align: 'right' }); compY += 12; }
-            y = Math.max(y, compY) + 10;
+            if (compPhone) { doc.text('COM: ' + compPhone, mr, compY, { align: 'right' }); compY += 12; }
+            if (compEmail) { doc.text('NET: ' + compEmail, mr, compY, { align: 'right' }); compY += 12; }
+            y = Math.max(y, compY) + 15;
         }
         else if (block.id === 'customer_info') {
             checkPageBreak(80);
             var custY = y;
-            doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(148, 163, 184);
-            doc.text('SOLD TO', ml, custY);
-            custY += 14;
-            doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+            doc.setFontSize(9); doc.setFont('courier', 'bold'); doc.setTextColor(188, 19, 254);
+            doc.text('> TARGET_ENTITY', ml, custY);
+            custY += 16;
+            doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
             if (contact) {
                 contact.split(',').forEach(function(p) {
-                    p = p.trim(); if (p) { doc.text(p.substring(0, 48), ml, custY); custY += 14; }
+                    p = p.trim(); if (p) { doc.text(p.substring(0, 48).toUpperCase(), ml, custY); custY += 14; }
                 });
             }
-            doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
-            if (email && email !== 'No email') { doc.text(email, ml, custY); custY += 12; }
-            if (phone && phone !== 'No phone') { doc.text(phone, ml, custY); custY += 12; }
-            y = Math.max(y, custY) + 10;
+            doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
+            if (email && email !== 'No email') { doc.text('ID: ' + email, ml, custY); custY += 12; }
+            if (phone && phone !== 'No phone') { doc.text('CH: ' + phone, ml, custY); custY += 12; }
+            y = Math.max(y, custY) + 15;
         }
         else if (block.id === 'invoice_details') {
-            checkPageBreak(50);
-            doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.5);
-            doc.line(ml, y, mr, y); y += 14;
+            checkPageBreak(60);
+            // Cyber Box for Details
+            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1);
+            doc.rect(ml, y, mr - ml, 40);
+            doc.setFillColor(15, 25, 40);
+            doc.rect(ml, y, mr - ml, 40, 'F');
+            doc.rect(ml, y, mr - ml, 40, 'S');
+
             var detW = (mr - ml) / 3;
-            var detLabels = ['INVOICE DATE', 'DUE DATE', 'INVOICE NO'];
-            var detValues = [issueDate || '-', dueDate || '-', number];
+            var detLabels = ['TIMESTAMP', 'DEADLINE', 'REF_ID'];
+            var detValues = [issueDate || '-', dueDate || '-', numberText];
             detLabels.forEach(function(label, i) {
                 var dx = ml + detW * i;
-                doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(148, 163, 184);
-                doc.text(label, dx + 8, y);
-                doc.setFontSize(10); doc.setTextColor(30, 41, 59);
-                doc.text(detValues[i], dx + 8, y + 14);
+                doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+                doc.text(label, dx + 12, y + 16);
+                doc.setFontSize(11); doc.setTextColor(255, 255, 255);
+                doc.text(detValues[i], dx + 12, y + 30);
             });
-            y += 32; doc.line(ml, y, mr, y); y += 10;
+            y += 60;
         }
         else if (block.id === 'line_items') {
             checkPageBreak(100);
-            doc.setFillColor(30, 41, 59); doc.rect(ml, y, mr - ml, 20, 'F');
-            doc.setFontSize(7.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(220, 225, 235);
-            doc.text('Item', ml + 3, y + 13);
-            doc.text('Amount', mr - 2, y + 13, { align: 'right' });
-            y += 24;
+            // Header
+            doc.setFillColor(20, 30, 45); doc.rect(ml, y, mr - ml, 24, 'F');
+            doc.setFontSize(9); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+            doc.text('RESOURCE', ml + 8, y + 16);
+            doc.text('CREDITS', mr - 8, y + 16, { align: 'right' });
+            y += 28;
             
             var rows = [];
             if (isDummy) {
-                rows = [{name: 'Software License', desc: 'Annual Subscription', qty: '1', price: '1000.00', disc: '0', amount: '1000.00'}];
+                rows = [{name: 'Cybernetic Enhancement Model X', desc: '-', qty: '1', price: '4500.00', disc: '0', amount: '4500.00'}];
             } else {
                 document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
                     var cells = tr.querySelectorAll('td');
@@ -1104,78 +1135,94 @@ function generateInvoicePDF(isDummy = false) {
             
             rows.forEach(function(row, idx) {
                 checkPageBreak(40);
-                if (idx % 2 === 0) { doc.setFillColor(248, 250, 252); doc.rect(ml, y, mr - ml, 22, 'F'); }
-                doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
+                if (idx % 2 === 0) { doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F'); }
+                doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255);
                 var n = doc.splitTextToSize(row.name || '-', 150);
                 if (n.length > 4) { n = n.slice(0, 4); n[3] = n[3].substring(0, n[3].length - 3) + '...'; }
-                doc.text(n, ml + 3, y + 14);
-                doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
-                doc.text(row.qty + ' x ' + row.price, ml + 160, y + 14);
-                doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-                doc.text(row.amount, mr - 2, y + 14, { align: 'right' });
-                y += Math.max(22, n.length * 12 + 10);
+                doc.text(n, ml + 8, y + 16);
+                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
+                doc.text(row.qty + ' x ' + row.price, ml + 170, y + 16);
+                doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+                doc.text(row.amount, mr - 8, y + 16, { align: 'right' });
+                y += Math.max(24, n.length * 14 + 10);
             });
             if (rows.length === 0) {
-                doc.setFillColor(248, 250, 252); doc.rect(ml, y, mr - ml, 22, 'F');
-                doc.setFontSize(9); doc.setTextColor(148, 163, 184);
-                doc.text('No line items', ml + 3, y + 14); y += 22;
+                doc.setFillColor(12, 18, 30); doc.rect(ml, y, mr - ml, 24, 'F');
+                doc.setFontSize(10); doc.setTextColor(100, 110, 130);
+                doc.text('NO RESOURCES ALLOCATED', ml + 8, y + 16); y += 24;
             }
-            doc.setDrawColor(226, 232, 240); doc.line(ml, y, mr, y); y += 10;
+            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.line(ml, y, mr, y); y += 20;
         }
         else if (block.id === 'totals') {
-            checkPageBreak(80);
+            checkPageBreak(100);
             var totLabelX = mr - 300; var totValX = mr - 8;
-            doc.setFontSize(9.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
-            doc.text('Subtotal', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(subtotal, totValX, y, { align: 'right' }); y += 16;
-            doc.setTextColor(100, 116, 139); doc.text('VAT', totLabelX, y); doc.setTextColor(30, 41, 59); doc.text(vat, totValX, y, { align: 'right' }); y += 6;
-            doc.setDrawColor(200, 210, 220); doc.line(totLabelX, y, totValX, y); y += 14;
-            doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-            doc.text('TOTAL', totLabelX, y); doc.text(total, totValX, y, { align: 'right' }); y += 20;
+            
+            // Cyber box for totals
+            doc.setFillColor(15, 25, 40);
+            doc.rect(totLabelX - 20, y - 10, mr - (totLabelX - 20), 80, 'F');
+            doc.setDrawColor(188, 19, 254); // Purple border right
+            doc.setLineWidth(2);
+            doc.line(mr, y - 10, mr, y + 70);
+
+            doc.setFontSize(10); doc.setFont('courier', 'normal'); doc.setTextColor(180, 190, 200);
+            doc.text('SUB_REQ', totLabelX, y + 10); doc.setTextColor(255, 255, 255); doc.text(subtotal, totValX - 10, y + 10, { align: 'right' }); y += 18;
+            doc.setTextColor(180, 190, 200); doc.text('TAX_SYS', totLabelX, y + 10); doc.setTextColor(255, 255, 255); doc.text(vat, totValX - 10, y + 10, { align: 'right' }); y += 18;
+            
+            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.line(totLabelX, y + 5, totValX - 10, y + 5); y += 22;
+            
+            doc.setFontSize(14); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+            doc.text('TOTAL_AUTH', totLabelX, y + 5); doc.text(total, totValX - 10, y + 5, { align: 'right' }); y += 30;
         }
         else if (block.id === 'bank_details') {
             if (bankContent) {
                 checkPageBreak(100);
-                doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59);
-                doc.text('Payment Details:', ml, y); y += 12;
-                doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
+                doc.setFontSize(10); doc.setFont('courier', 'bold'); doc.setTextColor(188, 19, 254);
+                doc.text('> TRANSFER_COORDINATES', ml, y); y += 16;
+                doc.setFontSize(9); doc.setFont('courier', 'normal'); doc.setTextColor(220, 230, 240);
                 var bankLines = doc.splitTextToSize(bankContent, 300);
-                doc.text(bankLines, ml, y); y += bankLines.length * 12 + 10;
+                doc.text(bankLines, ml, y); y += bankLines.length * 14 + 10;
             }
         }
         else if (block.id === 'terms_conditions') {
             checkPageBreak(60);
-            doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(148, 163, 184);
-            doc.text('TERMS & CONDITIONS', ml, y); y += 12;
-            doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139);
-            doc.text('Payment is due within the specified due date. Late payments may incur additional fees.', ml, y); y += 14;
+            doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(100, 110, 130);
+            doc.text('TERMS & PROTOCOLS', ml, y); y += 14;
+            doc.setFontSize(8); doc.setFont('courier', 'normal'); doc.setTextColor(140, 150, 170);
+            var termLines = doc.splitTextToSize(savedTerms, mr - ml);
+            doc.text(termLines, ml, y); y += termLines.length * 12 + 10;
         }
         else if (block.id === 'signature') {
-            checkPageBreak(70);
-            doc.setDrawColor(180, 190, 200); doc.setLineWidth(0.5);
-            doc.line(mr - 150, y + 40, mr, y + 40);
-            doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(148, 163, 184);
-            doc.text('Authorized Signature', mr - 75, y + 54, { align: 'center' });
-            y += 60;
+            checkPageBreak(100);
+            if (savedSignature) {
+                try { doc.addImage(savedSignature, 'PNG', mr - 160, y, 160, 50); } catch(e) {}
+            } else {
+                doc.setDrawColor(0, 240, 255); doc.setLineWidth(1);
+                doc.line(mr - 160, y + 50, mr, y + 50);
+            }
+            doc.setFontSize(8); doc.setFont('courier', 'bold'); doc.setTextColor(0, 240, 255);
+            doc.text('// DIGITAL_AUTHORIZATION_VERIFIED', mr, y + 64, { align: 'right' });
+            y += 80;
         }
         else if (block.id === 'payment_stub') {
             checkPageBreak(150);
-            doc.setDrawColor(160, 170, 180); doc.setLineWidth(0.4); doc.setLineDashPattern([6, 4], 0);
+            doc.setDrawColor(0, 240, 255); doc.setLineWidth(1); doc.setLineDashPattern([4, 4], 0);
             doc.line(ml, y, mr, y); doc.setLineDashPattern([], 0);
-            doc.setFontSize(12); doc.setTextColor(160, 170, 180); doc.text('✂', ml - 2, y - 3); y += 14;
-            doc.setFillColor(248, 250, 252); doc.roundedRect(ml, y - 4, mr - ml, 28, 4, 4, 'F');
-            doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(30, 41, 59);
-            doc.text('PAYMENT ADVICE', ml + 10, y + 14); y += 36;
-            doc.setFontSize(8); doc.setTextColor(148, 163, 184); doc.text('PAY TO', ml + 10, y); y += 12;
-            doc.setFontSize(9.5); doc.setTextColor(30, 41, 59); if (company) { doc.text(company.substring(0, 38), ml + 10, y); y += 12; }
-            doc.setFontSize(8); doc.text('Amount Enclosed: ___________', mr - 120, y); y += 20;
+            doc.setFontSize(12); doc.setTextColor(0, 240, 255); doc.text('8<--', ml - 2, y - 3); y += 20;
+            
+            doc.setFillColor(15, 25, 40); doc.rect(ml, y, mr - ml, 40, 'F');
+            doc.setFont('courier', 'bold'); doc.setFontSize(12); doc.setTextColor(255, 255, 255);
+            doc.text('PAYMENT ADVICE', ml + 12, y + 24);
+            doc.setFontSize(9); doc.setTextColor(180, 190, 200); doc.text('TARGET: ' + (company ? company.substring(0, 30) : 'SYS'), mr - 200, y + 16);
+            doc.setFontSize(9); doc.setTextColor(0, 240, 255); doc.text('AMT: ___________', mr - 200, y + 30);
+            y += 60;
         }
     });
     
     // Add Footer on last page
-    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
-    doc.line(ml, h - 30, mr, h - 30);
-    doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(180, 190, 200);
-    doc.text('Company Registration No: ' + (compAbn || 'N/A') + '  |  Registered Office: ' + (compAddr || 'N/A'), ml, h - 20);
+    doc.setDrawColor(188, 19, 254); doc.setLineWidth(1);
+    doc.line(ml, h - 40, mr, h - 40);
+    doc.setFontSize(7); doc.setFont('courier', 'normal'); doc.setTextColor(100, 110, 130);
+    doc.text('REG_NO: ' + (compAbn || 'N/A') + ' | NODE: ' + (compAddr || 'N/A'), ml, h - 26);
     
     drawPageNum(doc);
     return doc;
@@ -5420,3 +5467,45 @@ window.addBankDetailSlot = function(data) {
     `;
     container.appendChild(slot);
 };
+
+
+// --- Legal Settings Logic ---
+function handleSettingsSignatureUpload(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert('Signature image must be under 2MB.'); return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var b64 = e.target.result;
+        var img = document.getElementById('settings-signature-img');
+        var text = document.getElementById('settings-signature-text');
+        if (img && text) {
+            img.src = b64;
+            img.style.display = 'block';
+            text.style.display = 'none';
+        }
+        localStorage.setItem('company_signature', b64);
+    };
+    reader.readAsDataURL(file);
+}
+
+function saveLegalSettings() {
+    var terms = document.getElementById('settings-terms') ? document.getElementById('settings-terms').value : '';
+    
+    // Save locally
+    localStorage.setItem('company_terms', terms);
+    
+    // Save to backend
+    fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+            { key: 'company_terms', value: terms }
+        ])
+    }).then(res => res.json()).then(data => {
+        showToast('Legal settings saved successfully', 'success');
+    }).catch(err => {
+        console.error(err);
+        showToast('Failed to save legal settings', 'error');
+    });
+}

@@ -663,7 +663,37 @@
                     </div>
                     
                     
+                    
                     <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header"><h3>Legal & Authorization</h3></div>
+                        <div class="widget-content">
+                            <div class="form-group">
+                                <label>Default Terms & Conditions</label>
+                                <textarea id="settings-terms" class="form-control" rows="4" placeholder="e.g. Payment is due within 30 days. Late payments may incur fees."></textarea>
+                                <p style="color:var(--text-secondary);font-size:0.85rem;margin-top:4px;">This will be appended to the bottom of your invoices.</p>
+                            </div>
+                            
+                            <div class="form-group" style="margin-top:16px;">
+                                <label>Digital Signature</label>
+                                <div style="display:flex;align-items:center;gap:24px;margin-top:8px;">
+                                    <div onclick="document.getElementById('settings-signature-upload').click()" style="width:200px;height:80px;border:2px dashed var(--border-color);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex-shrink:0;transition:border-color 0.2s;" onmouseover="this.style.borderColor='var(--primary-color)'" onmouseout="this.style.borderColor='var(--border-color)'">
+                                        <img id="settings-signature-img" src="" style="display:none;max-width:100%;max-height:100%;object-fit:contain;">
+                                        <span id="settings-signature-text" style="color:var(--primary-color);font-weight:500;font-size:0.85rem;text-align:center;">+ Upload Signature</span>
+                                    </div>
+                                    <input type="file" id="settings-signature-upload" accept="image/*" style="display:none;" onchange="handleSettingsSignatureUpload(event)">
+                                    <div>
+                                        <p style="font-weight:600;margin-bottom:4px;">Your signature</p>
+                                        <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:12px;">Appears on your 2050 AD invoice layout. PNG or SVG with transparent background recommended.</p>
+                                        <button class="btn btn-outline" style="font-size:0.82rem;" onclick="document.getElementById('settings-signature-upload').click()">Upload Signature</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <button class="btn btn-primary" onclick="saveLegalSettings()" style="margin-top:16px;">Save Legal Details</button>
+                        </div>
+                    </div>
+
+<div class="glass-widget" style="margin-bottom:24px;">
                         <div class="widget-header" style="display:flex; justify-content:space-between; align-items:center;">
                             <h3>Invoice Template Builder</h3>
                             <div style="display:flex; gap:8px;">
