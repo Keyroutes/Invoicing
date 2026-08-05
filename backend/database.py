@@ -593,6 +593,51 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Recruitment: candidate documents, pipeline history, rating
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS candidate_documents (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        submission_id INTEGER REFERENCES form_submissions(id) NOT NULL,
+                        doc_type VARCHAR DEFAULT 'other',
+                        file_name VARCHAR DEFAULT '',
+                        file_type VARCHAR DEFAULT '',
+                        file_size INTEGER DEFAULT 0,
+                        file_data TEXT DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candidate_documents_submission ON candidate_documents (submission_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_candidate_documents_client ON candidate_documents (client_id)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS submission_events (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        submission_id INTEGER REFERENCES form_submissions(id) NOT NULL,
+                        from_stage VARCHAR DEFAULT '',
+                        to_stage VARCHAR DEFAULT '',
+                        note VARCHAR DEFAULT '',
+                        actor VARCHAR DEFAULT 'HR',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_submission_events_submission ON submission_events (submission_id)"))
+                conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0"))
+                conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS candidate_phone VARCHAR DEFAULT ''"))
+                conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS hired_employee_id INTEGER"))
+                conn.commit()
+            except Exception:
+                pass
+
+            # Employee seniority level
+            try:
+                conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS level VARCHAR DEFAULT ''"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_employees_level ON employees (level)"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Payslip period guard + YTD support
             try:
                 conn.execute(text("ALTER TABLE payslips ADD COLUMN IF NOT EXISTS pay_frequency VARCHAR DEFAULT ''"))

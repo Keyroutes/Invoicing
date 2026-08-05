@@ -2267,6 +2267,7 @@ class EmployeeCreate(BaseModel):
     reports_to: Optional[int] = None
     job_title: Optional[str] = ""
     role: Optional[str] = "employee"
+    level: Optional[str] = ""
     employment_type: Optional[str] = "full_time"
     pay_frequency: Optional[str] = "monthly"
     salary: Optional[float] = 0.0
@@ -2301,6 +2302,94 @@ class PayslipCreate(BaseModel):
     retirement: Optional[float] = 0.0
     other_deductions: Optional[float] = 0.0
     notes: Optional[str] = ""
+
+# --- Org hierarchy: levels and roles ---------------------------------------
+# `level` is the seniority band; `role` is the person's place in the reporting
+# line. They are deliberately separate: a senior engineer (L4) and a team lead
+# can be the same band but different roles.
+
+EMPLOYEE_LEVELS = [
+    {"code": "L1", "label": "L1 - Intern / Trainee", "rank": 1},
+    {"code": "L2", "label": "L2 - Junior", "rank": 2},
+    {"code": "L3", "label": "L3 - Mid", "rank": 3},
+    {"code": "L4", "label": "L4 - Senior", "rank": 4},
+    {"code": "L5", "label": "L5 - Lead", "rank": 5},
+    {"code": "L6", "label": "L6 - Principal / Manager", "rank": 6},
+    {"code": "L7", "label": "L7 - Director", "rank": 7},
+    {"code": "L8", "label": "L8 - Executive", "rank": 8},
+]
+LEVEL_CODES = {lvl["code"] for lvl in EMPLOYEE_LEVELS}
+LEVEL_RANK = {lvl["code"]: lvl["rank"] for lvl in EMPLOYEE_LEVELS}
+
+EMPLOYEE_ROLES = [
+    {"code": "employee", "label": "Employee"},
+    {"code": "team_lead", "label": "Team Lead"},
+    {"code": "manager", "label": "Manager"},
+    {"code": "department_head", "label": "Department Head"},
+    {"code": "hr_admin", "label": "HR Admin"},
+    {"code": "executive", "label": "Executive"},
+]
+ROLE_CODES = {r["code"] for r in EMPLOYEE_ROLES}
+
+
+@app.get("/api/hr/levels")
+def get_hr_levels(request: Request, db: Session = Depends(get_db)):
+    """Catalogue the UI uses to populate level and role pickers."""
+    get_client_user(request, db)
+    return {"levels": EMPLOYEE_LEVELS, "roles": EMPLOYEE_ROLES}
+
+
+def validate_level(level):
+    level = (level or "").strip().upper()
+    if level and level not in LEVEL_CODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown level '{level}'. Expected one of: {', '.join(sorted(LEVEL_CODES))}",
+        )
+    return level
+
+
+def validate_role(role):
+    role = (role or "").strip().lower()
+    if role and role not in ROLE_CODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown role '{role}'. Expected one of: {', '.join(sorted(ROLE_CODES))}",
+        )
+    return role or "employee"
+
+
+def validate_manager(db, client_id, employee_id, manager_id):
+    """A reporting line must stay a tree.
+
+    Without this an admin could point A at B and B at A; the org chart renderer
+    walks children recursively and would spin forever on the cycle.
+    """
+    if not manager_id:
+        return None
+    if employee_id and manager_id == employee_id:
+        raise HTTPException(status_code=400, detail="An employee cannot report to themselves")
+    manager = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == manager_id, models.DBEmployee.client_id == client_id
+    ).first()
+    if not manager:
+        raise HTTPException(status_code=400, detail="Manager not found")
+    # Walk up from the proposed manager; hitting this employee means a cycle.
+    seen = set()
+    cursor = manager
+    while cursor and cursor.reports_to:
+        if cursor.reports_to in seen:
+            break  # pre-existing loop in the data; don't spin
+        seen.add(cursor.reports_to)
+        if employee_id and cursor.reports_to == employee_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{manager.first_name} {manager.last_name} already reports to this employee, "
+                       "so this would create a reporting loop",
+            )
+        cursor = db.query(models.DBEmployee).filter(models.DBEmployee.id == cursor.reports_to).first()
+    return manager_id
+
 
 # --- Departments API ---
 
@@ -2414,7 +2503,7 @@ def get_employees(request: Request, q: str = "", status: str = "", db: Session =
             "email": e.email, "phone": e.phone,
             "department_id": e.department_id, "department_name": dept_name,
             "reports_to": e.reports_to, "manager_name": manager_name,
-            "job_title": e.job_title, "role": e.role,
+            "job_title": e.job_title, "role": e.role, "level": e.level or "",
             "employment_type": e.employment_type,
             "pay_frequency": e.pay_frequency,
             "salary": e.salary, "hourly_rate": e.hourly_rate,
@@ -2438,6 +2527,10 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
     if existing:
         raise HTTPException(status_code=400, detail="Employee with this email already exists")
 
+    level = validate_level(body.level)
+    role = validate_role(body.role)
+    reports_to = validate_manager(db, client.id, None, body.reports_to)
+
     max_num = db.query(sqlfunc.coalesce(sqlfunc.max(models.DBEmployee.id), 0)).filter(models.DBEmployee.client_id == client.id).scalar()
     emp_number = f"EMP-{max_num + 1:04d}" if not body.employee_id else body.employee_id
 
@@ -2445,8 +2538,8 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
         client_id=client.id, employee_id=emp_number,
         first_name=body.first_name, last_name=body.last_name,
         email=body.email, phone=body.phone, address=body.address,
-        department_id=body.department_id, reports_to=body.reports_to,
-        job_title=body.job_title, role=body.role,
+        department_id=body.department_id, reports_to=reports_to,
+        job_title=body.job_title, role=role, level=level,
         employment_type=body.employment_type, pay_frequency=body.pay_frequency,
         salary=body.salary, hourly_rate=body.hourly_rate,
         tax_rate=body.tax_rate, deductions=body.deductions,
@@ -2510,7 +2603,7 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
     return {
         "id": emp.id, "employee_id": emp.employee_id,
         "first_name": emp.first_name, "last_name": emp.last_name,
-        "email": emp.email, "status": emp.status,
+        "email": emp.email, "status": emp.status, "level": emp.level or "", "role": emp.role,
         "department_id": emp.department_id, "reports_to": emp.reports_to,
         "message": "Employee created. Onboarding checklist generated.",
     }
@@ -2538,7 +2631,7 @@ def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
         "email": emp.email, "phone": emp.phone, "address": emp.address,
         "department_id": emp.department_id, "department_name": dept_name,
         "reports_to": emp.reports_to, "manager_name": manager_name,
-        "job_title": emp.job_title, "role": emp.role,
+        "job_title": emp.job_title, "role": emp.role, "level": emp.level or "",
         "employment_type": emp.employment_type, "pay_frequency": emp.pay_frequency,
         "salary": emp.salary, "hourly_rate": emp.hourly_rate,
         "tax_rate": emp.tax_rate, "deductions": emp.deductions,
@@ -2565,10 +2658,18 @@ def update_employee(emp_id: int, request: Request, body: dict = None, db: Sessio
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
     old_dept = emp.department_id
-    if body:
-        for key, val in body.items():
-            if hasattr(emp, key) and key not in ("id", "client_id", "created_at", "password_hash"):
-                setattr(emp, key, val)
+    body = body or {}
+    # Hierarchy fields go through the same checks as on create; a blind
+    # setattr let callers set an unknown level or build a reporting loop.
+    if "level" in body:
+        body["level"] = validate_level(body["level"])
+    if "role" in body:
+        body["role"] = validate_role(body["role"])
+    if "reports_to" in body:
+        body["reports_to"] = validate_manager(db, client.id, emp.id, body["reports_to"])
+    for key, val in body.items():
+        if hasattr(emp, key) and key not in ("id", "client_id", "created_at", "password_hash", "employee_id"):
+            setattr(emp, key, val)
     new_dept = emp.department_id
     if new_dept and new_dept != old_dept:
         pending_goals = db.query(models.DBDepartmentGoal).filter(
@@ -3214,6 +3315,7 @@ def get_payslip(ps_id: int, request: Request, db: Session = Depends(get_db)):
             "employee_id": emp.employee_id if emp else "",
             "email": emp.email if emp else "",
             "job_title": emp.job_title if emp else "",
+            "level": emp.level if emp else "",
             "department_name": dept_name, "bank_name": emp.bank_name if emp else "",
             "bank_account": emp.bank_account if emp else "", "tax_id": emp.tax_id if emp else "",
             "pay_frequency": emp.pay_frequency if emp else "",
@@ -3470,6 +3572,7 @@ def get_org_chart(request: Request, db: Session = Depends(get_db)):
             "id": e.id, "employee_id": e.employee_id,
             "name": f"{e.first_name} {e.last_name}",
             "job_title": e.job_title, "email": e.email,
+            "level": e.level or "", "role": e.role or "employee",
             "department": dept_name, "reports_to": e.reports_to,
             "status": e.status,
         }
@@ -4301,6 +4404,13 @@ class RecruitmentFormCreate(BaseModel):
     fields: Optional[str] = "[]"
     pipeline_stages: Optional[str] = '["Applied","Screening","Interview","Offer","Hired"]'
 
+class CandidateDocumentIn(BaseModel):
+    doc_type: Optional[str] = "other"
+    file_name: str
+    file_type: Optional[str] = ""
+    file_data: str
+
+
 class FormSubmissionCreate(BaseModel):
     answers: Optional[str] = "{}"
     file_name: Optional[str] = ""
@@ -4308,6 +4418,59 @@ class FormSubmissionCreate(BaseModel):
     file_data: Optional[str] = ""
     candidate_name: Optional[str] = ""
     candidate_email: Optional[str] = ""
+    candidate_phone: Optional[str] = ""
+    documents: Optional[List[CandidateDocumentIn]] = None
+
+
+# --- Candidate file handling ------------------------------------------------
+# The application form is public, so uploads are the one place an anonymous
+# visitor can put bytes in the database. Everything is bounded.
+
+MAX_DOCUMENT_BYTES = 5 * 1024 * 1024      # 5 MB per file
+MAX_DOCUMENTS_PER_APPLICATION = 6
+ALLOWED_DOCUMENT_TYPES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "image/png", "image/jpeg", "image/webp",
+    "text/plain",
+}
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".webp", ".txt"}
+
+
+def decoded_size(data_uri_or_b64: str) -> int:
+    """Byte size of a base64 payload without materialising it."""
+    if not data_uri_or_b64:
+        return 0
+    raw = data_uri_or_b64.split(",", 1)[-1]
+    padding = raw[-2:].count("=") if len(raw) >= 2 else 0
+    return max(0, (len(raw) * 3) // 4 - padding)
+
+
+def validate_candidate_document(doc, index=1):
+    name = (doc.file_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail=f"Document {index}: a file name is required")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ALLOWED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{name}' is not an accepted file type. Allowed: "
+                   + ", ".join(sorted(ALLOWED_DOCUMENT_EXTENSIONS)),
+        )
+    mime = (doc.file_type or "").split(";")[0].strip().lower()
+    if mime and mime not in ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"'{name}' has an unsupported content type ({mime})")
+    size = decoded_size(doc.file_data)
+    if size == 0:
+        raise HTTPException(status_code=400, detail=f"'{name}' appears to be empty")
+    if size > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"'{name}' is {size / 1048576:.1f} MB; the limit is "
+                   f"{MAX_DOCUMENT_BYTES // 1048576} MB per file",
+        )
+    return size
 
 @app.get("/api/recruitment/forms")
 def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
@@ -4365,7 +4528,21 @@ def delete_recruitment_form(form_id: int, request: Request, db: Session = Depend
     ).first()
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
+    # Documents and pipeline history reference the submissions, so they must go
+    # first or the delete fails on a foreign key.
+    sub_ids = [s.id for s in db.query(models.DBFormSubmission.id).filter(
+        models.DBFormSubmission.form_id == form_id
+    ).all()]
+    if sub_ids:
+        db.query(models.DBCandidateDocument).filter(
+            models.DBCandidateDocument.submission_id.in_(sub_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.DBSubmissionEvent).filter(
+            models.DBSubmissionEvent.submission_id.in_(sub_ids)
+        ).delete(synchronize_session=False)
     db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == form_id).delete()
+    log_audit(db, client.id, "recruitment_form_deleted", "form", form.id, form.title,
+              f"{len(sub_ids)} application(s) removed", request)
     db.delete(form)
     db.commit()
     return {"message": "Form deleted"}
@@ -4381,11 +4558,25 @@ def list_form_submissions(form_id: int, request: Request, db: Session = Depends(
     subs = db.query(models.DBFormSubmission).filter(
         models.DBFormSubmission.form_id == form_id
     ).order_by(models.DBFormSubmission.created_at.desc()).all()
+    # File payloads are deliberately omitted: a list of 200 candidates each
+    # carrying a base64 CV is tens of megabytes. Documents are fetched per
+    # candidate from /api/recruitment/submissions/{id}/documents.
+    doc_counts = dict(
+        db.query(models.DBCandidateDocument.submission_id, sqlfunc.count(models.DBCandidateDocument.id))
+        .filter(models.DBCandidateDocument.submission_id.in_([s.id for s in subs] or [0]))
+        .group_by(models.DBCandidateDocument.submission_id).all()
+    )
     return [{
         "id": s.id, "answers": s.answers, "file_name": s.file_name,
-        "file_type": s.file_type, "file_data": s.file_data,
+        "file_type": s.file_type,
+        "has_resume": bool(s.file_data) or doc_counts.get(s.id, 0) > 0,
+        "document_count": doc_counts.get(s.id, 0) or (1 if s.file_data else 0),
         "candidate_name": s.candidate_name,
-        "candidate_email": s.candidate_email, "status": s.status,
+        "candidate_email": s.candidate_email,
+        "candidate_phone": getattr(s, 'candidate_phone', '') or '',
+        "status": s.status,
+        "rating": getattr(s, 'rating', 0) or 0,
+        "hired_employee_id": getattr(s, 'hired_employee_id', None),
         "current_stage": getattr(s, 'current_stage', 'Applied'),
         "stage_order": getattr(s, 'stage_order', 0),
         "notes": s.notes, "created_at": s.created_at,
@@ -4431,9 +4622,14 @@ def get_form_pipeline(form_id: int, request: Request, db: Session = Depends(get_
             "id": s.id, "answers": s.answers, "file_name": s.file_name,
             "file_type": s.file_type, "candidate_name": s.candidate_name,
             "candidate_email": s.candidate_email, "status": s.status,
+            "rating": getattr(s, 'rating', 0) or 0,
+            "hired_employee_id": getattr(s, 'hired_employee_id', None),
             "current_stage": stage, "stage_order": getattr(s, 'stage_order', 0),
             "notes": s.notes, "created_at": s.created_at,
         })
+    # Stages with no candidates must still render as empty columns.
+    for st in stages:
+        pipeline.setdefault(st, [])
     return {"stages": stages, "pipeline": pipeline}
 
 @app.put("/api/recruitment/submissions/{sub_id}/stage")
@@ -4449,10 +4645,223 @@ def move_submission_stage(sub_id: int, request: Request, body: dict, db: Session
     stage_order = body.get("stage_order", 0)
     if not new_stage:
         raise HTTPException(status_code=400, detail="stage is required")
+    # Only stages the form actually defines, so a typo cannot strand a
+    # candidate in a column the board never renders.
+    form = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.id == sub.form_id).first()
+    try:
+        valid_stages = json.loads(form.pipeline_stages or "[]") if form else []
+    except (ValueError, TypeError):
+        valid_stages = []
+    if valid_stages and new_stage not in valid_stages:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{new_stage}' is not a stage on this form. Valid stages: {', '.join(valid_stages)}",
+        )
+    previous = sub.current_stage
+    if previous == new_stage:
+        return {"message": f"Candidate already in {new_stage}", "stage": new_stage}
     sub.current_stage = new_stage
     sub.stage_order = stage_order
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub.id,
+        from_stage=previous or "", to_stage=new_stage,
+        note=body.get("note", ""), actor=body.get("actor", "HR"),
+    ))
+    log_audit(db, client.id, "candidate_stage_changed", "candidate", sub.id,
+              sub.candidate_name or sub.candidate_email, f"{previous} -> {new_stage}", request)
     db.commit()
-    return {"message": f"Candidate moved to {new_stage}"}
+    return {"message": f"Candidate moved to {new_stage}", "stage": new_stage, "from_stage": previous}
+
+
+@app.get("/api/recruitment/submissions/{sub_id}/documents")
+def list_candidate_documents(sub_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id, models.DBFormSubmission.client_id == client.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    docs = db.query(models.DBCandidateDocument).filter(
+        models.DBCandidateDocument.submission_id == sub_id
+    ).order_by(models.DBCandidateDocument.id.asc()).all()
+    # Metadata only; the payload is fetched per file so a candidate list with
+    # many CVs does not ship megabytes of base64.
+    return [{
+        "id": d.id, "doc_type": d.doc_type, "file_name": d.file_name,
+        "file_type": d.file_type, "file_size": d.file_size, "created_at": d.created_at,
+    } for d in docs]
+
+
+@app.get("/api/recruitment/documents/{doc_id}")
+def get_candidate_document(doc_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    doc = db.query(models.DBCandidateDocument).filter(
+        models.DBCandidateDocument.id == doc_id, models.DBCandidateDocument.client_id == client.id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {
+        "id": doc.id, "file_name": doc.file_name, "file_type": doc.file_type,
+        "doc_type": doc.doc_type, "file_size": doc.file_size, "file_data": doc.file_data,
+    }
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/documents")
+def add_candidate_document(sub_id: int, body: CandidateDocumentIn, request: Request, db: Session = Depends(get_db)):
+    """Let HR attach a document to an existing application (signed offer,
+    interview scorecard, reference)."""
+    client = get_client_user(request, db)
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id, models.DBFormSubmission.client_id == client.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    existing = db.query(models.DBCandidateDocument).filter(
+        models.DBCandidateDocument.submission_id == sub_id
+    ).count()
+    if existing >= MAX_DOCUMENTS_PER_APPLICATION * 2:
+        raise HTTPException(status_code=400, detail="This candidate already has the maximum number of documents")
+    size = validate_candidate_document(body)
+    doc = models.DBCandidateDocument(
+        client_id=client.id, submission_id=sub_id,
+        doc_type=body.doc_type or "other", file_name=body.file_name,
+        file_type=body.file_type or "", file_size=size, file_data=body.file_data,
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    return {"id": doc.id, "message": "Document attached"}
+
+
+@app.delete("/api/recruitment/documents/{doc_id}")
+def delete_candidate_document(doc_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    doc = db.query(models.DBCandidateDocument).filter(
+        models.DBCandidateDocument.id == doc_id, models.DBCandidateDocument.client_id == client.id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(doc)
+    db.commit()
+    return {"message": "Document removed"}
+
+
+@app.get("/api/recruitment/submissions/{sub_id}/history")
+def get_submission_history(sub_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id, models.DBFormSubmission.client_id == client.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    events = db.query(models.DBSubmissionEvent).filter(
+        models.DBSubmissionEvent.submission_id == sub_id
+    ).order_by(models.DBSubmissionEvent.id.asc()).all()
+    return [{
+        "id": e.id, "from_stage": e.from_stage, "to_stage": e.to_stage,
+        "note": e.note, "actor": e.actor, "created_at": e.created_at,
+    } for e in events]
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/hire")
+def hire_candidate(sub_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Turn a successful candidate into an employee.
+
+    Previously a hire had to be retyped by hand into the employee form, which
+    is where names, emails and start dates get transcribed wrongly.
+    """
+    client = get_client_user(request, db)
+    body = body or {}
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id, models.DBFormSubmission.client_id == client.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    if sub.hired_employee_id:
+        raise HTTPException(status_code=409, detail="This candidate has already been converted to an employee")
+
+    email = (body.get("email") or sub.candidate_email or "").strip()
+    if not email or not validate_email_address(email):
+        raise HTTPException(status_code=400, detail="A valid email address is required to create the employee record")
+    if db.query(models.DBEmployee).filter(
+        models.DBEmployee.email == email, models.DBEmployee.client_id == client.id
+    ).first():
+        raise HTTPException(status_code=400, detail="An employee with this email already exists")
+
+    full_name = (body.get("full_name") or sub.candidate_name or "").strip()
+    parts = full_name.split()
+    first_name = body.get("first_name") or (parts[0] if parts else "New")
+    last_name = body.get("last_name") or (" ".join(parts[1:]) if len(parts) > 1 else "Starter")
+
+    level = validate_level(body.get("level"))
+    role = validate_role(body.get("role"))
+    reports_to = validate_manager(db, client.id, None, body.get("reports_to"))
+
+    max_num = db.query(sqlfunc.coalesce(sqlfunc.max(models.DBEmployee.id), 0)).filter(
+        models.DBEmployee.client_id == client.id
+    ).scalar()
+    emp = models.DBEmployee(
+        client_id=client.id, employee_id=f"EMP-{max_num + 1:04d}",
+        first_name=first_name, last_name=last_name, email=email,
+        phone=body.get("phone") or sub.candidate_phone or "",
+        job_title=body.get("job_title", ""), department_id=body.get("department_id"),
+        reports_to=reports_to, level=level, role=role,
+        employment_type=body.get("employment_type", "full_time"),
+        pay_frequency=body.get("pay_frequency", "monthly"),
+        salary=float(body.get("salary") or 0),
+        start_date=body.get("start_date", ""),
+        status="onboarding",
+    )
+    db.add(emp)
+    db.flush()
+
+    # Carry the application's files across so the new starter's record already
+    # holds their CV and right-to-work documents.
+    for doc in db.query(models.DBCandidateDocument).filter(
+        models.DBCandidateDocument.submission_id == sub.id
+    ).all():
+        db.add(models.DBDocument(
+            client_id=client.id, employee_id=emp.id,
+            title=doc.file_name or doc.doc_type, doc_type=doc.doc_type,
+            file_name=doc.file_name, file_type=doc.file_type,
+            file_data=doc.file_data, uploaded_by="Recruitment",
+        ))
+
+    sub.hired_employee_id = emp.id
+    sub.status = "hired"
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub.id,
+        from_stage=sub.current_stage or "", to_stage="Hired",
+        actor="HR", note=f"Converted to employee {emp.employee_id}",
+    ))
+    log_audit(db, client.id, "candidate_hired", "candidate", sub.id,
+              full_name or email, f"Employee {emp.employee_id}", request)
+    db.commit()
+    db.refresh(emp)
+    return {
+        "message": f"{first_name} {last_name} added as {emp.employee_id}",
+        "employee_id": emp.id, "employee_number": emp.employee_id,
+    }
+
+
+@app.put("/api/recruitment/submissions/{sub_id}/rating")
+def rate_candidate(sub_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    body = body or {}
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id, models.DBFormSubmission.client_id == client.id
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    try:
+        rating = int(body.get("rating", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Rating must be a whole number")
+    if rating < 0 or rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be between 0 and 5")
+    sub.rating = rating
+    db.commit()
+    return {"message": "Rating saved", "rating": rating}
 
 @app.get("/api/recruitment/form/{token}")
 def get_public_form(token: str, db: Session = Depends(get_db)):
@@ -4465,22 +4874,77 @@ def get_public_form(token: str, db: Session = Depends(get_db)):
     return {"title": form.title, "description": form.description, "fields": form.fields}
 
 @app.post("/api/recruitment/form/{token}/submit")
-def submit_application(token: str, body: FormSubmissionCreate, db: Session = Depends(get_db)):
+def submit_application(token: str, body: FormSubmissionCreate, request: Request, db: Session = Depends(get_db)):
+    """Public endpoint - anyone with the form link can post here, so it is rate
+    limited and every attachment is size- and type-checked."""
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"apply:{ip}", max_requests=5, window=600):
+        raise HTTPException(status_code=429, detail="Too many applications submitted. Please try again later.")
+
     form = db.query(models.DBRecruitmentForm).filter(
         models.DBRecruitmentForm.form_token == token,
         models.DBRecruitmentForm.is_active == True,
     ).first()
     if not form:
         raise HTTPException(status_code=404, detail="Form not found or inactive")
+
+    if body.candidate_email and not validate_email_address(body.candidate_email):
+        raise HTTPException(status_code=400, detail="Please enter a valid email address")
+
+    docs = list(body.documents or [])
+    # Fold the single legacy attachment into the document list.
+    if body.file_data and body.file_name:
+        docs.insert(0, CandidateDocumentIn(
+            doc_type="resume", file_name=body.file_name,
+            file_type=body.file_type or "", file_data=body.file_data,
+        ))
+    if len(docs) > MAX_DOCUMENTS_PER_APPLICATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Please attach at most {MAX_DOCUMENTS_PER_APPLICATION} files",
+        )
+    sizes = [validate_candidate_document(d, i + 1) for i, d in enumerate(docs)]
+    if sum(sizes) > MAX_DOCUMENT_BYTES * 2:
+        raise HTTPException(status_code=413, detail="The attachments are too large in total")
+
+    first_stage = "Applied"
+    try:
+        stages = json.loads(form.pipeline_stages or "[]")
+        if stages:
+            first_stage = stages[0]
+    except (ValueError, TypeError):
+        pass
+
     sub = models.DBFormSubmission(
         client_id=form.client_id, form_id=form.id,
-        answers=body.answers, file_name=body.file_name,
-        file_type=body.file_type, file_data=body.file_data,
+        answers=body.answers,
+        file_name=docs[0].file_name if docs else "",
+        file_type=docs[0].file_type if docs else "",
+        file_data=docs[0].file_data if docs else "",
         candidate_name=body.candidate_name, candidate_email=body.candidate_email,
+        candidate_phone=body.candidate_phone or "",
+        current_stage=first_stage, stage_order=0,
     )
     db.add(sub)
+    db.flush()
+
+    for doc, size in zip(docs, sizes):
+        db.add(models.DBCandidateDocument(
+            client_id=form.client_id, submission_id=sub.id,
+            doc_type=doc.doc_type or "other", file_name=doc.file_name,
+            file_type=doc.file_type or "", file_size=size, file_data=doc.file_data,
+        ))
+    db.add(models.DBSubmissionEvent(
+        client_id=form.client_id, submission_id=sub.id,
+        from_stage="", to_stage=first_stage, actor="Candidate",
+        note="Application received",
+    ))
     db.commit()
-    return {"message": "Application submitted successfully"}
+    return {
+        "message": "Application submitted successfully",
+        "documents_received": len(docs),
+        "stage": first_stage,
+    }
 
 
 @app.get("/api/employee/goals")
@@ -4689,6 +5153,7 @@ def get_employee_profile(request: Request, db: Session = Depends(get_db)):
         "address": emp.address,
         "job_title": emp.job_title,
         "role": emp.role,
+        "level": emp.level or "",
         "employment_type": emp.employment_type,
         "department": dept.name if dept else "",
         "department_id": emp.department_id,

@@ -188,6 +188,9 @@ class DBEmployee(Base):
 
     job_title = Column(String, default="")
     role = Column(String, default="employee")
+    # Seniority band (L1..L8). Kept separate from `role`, which describes what
+    # the person does in the reporting line, not how senior they are.
+    level = Column(String, default="", index=True)
     employment_type = Column(String, default="full_time")
     pay_frequency = Column(String, default="monthly")
 
@@ -405,13 +408,50 @@ class DBFormSubmission(Base):
     file_data = Column(Text, default="")
     candidate_name = Column(String, default="")
     candidate_email = Column(String, default="")
+    candidate_phone = Column(String, default="")
     status = Column(String, default="new")
     current_stage = Column(String, default="Applied")
     stage_order = Column(Integer, default=0)
+    rating = Column(Integer, default=0)
     notes = Column(String, default="")
+    hired_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     form = relationship("DBRecruitmentForm")
+    documents = relationship("DBCandidateDocument", back_populates="submission")
+
+
+class DBCandidateDocument(Base):
+    """Files attached to an application. The submission row carries a single
+    legacy attachment; a candidate normally sends several (CV, cover letter,
+    right-to-work, certificates), so they live here."""
+    __tablename__ = "candidate_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    submission_id = Column(Integer, ForeignKey("form_submissions.id"), nullable=False, index=True)
+    doc_type = Column(String, default="other")
+    file_name = Column(String, default="")
+    file_type = Column(String, default="")
+    file_size = Column(Integer, default=0)
+    file_data = Column(Text, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    submission = relationship("DBFormSubmission", back_populates="documents")
+
+
+class DBSubmissionEvent(Base):
+    """Audit trail of a candidate's movement through the pipeline."""
+    __tablename__ = "submission_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    submission_id = Column(Integer, ForeignKey("form_submissions.id"), nullable=False, index=True)
+    from_stage = Column(String, default="")
+    to_stage = Column(String, default="")
+    note = Column(String, default="")
+    actor = Column(String, default="HR")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
 class DBEmployeeGoal(Base):

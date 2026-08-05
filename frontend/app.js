@@ -1061,6 +1061,21 @@ function previewInvoiceTemplate() {
 window.previewInvoiceTemplate = previewInvoiceTemplate;
 
 // --- DYNAMIC GENERATE INVOICE PDF ---
+// Currency sanitizer shared by the invoice and payslip PDFs. jsPDF's built-in
+// fonts are Latin-1 only, so symbols outside that range are transliterated
+// rather than rendered as garbage.
+function pdfSym(sym) {
+    var map = {
+        '₹': 'Rs.', '₩': 'W', '₪': 'ILS',
+        '₦': 'N',   '₫': 'D', '₭': 'K',
+        '₮': 'T',   '₱': 'P', '₲': 'G',
+        '₴': 'grn', '₵': 'GH','₸': 'T',
+        '₺': 'TL',  '₼': 'M', '₽': 'R'
+    };
+    return map[sym] !== undefined ? map[sym] : sym;
+}
+window.pdfSym = pdfSym;
+
 function generateInvoicePDF(isDummy) {
     var _jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     if (!_jsPDF) { throw new Error('jsPDF is not loaded'); }
@@ -1072,17 +1087,6 @@ function generateInvoicePDF(isDummy) {
     var pageBottom = h - 80;
     var pageNum = 1;
 
-    // ── Currency sanitizer (Latin-1 only fonts) ─────────────────
-    function pdfSym(sym) {
-        var map = {
-            '\u20B9': 'Rs.', '\u20A9': 'W', '\u20AA': 'ILS',
-            '\u20A6': 'N',   '\u20AB': 'D', '\u20AD': 'K',
-            '\u20AE': 'T',   '\u20B1': 'P', '\u20B2': 'G',
-            '\u20B4': 'grn', '\u20B5': 'GH','\u20B8': 'T',
-            '\u20BA': 'TL',  '\u20BC': 'M', '\u20BD': 'R',
-        };
-        return map[sym] !== undefined ? map[sym] : sym;
-    }
 
     // ── Helpers ──────────────────────────────────────────────────
     function lh(x1, x2, yy, w2) { doc.setLineWidth(w2||0.5); doc.line(x1, yy, x2, yy); }
@@ -2356,7 +2360,7 @@ function renderEmployees(employees) {
     employees.forEach(function(e) {
         var statusClass = (e.status || '').toLowerCase().replace(/\s+/g, '-');
         var typeLabel = (e.employment_type || '').replace('_', ' ');
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewEmployee(' + e.id + ')">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</a><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(e.email || '') + '</span></td><td>' + esc(e.employee_id || '-') + '</td><td>' + esc(e.department_name || '-') + '</td><td>' + esc(e.job_title || '-') + '</td><td>' + esc(typeLabel) + '</td><td>' + esc(e.start_date || '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(e.status) + '</span></td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="viewEmployee(' + e.id + ')">View</button></td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewEmployee(' + e.id + ')">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</a>' + levelBadge(e.level) + '<br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(e.email || '') + '</span></td><td>' + esc(e.employee_id || '-') + '</td><td>' + esc(e.department_name || '-') + '</td><td>' + esc(e.job_title || '-') + '<br><span style="font-size:0.72rem;color:var(--text-secondary);">' + esc(roleLabel(e.role)) + '</span></td><td>' + esc(typeLabel) + '</td><td>' + esc(e.start_date || '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(e.status) + '</span></td><td class="text-right"><button class="btn btn-outline btn-sm" onclick="viewEmployee(' + e.id + ')">View</button></td></tr>');
     });
 }
 
@@ -2393,12 +2397,15 @@ async function viewEmployee(empId) {
         var res = await fetch('/api/employees/' + empId);
         if (!res.ok) throw new Error('Failed');
         var emp = await res.json();
+        // Kept so the edit toggle can preselect the current band and role.
+        _currentEmployee = emp;
+        await loadHrLevels();
         document.getElementById('emp-detail-name').textContent = emp.full_name;
         document.getElementById('emp-detail-status').textContent = emp.status;
         document.getElementById('emp-detail-status').className = 'status-pill status-' + (emp.status || '').toLowerCase().replace(/\s+/g, '-');
         document.getElementById('emp-detail-eid').textContent = emp.employee_id || '-';
         document.getElementById('emp-detail-email').textContent = emp.email || '-';
-        var roMap = { 'phone': emp.phone, 'title': emp.job_title, 'dept': emp.department_name, 'mgr': emp.manager_name, 'type': (emp.employment_type || '').replace('_', ' '), 'payfreq': emp.pay_frequency || '-', 'salary': emp.salary ? formatCurrency(emp.salary) : '-', 'start': emp.start_date || '-', 'taxrate': emp.tax_rate ? emp.tax_rate + '%' : '-', 'emergency': emp.emergency_contact ? emp.emergency_contact + (emp.emergency_phone ? ' (' + emp.emergency_phone + ')' : '') : '-' };
+        var roMap = { 'phone': emp.phone, 'title': emp.job_title, 'dept': emp.department_name, 'mgr': emp.manager_name, 'type': (emp.employment_type || '').replace('_', ' '), 'payfreq': emp.pay_frequency || '-', 'salary': emp.salary ? formatCurrency(emp.salary) : '-', 'start': emp.start_date || '-', 'level': emp.level || '-', 'role': roleLabel(emp.role), 'taxrate': emp.tax_rate ? emp.tax_rate + '%' : '-', 'emergency': emp.emergency_contact ? emp.emergency_contact + (emp.emergency_phone ? ' (' + emp.emergency_phone + ')' : '') : '-' };
         Object.keys(roMap).forEach(function(k) {
             var roEl = document.getElementById('emp-detail-' + k + '-ro');
             if (roEl) roEl.textContent = roMap[k] || '-';
@@ -2481,9 +2488,65 @@ async function showAddEmployeeModal() {
         var mgrSel = document.getElementById('emp-reports-to');
         mgrSel.innerHTML = '<option value="">None</option>';
         emps.forEach(function(e) { mgrSel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</option>'); });
+        await populateLevelRoleSelects('emp-level', 'emp-role');
     } catch (e) { console.error(e); }
 }
 window.showAddEmployeeModal = showAddEmployeeModal;
+
+// --- Seniority levels and reporting roles ---------------------------------
+// The catalogue is served by the API so the vocabulary has one definition
+// rather than being duplicated in every picker.
+var _hrLevels = null;
+
+async function loadHrLevels() {
+    if (_hrLevels) return _hrLevels;
+    try {
+        var res = await fetch('/api/hr/levels');
+        if (!res.ok) return { levels: [], roles: [] };
+        _hrLevels = await res.json();
+    } catch (e) { _hrLevels = { levels: [], roles: [] }; }
+    return _hrLevels;
+}
+window.loadHrLevels = loadHrLevels;
+
+async function populateLevelRoleSelects(levelId, roleId, currentLevel, currentRole) {
+    var data = await loadHrLevels();
+    var lvlSel = document.getElementById(levelId);
+    if (lvlSel) {
+        lvlSel.innerHTML = '<option value="">Not set</option>';
+        (data.levels || []).forEach(function (l) {
+            lvlSel.insertAdjacentHTML('beforeend',
+                '<option value="' + esc(l.code) + '">' + esc(l.label) + '</option>');
+        });
+        if (currentLevel) lvlSel.value = currentLevel;
+    }
+    var roleSel = document.getElementById(roleId);
+    if (roleSel) {
+        roleSel.innerHTML = '';
+        (data.roles || []).forEach(function (r) {
+            roleSel.insertAdjacentHTML('beforeend',
+                '<option value="' + esc(r.code) + '">' + esc(r.label) + '</option>');
+        });
+        roleSel.value = currentRole || 'employee';
+    }
+}
+window.populateLevelRoleSelects = populateLevelRoleSelects;
+
+// Compact badge used in the employee list and org chart.
+function levelBadge(level) {
+    if (!level) return '';
+    return '<span style="display:inline-block;padding:2px 7px;border-radius:5px;font-size:0.7rem;' +
+           'font-weight:700;background:rgba(0,240,255,0.15);color:var(--primary-color);' +
+           'margin-left:6px;">' + esc(level) + '</span>';
+}
+window.levelBadge = levelBadge;
+
+function roleLabel(code) {
+    var roles = (_hrLevels && _hrLevels.roles) || [];
+    for (var i = 0; i < roles.length; i++) if (roles[i].code === code) return roles[i].label;
+    return code || 'Employee';
+}
+window.roleLabel = roleLabel;
 
 function closeAddEmployeeModal() {
     document.getElementById('add-employee-modal').style.display = 'none';
@@ -2506,6 +2569,8 @@ async function submitNewEmployee() {
         job_title: document.getElementById('emp-job-title').value,
         department_id: deptVal ? parseInt(deptVal) : null,
         reports_to: mgrVal ? parseInt(mgrVal) : null,
+        level: (document.getElementById('emp-level') || {}).value || '',
+        role: (document.getElementById('emp-role') || {}).value || 'employee',
         employment_type: document.getElementById('emp-type').value,
         pay_frequency: document.getElementById('emp-pay-freq').value,
         salary: parseFloat(document.getElementById('emp-salary').value) || 0,
@@ -2569,6 +2634,7 @@ async function resetEmpPassword() {
 window.resetEmpPassword = resetEmpPassword;
 
 // --- Employee Edit ---
+var _currentEmployee = null;
 var _empEditOriginal = {};
 function toggleEmpEdit() {
     var editBtn = document.getElementById('emp-edit-btn');
@@ -2578,9 +2644,9 @@ function toggleEmpEdit() {
     if (saveBtn) saveBtn.style.display = 'inline-flex';
     if (cancelBtn) cancelBtn.style.display = 'inline-flex';
     _empEditOriginal = {};
-    var fields = ['phone', 'title', 'dept', 'mgr', 'type', 'payfreq', 'salary', 'start', 'taxrate', 'emergency'];
-    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
-    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
+    var fields = ['phone', 'title', 'dept', 'mgr', 'level', 'role', 'type', 'payfreq', 'salary', 'start', 'taxrate', 'emergency'];
+    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-level', 'emp-detail-role', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
+    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-level-ro', 'emp-detail-role-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
     fields.forEach(function(f, i) {
         var input = document.getElementById(inputIds[i]);
         var ro = document.getElementById(roIds[i]);
@@ -2591,6 +2657,9 @@ function toggleEmpEdit() {
         }
     });
     loadEmpEditDropdowns();
+    // Preselect the employee's current band/role once the options exist.
+    populateLevelRoleSelects('emp-detail-level', 'emp-detail-role',
+        _currentEmployee && _currentEmployee.level, _currentEmployee && _currentEmployee.role);
 }
 window.toggleEmpEdit = toggleEmpEdit;
 
@@ -2628,14 +2697,19 @@ async function saveEmpEdit() {
         start_date: document.getElementById('emp-detail-start').value,
         tax_rate: parseFloat(document.getElementById('emp-detail-taxrate').value) || 0,
         emergency_contact: document.getElementById('emp-detail-emergency').value,
+        level: (document.getElementById('emp-detail-level') || {}).value || '',
+        role: (document.getElementById('emp-detail-role') || {}).value || 'employee',
     };
     try {
         var res = await fetch('/api/employees/' + currentEmployeeId, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+        var data = await res.json().catch(function () { return {}; });
+        // Surface the server's reason (bad level, reporting loop) rather than
+        // a generic failure.
         if (res.ok) { showToast('Employee updated', 'success'); cancelEmpEdit(); viewEmployee(currentEmployeeId); }
-        else { showToast('Failed to update', 'error'); }
+        else { showToast(data.detail || 'Failed to update', 'error'); }
     } catch(e) { showToast('Error', 'error'); }
 }
 window.saveEmpEdit = saveEmpEdit;
@@ -2645,8 +2719,8 @@ function cancelEmpEdit() {
     el = document.getElementById('emp-edit-btn'); if (el) el.style.display = 'inline-flex';
     el = document.getElementById('emp-save-btn'); if (el) el.style.display = 'none';
     el = document.getElementById('emp-cancel-edit-btn'); if (el) el.style.display = 'none';
-    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
-    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
+    var inputIds = ['emp-detail-phone', 'emp-detail-title', 'emp-detail-dept', 'emp-detail-mgr', 'emp-detail-level', 'emp-detail-role', 'emp-detail-type', 'emp-detail-payfreq', 'emp-detail-salary', 'emp-detail-start', 'emp-detail-taxrate', 'emp-detail-emergency'];
+    var roIds = ['emp-detail-phone-ro', 'emp-detail-title-ro', 'emp-detail-dept-ro', 'emp-detail-mgr-ro', 'emp-detail-level-ro', 'emp-detail-role-ro', 'emp-detail-type-ro', 'emp-detail-payfreq-ro', 'emp-detail-salary-ro', 'emp-detail-start-ro', 'emp-detail-taxrate-ro', 'emp-detail-emergency-ro'];
     inputIds.forEach(function(id, i) {
         var input = document.getElementById(id);
         var ro = document.getElementById(roIds[i]);
@@ -3320,6 +3394,10 @@ async function viewPayslip(psId) {
         var res = await fetch('/api/payslips/' + psId);
         if (!res.ok) throw new Error('Failed');
         var ps = await res.json();
+        // Keep the full record so the PDF can use fields the detail view does
+        // not show (employee id, department, bank, tax id, YTD) instead of
+        // scraping formatted text back out of the DOM.
+        _currentPayslip = ps;
         document.getElementById('ps-detail-title').textContent = 'Payslip ' + ps.number;
         document.getElementById('ps-detail-status').textContent = ps.status;
         document.getElementById('ps-detail-status').className = 'status-pill status-' + (ps.status || '').toLowerCase();
@@ -3558,191 +3636,257 @@ async function deletePayslip() {
 window.deletePayslip = deletePayslip;
 
 // --- Payslip PDF ---
+// Full payslip record stashed by viewPayslip so the PDF can use fields the
+// detail view does not render.
+var _currentPayslip = null;
+
+// Clean, white, print-ready payslip built in the same visual language as the
+// invoice PDF: no dark fills, ruled tables, black type on white.
 function generatePayslipPDF() {
     var jsPDF = window.jspdf.jsPDF;
-    var doc = new jsPDF({ unit: 'pt', format: 'letter' });
-    var w = 612, h = 792;
-    var margin = 48;
-    var y = 0;
-    var valueColor = [30, 41, 59];
-    var subColor = [100, 116, 139];
-    var labelColor = [148, 163, 184];
+    var doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    var W = doc.internal.pageSize.getWidth();
+    var H = doc.internal.pageSize.getHeight();
+    var ml = 40, mr = W - 40;
+    var contentW = mr - ml;
+    var ps = _currentPayslip || {};
+    var emp = ps.employee || {};
+    var co = ps.company || {};
+    var ytd = ps.ytd || {};
+    var cs = pdfSym(getCurrencySymbol());
 
-    var company = document.getElementById('ps-detail-company').textContent || '';
-    var companyAddr = document.getElementById('ps-detail-company-addr').textContent || '';
-    var number = document.getElementById('ps-detail-number').textContent || '';
-    var empName = document.getElementById('ps-detail-emp-name').textContent || '';
-    var period = document.getElementById('ps-detail-period').textContent || '';
-    var payDate = document.getElementById('ps-detail-pay-date').textContent || '';
-    var basic = document.getElementById('ps-detail-basic').textContent || '0.00';
-    var otpay = document.getElementById('ps-detail-otpay').textContent || '0.00';
-    var bonus = document.getElementById('ps-detail-bonus').textContent || '0.00';
-    var allow = document.getElementById('ps-detail-allow').textContent || '0.00';
-    var gross = document.getElementById('ps-detail-gross').textContent || '0.00';
-    var tax = document.getElementById('ps-detail-tax').textContent || '0.00';
-    var ins = document.getElementById('ps-detail-ins').textContent || '0.00';
-    var ret = document.getElementById('ps-detail-ret').textContent || '0.00';
-    var other = document.getElementById('ps-detail-other').textContent || '0.00';
-    var dedTotal = document.getElementById('ps-detail-dedtotal').textContent || '0.00';
-    var netPay = document.getElementById('ps-detail-net').textContent || '0.00';
-    var savedLogo = localStorage.getItem('company_logo') || '';
+    function money(v) {
+        var n = parseFloat(v || 0);
+        return cs + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+    function txt(s) { return pdfSym(String(s == null ? '' : s)); }
 
-    // === HEADER BAR ===
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, w, 90, 'F');
-    doc.setFillColor(16, 185, 129);
-    doc.rect(0, 86, w, 4, 'F');
-
-    if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', margin, 22, 110, 36); } catch(e) {}
+    // Horizontal rule
+    function hr(y, weight, shade) {
+        doc.setDrawColor(shade == null ? 200 : shade);
+        doc.setLineWidth(weight || 0.5);
+        doc.line(ml, y, mr, y);
     }
 
+    var y = 46;
+
+    // ── Header: title left, company right ────────────────────────────────
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(30);
-    doc.setTextColor(255, 255, 255);
-    doc.text('PAYSLIP', w - margin, 38, { align: 'right' });
-    doc.setFontSize(11);
+    doc.setFontSize(22);
+    doc.setTextColor(0, 0, 0);
+    doc.text('PAYSLIP', ml, y);
+
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
-    doc.text(number, w - margin, 56, { align: 'right' });
     doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    if (company) doc.text(company, w - margin, 72, { align: 'right' });
-    y = 108;
+    doc.setTextColor(90, 90, 90);
+    doc.text(txt(ps.number || ''), ml, y + 15);
 
-    // === EMPLOYEE INFO ===
-    var leftX = margin;
-    var rightX = w / 2 + 20;
-
+    var logo = localStorage.getItem('company_logo') || co.logo_url || '';
+    var rightY = y - 8;
+    if (logo) {
+        try {
+            doc.addImage(logo, 'PNG', mr - 100, rightY, 100, 32);
+            rightY += 40;
+        } catch (e) { /* unreadable logo must not break the document */ }
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(0, 0, 0);
+    if (co.name) { doc.text(txt(co.name), mr, rightY + 8, { align: 'right' }); rightY += 13; }
+    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(labelColor[0], labelColor[1], labelColor[2]);
-    doc.text('EMPLOYEE', leftX, y);
-    doc.text('PAYMENT DETAILS', rightX, y);
-    y += 14;
+    doc.setTextColor(95, 95, 95);
+    [co.address, co.email, co.phone, co.abn ? 'ABN/Tax ID: ' + co.abn : '']
+        .filter(Boolean).forEach(function (line) {
+            String(line).split('\n').forEach(function (part) {
+                doc.text(txt(part), mr, rightY + 8, { align: 'right' });
+                rightY += 11;
+            });
+        });
 
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-    doc.text(empName || '-', leftX, y);
-    y += 16;
+    y = Math.max(y + 26, rightY + 6);
+    hr(y, 1.1, 0); y += 18;
 
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
-    if (companyAddr) { doc.text(companyAddr.substring(0, 45), leftX, y); y += 13; }
-    if (company) { doc.text(company, leftX, y); y += 13; }
+    // ── Employee + period, two columns ───────────────────────────────────
+    var colR = ml + contentW / 2 + 10;
 
-    var pdY = 122;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(subColor[0], subColor[1], subColor[2]);
-    doc.text('Period:', rightX, pdY);
-    doc.text('Pay Date:', rightX, pdY + 16);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(valueColor[0], valueColor[1], valueColor[2]);
-    doc.text(period || '-', rightX + 56, pdY);
-    doc.text(payDate || '-', rightX + 56, pdY + 16);
+    function fieldBlock(x, heading, rows) {
+        var yy = y;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text(heading, x, yy);
+        yy += 14;
+        rows.forEach(function (r) {
+            if (!r[1]) return;
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.setTextColor(115, 115, 115);
+            doc.text(txt(r[0]), x, yy);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(20, 20, 20);
+            var val = doc.splitTextToSize(txt(r[1]), contentW / 2 - 90);
+            doc.text(val, x + 78, yy);
+            yy += 13 * val.length;
+        });
+        return yy;
+    }
 
-    y = Math.max(y, pdY + 40) + 16;
+    var leftEnd = fieldBlock(ml, 'EMPLOYEE', [
+        ['Name', emp.full_name],
+        ['Employee ID', emp.employee_id],
+        ['Job title', emp.job_title],
+        ['Department', emp.department_name],
+        ['Level', emp.level],
+        ['Tax ID', emp.tax_id]
+    ]);
+    var rightEnd = fieldBlock(colR, 'PAY PERIOD', [
+        ['Period', (ps.period_start || '') + '  to  ' + (ps.period_end || '')],
+        ['Pay date', ps.pay_date],
+        ['Frequency', emp.pay_frequency],
+        ['Bank', emp.bank_name],
+        ['Account', emp.bank_account],
+        ['Hours', ps.hours_worked ? String(ps.hours_worked) + ' h' : '']
+    ]);
 
-    // === EARNINGS TABLE ===
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
-    y += 16;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(200, 200, 220);
-    doc.text('EARNINGS', margin + 10, y);
-    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
-    y += 12;
+    y = Math.max(leftEnd, rightEnd) + 8;
+    hr(y, 0.5); y += 20;
 
-    var earnings = [['Basic Salary', basic], ['Overtime Pay', otpay], ['Bonus', bonus], ['Allowances', allow]];
-    earnings.forEach(function(r, i) {
-        if (i % 2 === 0) {
-            doc.setFillColor(248, 250, 252);
-            doc.rect(margin, y - 9, w - margin * 2, 22, 'F');
-        }
+    // ── Earnings / deductions, side by side ──────────────────────────────
+    var tableW = contentW / 2 - 10;
+
+    function moneyTable(x, heading, rows, total, totalLabel) {
+        var yy = y;
+        doc.setFillColor(245, 246, 248);
+        doc.rect(x, yy - 11, tableW, 20, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(40, 40, 40);
+        doc.text(heading, x + 8, yy + 2);
+        doc.text('AMOUNT', x + tableW - 8, yy + 2, { align: 'right' });
+        yy += 9;
+        doc.setDrawColor(210);
+        doc.setLineWidth(0.5);
+        doc.line(x, yy, x + tableW, yy);
+        yy += 16;
+
+        rows.forEach(function (r) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(55, 55, 55);
+            doc.text(txt(r[0]), x + 8, yy);
+            doc.setTextColor(20, 20, 20);
+            doc.text(money(r[1]), x + tableW - 8, yy, { align: 'right' });
+            doc.setDrawColor(235);
+            doc.line(x, yy + 6, x + tableW, yy + 6);
+            yy += 20;
+        });
+
+        yy += 2;
+        doc.setDrawColor(150);
+        doc.setLineWidth(0.7);
+        doc.line(x, yy - 12, x + tableW, yy - 12);
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(51, 51, 51);
-        doc.text(r[0], margin + 10, y);
-        doc.text(r[1], w - margin - 10, y, { align: 'right' });
-        y += 22;
-    });
+        doc.setTextColor(0, 0, 0);
+        doc.text(totalLabel, x + 8, yy + 2);
+        doc.text(money(total), x + tableW - 8, yy + 2, { align: 'right' });
+        return yy + 14;
+    }
 
-    // Gross Pay row
-    doc.setFillColor(236, 253, 245);
-    doc.roundedRect(margin, y - 9, w - margin * 2, 26, 4, 4, 'F');
-    doc.setFontSize(11);
+    var earnEnd = moneyTable(ml, 'EARNINGS', [
+        ['Basic salary', ps.basic_salary],
+        ['Overtime' + (ps.overtime_hours ? ' (' + ps.overtime_hours + ' h)' : ''), ps.overtime_pay],
+        ['Bonus', ps.bonus],
+        ['Allowances', ps.allowances]
+    ], ps.gross_pay, 'Gross pay');
+
+    var dedEnd = moneyTable(colR, 'DEDUCTIONS', [
+        ['Tax', ps.tax_amount],
+        ['Insurance', ps.insurance],
+        ['Retirement', ps.retirement],
+        ['Other', ps.other_deductions]
+    ], ps.total_deductions, 'Total deductions');
+
+    y = Math.max(earnEnd, dedEnd) + 22;
+
+    // ── Net pay, outlined rather than filled so it prints cleanly ────────
+    doc.setDrawColor(0);
+    doc.setLineWidth(1.2);
+    doc.rect(ml, y, contentW, 54);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(5, 150, 105);
-    doc.text('Gross Pay', margin + 10, y + 4);
-    doc.text(gross, w - margin - 10, y + 4, { align: 'right' });
-    y += 34;
-
-    // === DEDUCTIONS TABLE ===
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(margin, y, w - margin * 2, 24, 4, 4, 'F');
-    y += 16;
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(200, 200, 220);
-    doc.text('DEDUCTIONS', margin + 10, y);
-    doc.text('AMOUNT', w - margin - 10, y, { align: 'right' });
-    y += 12;
-
-    var deductions = [['Tax', tax], ['Insurance', ins], ['Retirement', ret], ['Other Deductions', other]];
-    deductions.forEach(function(r, i) {
-        if (i % 2 === 0) {
-            doc.setFillColor(248, 250, 252);
-            doc.rect(margin, y - 9, w - margin * 2, 22, 'F');
-        }
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(51, 51, 51);
-        doc.text(r[0], margin + 10, y);
-        doc.setTextColor(220, 38, 38);
-        doc.text(r[1], w - margin - 10, y, { align: 'right' });
-        y += 22;
-    });
-
-    // Total Deductions row
-    doc.setFillColor(254, 226, 226);
-    doc.roundedRect(margin, y - 9, w - margin * 2, 26, 4, 4, 'F');
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(220, 38, 38);
-    doc.text('Total Deductions', margin + 10, y + 4);
-    doc.text(dedTotal, w - margin - 10, y + 4, { align: 'right' });
-    y += 40;
-
-    // === NET PAY BOX ===
-    doc.setFillColor(15, 23, 42);
-    doc.roundedRect(margin, y, w - margin * 2, 56, 8, 8, 'F');
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(148, 163, 184);
-    doc.text('NET PAY', margin + 20, y + 22);
-    doc.setFontSize(24);
-    doc.setTextColor(16, 185, 129);
-    doc.text(getCurrencySymbol() + netPay, w - margin - 20, y + 30, { align: 'right' });
-    y += 70;
-
-    // === FOOTER ===
-    var footerY = h - 50;
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.5);
-    doc.line(margin, footerY, w - margin, footerY);
-    footerY += 16;
     doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(148, 163, 184);
-    doc.text('This is a computer-generated payslip. No signature required.', w / 2, footerY, { align: 'center' });
-    footerY += 14;
+    doc.setTextColor(90, 90, 90);
+    doc.text('NET PAY', ml + 16, y + 21);
     doc.setFontSize(8);
-    doc.setTextColor(203, 213, 225);
-    if (company) doc.text(company + (companyAddr ? '  •  ' + companyAddr : ''), w / 2, footerY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text('Amount transferred to the employee', ml + 16, y + 37);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(0, 0, 0);
+    doc.text(money(ps.net_pay), mr - 16, y + 34, { align: 'right' });
+    y += 74;
+
+    // ── Year to date ─────────────────────────────────────────────────────
+    if (ytd && ytd.payslip_count) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text('YEAR TO DATE (' + txt(ytd.year || '') + ')', ml, y);
+        y += 14;
+        var cells = [
+            ['Gross', ytd.gross_pay], ['Tax', ytd.tax_amount],
+            ['Deductions', ytd.total_deductions], ['Net', ytd.net_pay]
+        ];
+        var cw = contentW / cells.length;
+        doc.setDrawColor(220);
+        doc.setLineWidth(0.5);
+        doc.rect(ml, y - 10, contentW, 34);
+        cells.forEach(function (c, i) {
+            var cx = ml + cw * i;
+            if (i > 0) doc.line(cx, y - 10, cx, y + 24);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(7.5);
+            doc.setTextColor(120, 120, 120);
+            doc.text(c[0], cx + 10, y + 2);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(20, 20, 20);
+            doc.text(money(c[1]), cx + 10, y + 17);
+        });
+        y += 44;
+    }
+
+    // ── Notes ────────────────────────────────────────────────────────────
+    if (ps.notes) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(120, 120, 120);
+        doc.text('NOTES', ml, y);
+        y += 13;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(70, 70, 70);
+        var noteLines = doc.splitTextToSize(txt(ps.notes), contentW);
+        // Trim rather than spill onto a second page for a one-page document.
+        noteLines = noteLines.slice(0, 4);
+        doc.text(noteLines, ml, y);
+        y += noteLines.length * 11 + 8;
+    }
+
+    // ── Footer pinned to the bottom ──────────────────────────────────────
+    var fy = H - 54;
+    hr(fy, 0.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(130, 130, 130);
+    doc.text('This is a computer-generated payslip and does not require a signature.', ml, fy + 14);
+    doc.text('Private and confidential', mr, fy + 14, { align: 'right' });
+    if (co.name) {
+        doc.setTextColor(160, 160, 160);
+        doc.text(txt(co.name), ml, fy + 26);
+    }
+    doc.text(txt(ps.number || ''), mr, fy + 26, { align: 'right' });
 
     return doc;
 }
@@ -3903,7 +4047,16 @@ async function loadOrgChart() {
     }
 }
 
-function renderOrgTreeNode(emp) {
+function renderOrgTreeNode(emp, depth) {
+    depth = depth || 0;
+    // The server rejects reporting loops, but legacy rows could still contain
+    // one. A hard depth cap keeps a bad record from hanging the browser.
+    if (depth > 20) {
+        var stop = document.createElement('div');
+        stop.style.cssText = 'font-size:0.75rem;color:var(--danger-color);padding:8px;';
+        stop.textContent = 'Reporting line too deep - check for a loop';
+        return stop;
+    }
     var hasChildren = emp.children && emp.children.length > 0;
     var wrapper = document.createElement('div');
     wrapper.style.cssText = 'display:inline-flex;flex-direction:column;align-items:center;position:relative;';
@@ -3913,8 +4066,9 @@ function renderOrgTreeNode(emp) {
     node.onmouseover = function() { this.style.borderColor = 'var(--primary-color)'; this.style.transform = 'translateY(-2px)'; };
     node.onmouseout = function() { this.style.borderColor = 'rgba(255,255,255,0.1)'; this.style.transform = 'none'; };
     node.setAttribute('onclick', 'viewEmployee(' + emp.id + ')');
-    node.innerHTML = '<div class="org-name" style="font-weight:700;font-size:0.9rem;">' + esc(emp.name) + '</div>' +
+    node.innerHTML = '<div class="org-name" style="font-weight:700;font-size:0.9rem;">' + esc(emp.name) + levelBadge(emp.level) + '</div>' +
         '<div class="org-title" style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">' + esc(emp.job_title || '-') + '</div>' +
+        (emp.role && emp.role !== 'employee' ? '<div style="font-size:0.7rem;color:var(--warning-color);margin-top:2px;">' + esc(roleLabel(emp.role)) + '</div>' : '') +
         (emp.department ? '<div class="org-dept" style="font-size:0.72rem;color:var(--primary-color);margin-top:4px;">' + esc(emp.department) + '</div>' : '');
     wrapper.appendChild(node);
     if (hasChildren) {
@@ -3926,7 +4080,7 @@ function renderOrgTreeNode(emp) {
         childrenRow.style.paddingTop = '10px';
         childrenRow.style.borderTop = '2px solid rgba(255,255,255,0.1)';
         emp.children.forEach(function(child) {
-            childrenRow.appendChild(renderOrgTreeNode(child));
+            childrenRow.appendChild(renderOrgTreeNode(child, depth + 1));
         });
         wrapper.appendChild(childrenRow);
     }
@@ -4618,32 +4772,158 @@ async function showRecSubmissionDetail(subId) {
         document.getElementById('rec-detail-answers').innerHTML = answersHtml || '<p style="color:var(--text-secondary);">No answers provided</p>';
         var stage = sub.current_stage || 'Applied';
         document.getElementById('rec-detail-stage').innerHTML = buildStageMoveHtml(sub.id, stage);
-        var resumeDiv = document.getElementById('rec-detail-resume');
-        var previewDiv = document.getElementById('rec-detail-preview');
-        if (sub.file_name) {
-            resumeDiv.style.display = 'block';
-            document.getElementById('rec-detail-filename').textContent = sub.file_name;
-            previewDiv.innerHTML = '';
-            if (sub.file_data) {
-                var mime = sub.file_type || 'application/octet-stream';
-                var dataUrl = 'data:' + mime + ';base64,' + sub.file_data;
-                if (mime === 'application/pdf') {
-                    previewDiv.innerHTML = '<iframe src="' + dataUrl + '" style="width:100%;height:500px;border:1px solid var(--border-color);border-radius:8px;"></iframe>';
-                } else if (mime.startsWith('image/')) {
-                    previewDiv.innerHTML = '<img src="' + dataUrl + '" style="max-width:100%;border-radius:8px;">';
-                } else if (mime === 'application/msword' || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                    previewDiv.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;"><i class="bi bi-file-earmark-word" style="font-size:2rem;display:block;margin-bottom:8px;"></i>Word document — use Download to view</div>';
-                } else {
-                    previewDiv.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;"><i class="bi bi-file-earmark" style="font-size:2rem;display:block;margin-bottom:8px;"></i>Preview not available — use Download</div>';
-                }
-            } else {
-                previewDiv.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;">No file uploaded</div>';
-            }
-        } else {
-            resumeDiv.style.display = 'none';
+        renderCandidateRating(sub.rating || 0);
+        await renderCandidateDocuments(subId);
+        await renderCandidateHistory(subId);
+        var hireBtn = document.getElementById('rec-hire-btn');
+        if (hireBtn) hireBtn.style.display = sub.hired_employee_id ? 'none' : 'inline-flex';
+        var hiredNote = document.getElementById('rec-hired-note');
+        if (hiredNote) {
+            hiredNote.style.display = sub.hired_employee_id ? 'block' : 'none';
+            hiredNote.textContent = sub.hired_employee_id ? 'Already added to the employee directory.' : '';
         }
     } catch(e) { console.error(e); }
 }
+
+// --- Candidate documents ---------------------------------------------------
+// Payloads are fetched per file rather than shipped with the candidate list.
+var _recDocuments = [];
+
+async function renderCandidateDocuments(subId) {
+    var host = document.getElementById('rec-detail-documents');
+    if (!host) return;
+    host.innerHTML = '<div style="color:var(--text-secondary);font-size:0.85rem;">Loading documents...</div>';
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + subId + '/documents');
+        _recDocuments = res.ok ? await res.json() : [];
+    } catch (e) { _recDocuments = []; }
+    if (!_recDocuments.length) {
+        host.innerHTML = '<div style="color:var(--text-secondary);font-size:0.85rem;padding:12px;border:1px dashed var(--border-color);border-radius:8px;">No documents attached.</div>';
+        return;
+    }
+    host.innerHTML = _recDocuments.map(function (d) {
+        var kb = d.file_size ? (d.file_size / 1024).toFixed(0) + ' KB' : '';
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;">' +
+               '<span style="flex:1;min-width:140px;overflow-wrap:anywhere;">' + esc(d.file_name) +
+               '<span style="display:block;font-size:0.72rem;color:var(--text-secondary);">' + esc(d.doc_type || '') + (kb ? ' &middot; ' + kb : '') + '</span></span>' +
+               '<button class="btn btn-outline btn-sm" onclick="previewCandidateDoc(' + d.id + ')">Preview</button>' +
+               '<button class="btn btn-outline btn-sm" onclick="downloadCandidateDoc(' + d.id + ')">Download</button>' +
+               '</div>';
+    }).join('');
+}
+window.renderCandidateDocuments = renderCandidateDocuments;
+
+async function fetchCandidateDoc(docId) {
+    var res = await fetch('/api/recruitment/documents/' + docId);
+    if (!res.ok) { showToast('Could not load that document', 'error'); return null; }
+    return await res.json();
+}
+
+async function previewCandidateDoc(docId) {
+    var doc = await fetchCandidateDoc(docId);
+    if (!doc) return;
+    var host = document.getElementById('rec-detail-preview');
+    if (!host) return;
+    var mime = doc.file_type || 'application/octet-stream';
+    var dataUrl = 'data:' + mime + ';base64,' + doc.file_data;
+    if (mime === 'application/pdf') {
+        host.innerHTML = '<iframe src="' + dataUrl + '" style="width:100%;height:500px;border:1px solid var(--border-color);border-radius:8px;"></iframe>';
+    } else if (mime.indexOf('image/') === 0) {
+        host.innerHTML = '<img src="' + dataUrl + '" style="max-width:100%;border-radius:8px;">';
+    } else {
+        host.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary);border:1px dashed var(--border-color);border-radius:8px;">' +
+                         esc(doc.file_name) + ' cannot be previewed in the browser &mdash; use Download.</div>';
+    }
+}
+window.previewCandidateDoc = previewCandidateDoc;
+
+async function downloadCandidateDoc(docId) {
+    var doc = await fetchCandidateDoc(docId);
+    if (!doc || !doc.file_data) { showToast('No file data available', 'error'); return; }
+    var byteStr = atob(doc.file_data);
+    var arr = new Uint8Array(byteStr.length);
+    for (var i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
+    var blob = new Blob([arr], { type: doc.file_type || 'application/octet-stream' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = doc.file_name || 'document'; a.click();
+    URL.revokeObjectURL(url);
+}
+window.downloadCandidateDoc = downloadCandidateDoc;
+
+async function renderCandidateHistory(subId) {
+    var host = document.getElementById('rec-detail-history');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + subId + '/history');
+        var events = res.ok ? await res.json() : [];
+        host.innerHTML = events.length
+            ? events.map(function (e) {
+                return '<div style="display:flex;gap:10px;font-size:0.8rem;padding:6px 0;border-bottom:1px solid var(--border-color);">' +
+                       '<span style="color:var(--text-secondary);white-space:nowrap;">' + esc((e.created_at || '').slice(0, 16)) + '</span>' +
+                       '<span>' + (e.from_stage ? esc(e.from_stage) + ' &rarr; ' : '') + '<strong>' + esc(e.to_stage) + '</strong>' +
+                       '<span style="color:var(--text-secondary);"> by ' + esc(e.actor || 'HR') + '</span>' +
+                       (e.note ? '<div style="color:var(--text-secondary);">' + esc(e.note) + '</div>' : '') + '</span></div>';
+              }).join('')
+            : '<div style="color:var(--text-secondary);font-size:0.85rem;">No pipeline activity yet.</div>';
+    } catch (e) { host.innerHTML = ''; }
+}
+window.renderCandidateHistory = renderCandidateHistory;
+
+function renderCandidateRating(rating) {
+    var host = document.getElementById('rec-detail-rating');
+    if (!host) return;
+    var html = '';
+    for (var i = 1; i <= 5; i++) {
+        html += '<button type="button" onclick="setCandidateRating(' + i + ')" aria-label="Rate ' + i + ' of 5" ' +
+                'style="background:none;border:none;cursor:pointer;font-size:1.3rem;padding:2px 3px;min-width:32px;min-height:32px;' +
+                'color:' + (i <= rating ? 'var(--warning-color)' : 'var(--text-secondary)') + ';">&#9733;</button>';
+    }
+    html += '<button type="button" onclick="setCandidateRating(0)" class="btn btn-outline btn-sm" style="margin-left:8px;font-size:0.72rem;">Clear</button>';
+    host.innerHTML = html;
+}
+window.renderCandidateRating = renderCandidateRating;
+
+async function setCandidateRating(rating) {
+    if (!recCurrentSubId) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/rating', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating: rating })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        renderCandidateRating(data.rating);
+        showToast('Rating saved', 'success');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.setCandidateRating = setCandidateRating;
+
+// Turn a successful candidate into an employee without retyping their details.
+async function hireCandidate() {
+    if (!recCurrentSubId) return;
+    var jobTitle = prompt('Job title for the new employee:', '');
+    if (jobTitle === null) return;
+    var startDate = prompt('Start date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+    if (startDate === null) return;
+    var salary = prompt('Salary per pay period (0 if hourly):', '0');
+    if (salary === null) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/hire', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_title: jobTitle, start_date: startDate,
+                salary: parseFloat(salary) || 0
+            })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast(data.message, 'success');
+        showRecSubmissionDetail(recCurrentSubId);
+        if (typeof loadHRStats === 'function') loadHRStats();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.hireCandidate = hireCandidate;
 
 function buildStageMoveHtml(subId, currentStage) {
     var stages = recCurrentPipelineStages;
@@ -4678,19 +4958,6 @@ async function updateRecSubmission() {
     } catch(e) { showToast('Error', 'error'); }
 }
 
-function downloadRecResume() {
-    var sub = _recSubmissionResume;
-    if (!sub || !sub.file_data) { showToast('No resume file available', 'error'); return; }
-    var byteStr = atob(sub.file_data);
-    var arr = new Uint8Array(byteStr.length);
-    for (var i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
-    var blob = new Blob([arr], { type: sub.file_type || 'application/octet-stream' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url; a.download = sub.file_name || 'resume'; a.click();
-    URL.revokeObjectURL(url);
-}
-
 function esc(s) {
     if (s === null || s === undefined) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -4714,7 +4981,6 @@ window.showRecFormsList = showRecFormsList;
 window.showRecSubmissions = showRecSubmissions;
 window.showRecSubmissionDetail = showRecSubmissionDetail;
 window.updateRecSubmission = updateRecSubmission;
-window.downloadRecResume = downloadRecResume;
 window.switchRecView = switchRecView;
 window.addRecStage = addRecStage;
 window.removeRecStage = removeRecStage;

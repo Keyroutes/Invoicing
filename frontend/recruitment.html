@@ -37,6 +37,13 @@
         .file-upload { position: relative; border: 2px dashed rgba(255,255,255,0.15); border-radius: 8px; padding: 24px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
         .file-upload:hover { border-color: #22d3ee; background: rgba(34,211,238,0.05); }
         .file-upload input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .file-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .file-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
+                    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); font-size: 13px; }
+        .file-row-name { flex: 1; overflow-wrap: anywhere; }
+        .file-row-size { opacity: 0.6; font-size: 12px; white-space: nowrap; }
+        .file-row-remove { background: none; border: none; color: #f87171; cursor: pointer;
+                           font-size: 20px; line-height: 1; min-width: 32px; min-height: 32px; }
         .file-upload .file-icon { font-size: 2rem; margin-bottom: 8px; }
         .file-upload .file-text { font-size: 0.85rem; color: #94a3b8; }
         .file-upload .file-name { color: #22d3ee; font-weight: 600; font-size: 0.9rem; margin-top: 8px; }
@@ -58,7 +65,7 @@
         .powered-by { text-align: center; margin-top: 32px; font-size: 0.75rem; color: #475569; }
         .powered-by a { color: #22d3ee; }
     </style>
-    <link rel="stylesheet" href="mobile.css">
+    <link rel="stylesheet" href="mobile.css?v=14">
 </head>
 <body>
     <div class="bg-shapes">
@@ -99,7 +106,6 @@
 
     <script>
         let formFields = [];
-        let uploadedFile = null;
 
         async function loadForm() {
             const params = new URLSearchParams(window.location.search);
@@ -139,11 +145,12 @@
                     </select>`;
                 } else if (f.type === 'file') {
                     input = `<div class="file-upload" id="file-upload-${i}">
-                        <input type="file" accept=".pdf,.doc,.docx" onchange="handleFileUpload(this,${i})">
+                        <input type="file" multiple accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt" onchange="handleFileUpload(this,${i})">
                         <div class="file-icon">&#128196;</div>
-                        <div class="file-text">Click to upload PDF or Word document</div>
-                        <div class="file-name" id="file-name-${i}"></div>
-                    </div>`;
+                        <div class="file-text">Click to attach up to ${MAX_FILES} files &mdash; CV, cover letter, certificates</div>
+                        <div class="file-text" style="font-size:12px;opacity:0.7;">PDF, Word, images or text &middot; max ${MAX_MB}MB each</div>
+                    </div>
+                    <div class="file-list" id="file-list-${i}"></div>`;
                 } else {
                     const type = f.type === 'email' ? 'email' : f.type === 'phone' ? 'tel' : 'text';
                     input = `<input type="${type}" class="form-control" id="field-${i}" name="${esc(f.label)}" placeholder="Enter ${esc(f.label).toLowerCase()}..." ${reqAttr}>`;
@@ -152,17 +159,61 @@
             }).join('');
         }
 
+        // Applicants routinely need to send more than one document, so the
+        // picker accepts several and validates each before it is queued.
+        const MAX_FILES = 6;
+        const MAX_MB = 5;
+        const ALLOWED_EXT = ['pdf', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'webp', 'txt'];
+        let uploadedFiles = [];
+
+        function renderFileList(idx) {
+            const list = document.getElementById('file-list-' + idx);
+            if (!list) return;
+            list.innerHTML = uploadedFiles.map(function (f, n) {
+                return '<div class="file-row"><span class="file-row-name">' + esc(f.name) + '</span>' +
+                       '<span class="file-row-size">' + (f.size / 1024).toFixed(0) + ' KB</span>' +
+                       '<button type="button" class="file-row-remove" onclick="removeFile(' + n + ',' + idx + ')" ' +
+                       'aria-label="Remove ' + esc(f.name) + '">&times;</button></div>';
+            }).join('');
+        }
+
+        function removeFile(n, idx) {
+            uploadedFiles.splice(n, 1);
+            renderFileList(idx);
+        }
+
         function handleFileUpload(input, idx) {
-            const file = input.files[0];
-            if (!file) return;
-            if (file.size > 5 * 1024 * 1024) { alert('File too large. Maximum size is 5MB.'); input.value = ''; return; }
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const base64 = e.target.result.split(',')[1];
-                uploadedFile = { name: file.name, type: file.type, data: base64 };
-                document.getElementById('file-name-' + idx).textContent = file.name;
-            };
-            reader.readAsDataURL(file);
+            const chosen = Array.from(input.files || []);
+            input.value = '';   // allow re-picking the same file after a removal
+            for (const file of chosen) {
+                if (uploadedFiles.length >= MAX_FILES) {
+                    showError('You can attach at most ' + MAX_FILES + ' files.');
+                    break;
+                }
+                const ext = (file.name.split('.').pop() || '').toLowerCase();
+                if (ALLOWED_EXT.indexOf(ext) < 0) {
+                    showError('"' + file.name + '" is not an accepted file type.');
+                    continue;
+                }
+                if (file.size > MAX_MB * 1024 * 1024) {
+                    showError('"' + file.name + '" is larger than ' + MAX_MB + 'MB.');
+                    continue;
+                }
+                if (uploadedFiles.some(function (f) { return f.name === file.name && f.size === file.size; })) {
+                    continue;   // already attached
+                }
+                (function (f) {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        uploadedFiles.push({
+                            name: f.name, type: f.type, size: f.size,
+                            data: e.target.result.split(',')[1]
+                        });
+                        renderFileList(idx);
+                    };
+                    reader.readAsDataURL(f);
+                })(file);
+            }
         }
 
         async function submitApplication(e) {
@@ -187,10 +238,13 @@
                 candidate_name: candidateName,
                 candidate_email: candidateEmail,
             };
-            if (uploadedFile) {
-                body.file_name = uploadedFile.name;
-                body.file_type = uploadedFile.type;
-                body.file_data = uploadedFile.data;
+            if (uploadedFiles.length) {
+                body.documents = uploadedFiles.map(function (f, n) {
+                    return {
+                        doc_type: n === 0 ? 'resume' : 'supporting',
+                        file_name: f.name, file_type: f.type, file_data: f.data
+                    };
+                });
             }
 
             const params = new URLSearchParams(window.location.search);

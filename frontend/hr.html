@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="mobile.css">
+    <link rel="stylesheet" href="styles.css?v=14">
+    <link rel="stylesheet" href="mobile.css?v=14">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -765,6 +765,8 @@
                                         <div><span style="color:var(--text-secondary);">Job Title:</span> <input type="text" id="emp-detail-title" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="job_title"><span id="emp-detail-title-ro">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Department:</span> <select id="emp-detail-dept" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="department_id"><option value="">None</option></select><span id="emp-detail-dept-ro">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Manager:</span> <select id="emp-detail-mgr" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="reports_to"><option value="">None</option></select><span id="emp-detail-mgr-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Level:</span> <select id="emp-detail-level" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="level"><option value="">Not set</option></select><span id="emp-detail-level-ro">-</span></div>
+                                        <div><span style="color:var(--text-secondary);">Role:</span> <select id="emp-detail-role" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="role"><option value="employee">Employee</option></select><span id="emp-detail-role-ro">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Type:</span> <select id="emp-detail-type" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="employment_type"><option value="full_time">Full Time</option><option value="part_time">Part Time</option><option value="contract">Contract</option><option value="casual">Casual</option></select><span id="emp-detail-type-ro">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Pay Frequency:</span> <select id="emp-detail-payfreq" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="pay_frequency"><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="biweekly">Bi-Weekly</option></select><span id="emp-detail-payfreq-ro">-</span></div>
                                         <div><span style="color:var(--text-secondary);">Salary:</span> <input type="number" id="emp-detail-salary" class="form-control" style="display:none;padding:4px 8px;font-size:0.85rem;" data-field="salary" step="0.01"><span id="emp-detail-salary-ro">-</span></div>
@@ -1658,13 +1660,25 @@
                                     <div class="widget-content" id="rec-detail-stage">
                                     </div>
                                 </div>
-                                <div class="glass-widget" id="rec-detail-resume" style="display:none;">
-                                    <div class="widget-header"><h3>Resume</h3></div>
+                                <div class="glass-widget" id="rec-detail-resume">
+                                    <div class="widget-header"><h3>Documents</h3></div>
                                     <div class="widget-content">
-                                        <p id="rec-detail-filename" style="font-size:0.85rem;margin-bottom:12px;"></p>
+                                        <div id="rec-detail-documents" style="margin-bottom:12px;"></div>
                                         <div id="rec-detail-preview" style="margin-bottom:12px;"></div>
-                                        <button class="btn btn-outline btn-sm" onclick="downloadRecResume()">Download</button>
                                     </div>
+                                </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>Assessment</h3></div>
+                                    <div class="widget-content">
+                                        <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:6px;">Rating</div>
+                                        <div id="rec-detail-rating" style="margin-bottom:16px;"></div>
+                                        <button class="btn btn-primary btn-sm" id="rec-hire-btn" onclick="hireCandidate()">Hire &amp; Add to Team</button>
+                                        <p id="rec-hired-note" style="display:none;font-size:0.8rem;color:var(--success-color);margin-top:8px;"></p>
+                                    </div>
+                                </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>Pipeline History</h3></div>
+                                    <div class="widget-content" id="rec-detail-history"></div>
                                 </div>
                                 <div class="glass-widget" style="margin-top:16px;">
                                     <div class="widget-header"><h3>AI Screening</h3></div>
@@ -1705,6 +1719,14 @@
                         <div class="form-group">
                             <label>Reports To</label>
                             <select id="emp-reports-to" class="form-control"><option value="">None</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Level</label>
+                            <select id="emp-level" class="form-control"><option value="">Not set</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Role</label>
+                            <select id="emp-role" class="form-control"><option value="employee">Employee</option></select>
                         </div>
                         <div class="form-group">
                             <label>Employment Type</label>
@@ -1858,7 +1880,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=14"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()">

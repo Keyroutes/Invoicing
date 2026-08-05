@@ -666,7 +666,7 @@ textarea.table-input.item-desc {
     }
     .top-nav-menu::-webkit-scrollbar { display: none; }
     .top-nav-menu.mobile-open { transform: translateY(0); }
-    .nav-item { width: 100%; padding: 14px 16px; border-radius: 8px; }
+    .nav-item { width: 100%; padding: 14px 16px; border-radius: 8px; min-height: 44px; }
     .search-bar { display: none; }
     .enterprise-topbar {
         gap: 10px;
@@ -676,6 +676,13 @@ textarea.table-input.item-desc {
     .top-nav-menu {
         max-height: calc(100dvh - var(--topbar-height));
         padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        /* The base rule fades the right edge to hint that the desktop nav
+           scrolls sideways. Once the nav is a full-width vertical drawer that
+           same horizontal fade just washes every menu item out, which is why
+           the mobile menu looked dimmed and unusable. */
+        -webkit-mask-image: none;
+        mask-image: none;
+        overflow-x: hidden;
     }
 
     .dashboard, .view-section { padding: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
