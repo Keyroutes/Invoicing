@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=14">
-    <link rel="stylesheet" href="mobile.css?v=14">
+    <link rel="stylesheet" href="styles.css?v=15">
+    <link rel="stylesheet" href="mobile.css?v=15">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -1536,9 +1536,10 @@
                     <div class="invoices-header-area">
                         <div>
                             <h1>Recruitment</h1>
-                            <p class="subtitle">Manage application forms and candidate submissions</p>
+                            <p class="subtitle">Jobs, candidates, interviews and offers</p>
                         </div>
                         <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="openJobModal()">+ New Job</button>
                             <button class="btn btn-primary" onclick="showAddFormModal()">+ New Form</button>
                         </div>
                     </div>
@@ -1563,8 +1564,66 @@
                         </section>
                     </div>
 
+                    <!-- Hiring snapshot -->
+                    <div class="grid-4 mb-24" id="rec-analytics-cards"></div>
+
+                    <div class="invoices-tabs" id="rec-tabs">
+                        <button class="tab active" onclick="switchRecTab('jobs', this)">Jobs</button>
+                        <button class="tab" onclick="switchRecTab('forms', this)">Application Forms</button>
+                        <button class="tab" onclick="switchRecTab('pool', this)">Talent Pool</button>
+                        <button class="tab" onclick="switchRecTab('interviews', this)">Interviews</button>
+                    </div>
+
+                    <!-- Jobs -->
+                    <div id="rec-jobs-panel">
+                        <div class="glass-widget">
+                            <div class="widget-header"><h3>Open Roles</h3></div>
+                            <div class="widget-content" style="padding:0;">
+                                <div class="table-responsive"><table class="data-table">
+                                    <thead><tr>
+                                        <th>Ref</th><th>Title</th><th>Department</th><th>Location</th>
+                                        <th>Hiring Manager</th><th class="text-right">Applicants</th>
+                                        <th>Status</th><th class="text-right">Actions</th>
+                                    </tr></thead>
+                                    <tbody id="rec-jobs-tbody"><tr><td colspan="8" class="loading">Loading jobs...</td></tr></tbody>
+                                </table></div>
+                            </div>
+                        </div>
+                        <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:10px;">
+                            Published roles appear on your public job board:
+                            <a class="link" id="rec-board-link" href="#" target="_blank">open job board</a>
+                        </p>
+                    </div>
+
+                    <!-- Talent pool -->
+                    <div id="rec-pool-panel" style="display:none;">
+                        <div class="glass-widget">
+                            <div class="widget-header" style="gap:12px;">
+                                <h3>Talent Pool</h3>
+                                <input type="text" id="rec-pool-search" class="search-input" placeholder="Search all candidates..." onkeyup="loadTalentPool()" style="margin-left:auto;max-width:260px;">
+                            </div>
+                            <div class="widget-content" style="padding:0;">
+                                <div class="table-responsive"><table class="data-table">
+                                    <thead><tr>
+                                        <th>Candidate</th><th>Applied For</th><th>Stage</th>
+                                        <th>Status</th><th class="text-right">Rating</th><th class="text-right">Applications</th>
+                                    </tr></thead>
+                                    <tbody id="rec-pool-tbody"><tr><td colspan="6" class="loading">Loading...</td></tr></tbody>
+                                </table></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming interviews -->
+                    <div id="rec-interviews-panel" style="display:none;">
+                        <div class="glass-widget">
+                            <div class="widget-header"><h3>Upcoming Interviews</h3></div>
+                            <div class="widget-content" id="rec-upcoming-list"></div>
+                        </div>
+                    </div>
+
                     <!-- Forms List -->
-                    <div id="rec-forms-list">
+                    <div id="rec-forms-list" style="display:none;">
                         <div class="glass-widget">
                             <div class="widget-header"><h3>Application Forms</h3></div>
                             <div class="widget-content" style="padding:0;">
@@ -1674,6 +1733,35 @@
                                         <div id="rec-detail-rating" style="margin-bottom:16px;"></div>
                                         <button class="btn btn-primary btn-sm" id="rec-hire-btn" onclick="hireCandidate()">Hire &amp; Add to Team</button>
                                         <p id="rec-hired-note" style="display:none;font-size:0.8rem;color:var(--success-color);margin-top:8px;"></p>
+                                    </div>
+                                </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>Interviews</h3></div>
+                                    <div class="widget-content">
+                                        <div id="rec-interview-list" style="margin-bottom:12px;"></div>
+                                        <button class="btn btn-outline btn-sm" onclick="openInterviewModal()">Schedule Interview</button>
+                                    </div>
+                                </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>Offer</h3></div>
+                                    <div class="widget-content">
+                                        <div id="rec-offer-list" style="margin-bottom:12px;"></div>
+                                        <button class="btn btn-outline btn-sm" onclick="openOfferModal()">Create Offer</button>
+                                    </div>
+                                </div>
+                                <div class="glass-widget" style="margin-top:16px;">
+                                    <div class="widget-header"><h3>Contact Candidate</h3></div>
+                                    <div class="widget-content">
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-outline btn-sm" onclick="openCandidateEmail('interview')">Interview Invite</button>
+                                            <button class="btn btn-outline btn-sm" onclick="openCandidateEmail('offer')">Offer Email</button>
+                                            <button class="btn btn-outline btn-sm" onclick="openCandidateEmail('rejection')">Rejection</button>
+                                        </div>
+                                        <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-outline btn-sm" id="rec-reject-btn" onclick="rejectCandidate()" style="color:var(--danger-color);border-color:var(--danger-color);">Reject</button>
+                                            <button class="btn btn-outline btn-sm" id="rec-reopen-btn" onclick="reopenCandidate()" style="display:none;">Reopen</button>
+                                        </div>
+                                        <p id="rec-reject-note" style="display:none;font-size:0.8rem;color:var(--danger-color);margin-top:10px;"></p>
                                     </div>
                                 </div>
                                 <div class="glass-widget" style="margin-top:16px;">
@@ -1880,7 +1968,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=14"></script>
+    <script src="app.js?v=15"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()">
@@ -1933,5 +2021,96 @@
     </script>
 
     <div style="position:fixed;bottom:16px;right:16px;font-size:0.75rem;color:var(--text-secondary);opacity:0.6;pointer-events:none;z-index:9999;">Powered by Aniprotech</div>
+
+    <!-- Job requisition modal -->
+    <div id="job-modal" class="modal-overlay" style="display:none;">
+        <div class="modal" style="max-width:680px;">
+            <div class="modal-header"><h3 id="job-modal-title">New Job</h3><button class="btn-icon" onclick="closeJobModal()">&times;</button></div>
+            <div class="modal-body">
+                <input type="hidden" id="job-id">
+                <div class="grid-2 gap-16">
+                    <div class="form-group"><label>Job Title *</label><input type="text" id="job-title" class="form-control"></div>
+                    <div class="form-group"><label>Location</label><input type="text" id="job-location" class="form-control" placeholder="London / Remote"></div>
+                    <div class="form-group"><label>Department</label><select id="job-department" class="form-control"><option value="">None</option></select></div>
+                    <div class="form-group"><label>Hiring Manager</label><select id="job-manager" class="form-control"><option value="">None</option></select></div>
+                    <div class="form-group"><label>Work Mode</label><select id="job-mode" class="form-control"><option value="onsite">On-site</option><option value="hybrid">Hybrid</option><option value="remote">Remote</option></select></div>
+                    <div class="form-group"><label>Employment Type</label><select id="job-type" class="form-control"><option value="full_time">Full Time</option><option value="part_time">Part Time</option><option value="contract">Contract</option><option value="casual">Casual</option></select></div>
+                    <div class="form-group"><label>Level</label><select id="job-level" class="form-control"><option value="">Not set</option></select></div>
+                    <div class="form-group"><label>Openings</label><input type="number" id="job-openings" class="form-control" value="1" min="1"></div>
+                    <div class="form-group"><label>Salary From</label><input type="number" id="job-salary-min" class="form-control" value="0" step="100"></div>
+                    <div class="form-group"><label>Salary To</label><input type="number" id="job-salary-max" class="form-control" value="0" step="100"></div>
+                    <div class="form-group"><label>Closing Date</label><input type="date" id="job-closing" class="form-control"></div>
+                    <div class="form-group"><label>Status</label><select id="job-status" class="form-control"><option value="draft">Draft</option><option value="open">Open</option><option value="on_hold">On Hold</option><option value="closed">Closed</option><option value="filled">Filled</option></select></div>
+                </div>
+                <div class="form-group"><label>Description</label><textarea id="job-description" class="form-control" rows="3"></textarea></div>
+                <div class="form-group"><label>Requirements</label><textarea id="job-requirements" class="form-control" rows="3"></textarea></div>
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;"><input type="checkbox" id="job-show-salary" checked> Show salary on the public job board</label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeJobModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveJob()">Save Job</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interview modal -->
+    <div id="interview-modal" class="modal-overlay" style="display:none;">
+        <div class="modal" style="max-width:520px;">
+            <div class="modal-header"><h3>Schedule Interview</h3><button class="btn-icon" onclick="closeInterviewModal()">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>Round</label><input type="text" id="iv-round" class="form-control" value="Interview"></div>
+                <div class="grid-2 gap-16">
+                    <div class="form-group"><label>Date &amp; Time *</label><input type="datetime-local" id="iv-when" class="form-control"></div>
+                    <div class="form-group"><label>Duration (min)</label><input type="number" id="iv-duration" class="form-control" value="45" min="5"></div>
+                    <div class="form-group"><label>Mode</label><select id="iv-mode" class="form-control"><option value="video">Video</option><option value="phone">Phone</option><option value="onsite">On-site</option></select></div>
+                    <div class="form-group"><label>Interviewer</label><select id="iv-interviewer" class="form-control"><option value="">Unassigned</option></select></div>
+                </div>
+                <div class="form-group"><label>Meeting Link</label><input type="url" id="iv-link" class="form-control" placeholder="https://..."></div>
+                <div class="form-group"><label>Location</label><input type="text" id="iv-location" class="form-control"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeInterviewModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveInterview()">Schedule</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Offer modal -->
+    <div id="offer-modal" class="modal-overlay" style="display:none;">
+        <div class="modal" style="max-width:520px;">
+            <div class="modal-header"><h3>Create Offer</h3><button class="btn-icon" onclick="closeOfferModal()">&times;</button></div>
+            <div class="modal-body">
+                <div class="grid-2 gap-16">
+                    <div class="form-group"><label>Job Title</label><input type="text" id="of-title" class="form-control"></div>
+                    <div class="form-group"><label>Level</label><select id="of-level" class="form-control"><option value="">Not set</option></select></div>
+                    <div class="form-group"><label>Salary</label><input type="number" id="of-salary" class="form-control" value="0" step="100"></div>
+                    <div class="form-group"><label>Start Date</label><input type="date" id="of-start" class="form-control"></div>
+                    <div class="form-group"><label>Offer Expires</label><input type="date" id="of-expires" class="form-control"></div>
+                </div>
+                <div class="form-group"><label>Notes</label><textarea id="of-notes" class="form-control" rows="3"></textarea></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeOfferModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveOffer()">Create Offer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Candidate email modal -->
+    <div id="cand-email-modal" class="modal-overlay" style="display:none;">
+        <div class="modal" style="max-width:600px;">
+            <div class="modal-header"><h3>Email Candidate</h3><button class="btn-icon" onclick="closeCandidateEmail()">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>To</label><input type="email" id="ce-to" class="form-control" readonly></div>
+                <div class="form-group"><label>Subject</label><input type="text" id="ce-subject" class="form-control"></div>
+                <div class="form-group"><label>Message</label><textarea id="ce-body" class="form-control" rows="12"></textarea></div>
+                <p style="font-size:0.78rem;color:var(--text-secondary);">Edit freely before sending &mdash; nothing is sent until you press Send.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeCandidateEmail()">Cancel</button>
+                <button class="btn btn-primary" onclick="sendCandidateEmail()">Send</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

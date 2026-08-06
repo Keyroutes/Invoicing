@@ -593,6 +593,95 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Recruitment: job requisitions, interviews and offers
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS job_requisitions (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        reference VARCHAR DEFAULT '',
+                        title VARCHAR NOT NULL,
+                        department_id INTEGER REFERENCES departments(id),
+                        hiring_manager_id INTEGER REFERENCES employees(id),
+                        description TEXT DEFAULT '',
+                        requirements TEXT DEFAULT '',
+                        location VARCHAR DEFAULT '',
+                        work_mode VARCHAR DEFAULT 'onsite',
+                        employment_type VARCHAR DEFAULT 'full_time',
+                        level VARCHAR DEFAULT '',
+                        salary_min DOUBLE PRECISION DEFAULT 0,
+                        salary_max DOUBLE PRECISION DEFAULT 0,
+                        salary_currency VARCHAR DEFAULT '',
+                        show_salary BOOLEAN DEFAULT TRUE,
+                        openings INTEGER DEFAULT 1,
+                        status VARCHAR DEFAULT 'draft',
+                        is_published BOOLEAN DEFAULT FALSE,
+                        closing_date VARCHAR DEFAULT '',
+                        opened_at VARCHAR DEFAULT '',
+                        closed_at VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_job_requisitions_client ON job_requisitions (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_job_requisitions_status ON job_requisitions (status)"))
+                conn.execute(text("ALTER TABLE recruitment_forms ADD COLUMN IF NOT EXISTS job_id INTEGER"))
+
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS interviews (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        submission_id INTEGER REFERENCES form_submissions(id) NOT NULL,
+                        round_name VARCHAR DEFAULT 'Interview',
+                        scheduled_at VARCHAR DEFAULT '',
+                        duration_minutes INTEGER DEFAULT 45,
+                        mode VARCHAR DEFAULT 'video',
+                        location VARCHAR DEFAULT '',
+                        meeting_link VARCHAR DEFAULT '',
+                        interviewer_id INTEGER REFERENCES employees(id),
+                        interviewer_name VARCHAR DEFAULT '',
+                        status VARCHAR DEFAULT 'scheduled',
+                        outcome VARCHAR DEFAULT '',
+                        score INTEGER DEFAULT 0,
+                        feedback TEXT DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_interviews_submission ON interviews (submission_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_interviews_scheduled ON interviews (scheduled_at)"))
+
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS offers (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        submission_id INTEGER REFERENCES form_submissions(id) NOT NULL,
+                        job_title VARCHAR DEFAULT '',
+                        level VARCHAR DEFAULT '',
+                        salary DOUBLE PRECISION DEFAULT 0,
+                        currency VARCHAR DEFAULT '',
+                        start_date VARCHAR DEFAULT '',
+                        expires_on VARCHAR DEFAULT '',
+                        notes TEXT DEFAULT '',
+                        status VARCHAR DEFAULT 'draft',
+                        sent_at VARCHAR DEFAULT '',
+                        responded_at VARCHAR DEFAULT '',
+                        decline_reason VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_offers_submission ON offers (submission_id)"))
+
+                for col in [
+                    "source VARCHAR DEFAULT 'direct'",
+                    "owner_name VARCHAR DEFAULT ''",
+                    "rejected_reason VARCHAR DEFAULT ''",
+                    "rejected_at VARCHAR DEFAULT ''",
+                    "hired_at VARCHAR DEFAULT ''",
+                ]:
+                    conn.execute(text(f"ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS {col}"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Recruitment: candidate documents, pipeline history, rating
             try:
                 conn.execute(text("""

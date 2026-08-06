@@ -382,17 +382,109 @@ class DBOvertimeLog(Base):
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
+class DBJobRequisition(Base):
+    """An open role. The application form describes *how* to apply; the
+    requisition describes *what* is being hired for, which is what a hiring
+    manager, the job board and the reporting all key off."""
+    __tablename__ = "job_requisitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    reference = Column(String, default="", index=True)
+    title = Column(String, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True, index=True)
+    hiring_manager_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+
+    description = Column(Text, default="")
+    requirements = Column(Text, default="")
+    location = Column(String, default="")
+    work_mode = Column(String, default="onsite")       # onsite | hybrid | remote
+    employment_type = Column(String, default="full_time")
+    level = Column(String, default="")
+
+    salary_min = Column(Float, default=0.0)
+    salary_max = Column(Float, default=0.0)
+    salary_currency = Column(String, default="")
+    show_salary = Column(Boolean, default=True)
+
+    openings = Column(Integer, default=1)
+    status = Column(String, default="draft", index=True)  # draft|open|on_hold|closed|filled
+    is_published = Column(Boolean, default=False, index=True)
+    closing_date = Column(String, default="")
+    opened_at = Column(String, default="")
+    closed_at = Column(String, default="")
+
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    department = relationship("DBDepartment")
+    hiring_manager = relationship("DBEmployee")
+
+
 class DBRecruitmentForm(Base):
     __tablename__ = "recruitment_forms"
 
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    job_id = Column(Integer, ForeignKey("job_requisitions.id"), nullable=True, index=True)
     title = Column(String, nullable=False)
     description = Column(String, default="")
     fields = Column(Text, default="[]")
     is_active = Column(Boolean, default=True)
     form_token = Column(String, unique=True, index=True, default=lambda: str(__import__('uuid').uuid4()))
     pipeline_stages = Column(Text, default='["Applied","Screening","Interview","Offer","Hired"]')
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    job = relationship("DBJobRequisition")
+
+
+class DBInterview(Base):
+    """A scheduled conversation with a candidate, plus the scorecard."""
+    __tablename__ = "interviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    submission_id = Column(Integer, ForeignKey("form_submissions.id"), nullable=False, index=True)
+
+    round_name = Column(String, default="Interview")
+    scheduled_at = Column(String, default="", index=True)   # YYYY-MM-DD HH:MM
+    duration_minutes = Column(Integer, default=45)
+    mode = Column(String, default="video")                  # video | phone | onsite
+    location = Column(String, default="")
+    meeting_link = Column(String, default="")
+    interviewer_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    interviewer_name = Column(String, default="")
+
+    status = Column(String, default="scheduled", index=True)  # scheduled|completed|cancelled|no_show
+    outcome = Column(String, default="")                      # pass | fail | hold
+    score = Column(Integer, default=0)                        # 0-5
+    feedback = Column(Text, default="")
+
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    interviewer = relationship("DBEmployee")
+
+
+class DBOffer(Base):
+    """An offer extended to a candidate."""
+    __tablename__ = "offers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    submission_id = Column(Integer, ForeignKey("form_submissions.id"), nullable=False, index=True)
+
+    job_title = Column(String, default="")
+    level = Column(String, default="")
+    salary = Column(Float, default=0.0)
+    currency = Column(String, default="")
+    start_date = Column(String, default="")
+    expires_on = Column(String, default="")
+    notes = Column(Text, default="")
+
+    status = Column(String, default="draft", index=True)  # draft|sent|accepted|declined|withdrawn
+    sent_at = Column(String, default="")
+    responded_at = Column(String, default="")
+    decline_reason = Column(String, default="")
+
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 
@@ -414,6 +506,11 @@ class DBFormSubmission(Base):
     stage_order = Column(Integer, default=0)
     rating = Column(Integer, default=0)
     notes = Column(String, default="")
+    source = Column(String, default="direct")
+    owner_name = Column(String, default="")
+    rejected_reason = Column(String, default="")
+    rejected_at = Column(String, default="")
+    hired_at = Column(String, default="")
     hired_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 

@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import base64
 import logging
@@ -1195,13 +1195,17 @@ def validate_invoice_dates(issue_date, due_date):
         raise HTTPException(status_code=400, detail="Due date cannot be before the issue date")
 
 
-def next_sequence_number(db, model, client_id, prefix):
+def next_sequence_number(db, model, client_id, prefix, field="number"):
     """Next number in a per-tenant sequence, based on the highest number ever
-    issued. Counting rows breaks as soon as one is deleted."""
-    rows = db.query(model.number).filter(model.client_id == client_id).all()
+    issued. Counting rows breaks as soon as one is deleted.
+
+    `field` names the column holding the sequence (invoices and payslips call
+    it `number`; job requisitions call it `reference`)."""
+    column = getattr(model, field)
+    rows = db.query(column).filter(model.client_id == client_id).all()
     max_num = 0
     for row in rows:
-        num_str = row.number or ""
+        num_str = getattr(row, field) or ""
         if not num_str.startswith(prefix):
             continue
         tail = num_str[len(prefix):].split("-")[0].strip()
@@ -4396,12 +4400,893 @@ def employee_heartbeat(request: Request, db: Session = Depends(get_db)):
             pass
     return {"status": "ok"}
 
+# ============ JOB REQUISITIONS ============
+# A requisition is the role being hired for. Application forms hang off it, so
+# one job can have several intake forms (careers page, referral, agency) while
+# reporting still rolls up to a single opening.
+
+JOB_STATUSES = ("draft", "open", "on_hold", "closed", "filled")
+WORK_MODES = ("onsite", "hybrid", "remote")
+
+
+class JobRequisitionIn(BaseModel):
+    title: str
+    department_id: Optional[int] = None
+    hiring_manager_id: Optional[int] = None
+    description: Optional[str] = ""
+    requirements: Optional[str] = ""
+    location: Optional[str] = ""
+    work_mode: Optional[str] = "onsite"
+    employment_type: Optional[str] = "full_time"
+    level: Optional[str] = ""
+    salary_min: Optional[float] = 0.0
+    salary_max: Optional[float] = 0.0
+    show_salary: Optional[bool] = True
+    openings: Optional[int] = 1
+    closing_date: Optional[str] = ""
+    status: Optional[str] = "draft"
+
+
+def job_to_dict(job, db=None, counts=None):
+    dept_name = job.department.name if job.department else ""
+    manager_name = ""
+    if job.hiring_manager:
+        manager_name = f"{job.hiring_manager.first_name} {job.hiring_manager.last_name}"
+    data = {
+        "id": job.id, "reference": job.reference, "title": job.title,
+        "department_id": job.department_id, "department_name": dept_name,
+        "hiring_manager_id": job.hiring_manager_id, "hiring_manager_name": manager_name,
+        "description": job.description or "", "requirements": job.requirements or "",
+        "location": job.location or "", "work_mode": job.work_mode or "onsite",
+        "employment_type": job.employment_type or "full_time", "level": job.level or "",
+        "salary_min": job.salary_min or 0, "salary_max": job.salary_max or 0,
+        "salary_currency": job.salary_currency or "", "show_salary": bool(job.show_salary),
+        "openings": job.openings or 1, "status": job.status,
+        "is_published": bool(job.is_published), "closing_date": job.closing_date or "",
+        "opened_at": job.opened_at or "", "closed_at": job.closed_at or "",
+        "created_at": job.created_at,
+    }
+    if counts is not None:
+        data.update(counts)
+    return data
+
+
+def validate_job_payload(body, db, client_id):
+    if not (body.title or "").strip():
+        raise HTTPException(status_code=400, detail="A job title is required")
+    status = (body.status or "draft").strip().lower()
+    if status not in JOB_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(JOB_STATUSES)}")
+    mode = (body.work_mode or "onsite").strip().lower()
+    if mode not in WORK_MODES:
+        raise HTTPException(status_code=400, detail=f"Work mode must be one of: {', '.join(WORK_MODES)}")
+    # `or 1` would quietly turn an explicit 0 into 1 instead of rejecting it.
+    try:
+        openings = int(body.openings if body.openings is not None else 1)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Openings must be a whole number")
+    if openings < 1 or openings > 999:
+        raise HTTPException(status_code=400, detail="Openings must be between 1 and 999")
+    lo, hi = float(body.salary_min or 0), float(body.salary_max or 0)
+    if lo < 0 or hi < 0:
+        raise HTTPException(status_code=400, detail="Salary cannot be negative")
+    if lo and hi and lo > hi:
+        raise HTTPException(status_code=400, detail="Minimum salary cannot exceed the maximum")
+    if body.department_id:
+        dept = db.query(models.DBDepartment).filter(
+            models.DBDepartment.id == body.department_id,
+            models.DBDepartment.client_id == client_id,
+        ).first()
+        if not dept:
+            raise HTTPException(status_code=400, detail="Department not found")
+    if body.hiring_manager_id:
+        mgr = db.query(models.DBEmployee).filter(
+            models.DBEmployee.id == body.hiring_manager_id,
+            models.DBEmployee.client_id == client_id,
+        ).first()
+        if not mgr:
+            raise HTTPException(status_code=400, detail="Hiring manager not found")
+    return status, mode, openings, validate_level(body.level)
+
+
+@app.get("/api/recruitment/jobs")
+def list_jobs(request: Request, status: str = "", db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBJobRequisition).filter(models.DBJobRequisition.client_id == client.id)
+    if status:
+        query = query.filter(models.DBJobRequisition.status == status)
+    jobs = query.order_by(models.DBJobRequisition.id.desc()).all()
+
+    # Applicant and hire counts per job, in two queries rather than per row.
+    form_rows = db.query(models.DBRecruitmentForm.id, models.DBRecruitmentForm.job_id).filter(
+        models.DBRecruitmentForm.client_id == client.id
+    ).all()
+    form_to_job = {fid: jid for fid, jid in form_rows if jid}
+    applicants, hires = defaultdict(int), defaultdict(int)
+    if form_to_job:
+        subs = db.query(
+            models.DBFormSubmission.form_id, models.DBFormSubmission.hired_employee_id
+        ).filter(models.DBFormSubmission.form_id.in_(list(form_to_job.keys()))).all()
+        for form_id, hired in subs:
+            job_id = form_to_job.get(form_id)
+            if not job_id:
+                continue
+            applicants[job_id] += 1
+            if hired:
+                hires[job_id] += 1
+    return [job_to_dict(j, counts={
+        "applicant_count": applicants.get(j.id, 0),
+        "hired_count": hires.get(j.id, 0),
+        "remaining_openings": max(0, (j.openings or 1) - hires.get(j.id, 0)),
+    }) for j in jobs]
+
+
+@app.post("/api/recruitment/jobs")
+def create_job(request: Request, body: JobRequisitionIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    status, mode, openings, level = validate_job_payload(body, db, client.id)
+    reference = next_sequence_number(db, models.DBJobRequisition, client.id, "JOB-", field="reference")
+    now = datetime.now().strftime("%Y-%m-%d")
+    job = models.DBJobRequisition(
+        client_id=client.id, reference=reference, title=body.title.strip(),
+        department_id=body.department_id, hiring_manager_id=body.hiring_manager_id,
+        description=body.description or "", requirements=body.requirements or "",
+        location=body.location or "", work_mode=mode,
+        employment_type=body.employment_type or "full_time", level=level,
+        salary_min=float(body.salary_min or 0), salary_max=float(body.salary_max or 0),
+        salary_currency=client.currency or "", show_salary=bool(body.show_salary),
+        openings=openings, status=status,
+        is_published=(status == "open"),
+        closing_date=body.closing_date or "",
+        opened_at=now if status == "open" else "",
+    )
+    db.add(job)
+    log_audit(db, client.id, "job_created", "job", None, f"{reference} {body.title}", "", request)
+    db.commit()
+    db.refresh(job)
+    return job_to_dict(job)
+
+
+@app.get("/api/recruitment/jobs/{job_id}")
+def get_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    job = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.id == job_id, models.DBJobRequisition.client_id == client.id
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    forms = db.query(models.DBRecruitmentForm).filter(
+        models.DBRecruitmentForm.job_id == job_id
+    ).all()
+    data = job_to_dict(job)
+    data["forms"] = [{
+        "id": f.id, "title": f.title, "form_token": f.form_token, "is_active": f.is_active
+    } for f in forms]
+    return data
+
+
+@app.put("/api/recruitment/jobs/{job_id}")
+def update_job(job_id: int, request: Request, body: JobRequisitionIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    job = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.id == job_id, models.DBJobRequisition.client_id == client.id
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status, mode, openings, level = validate_job_payload(body, db, client.id)
+    now = datetime.now().strftime("%Y-%m-%d")
+    if status == "open" and job.status != "open":
+        job.opened_at = job.opened_at or now
+        job.closed_at = ""
+    if status in ("closed", "filled") and job.status not in ("closed", "filled"):
+        job.closed_at = now
+    job.title = body.title.strip()
+    job.department_id = body.department_id
+    job.hiring_manager_id = body.hiring_manager_id
+    job.description = body.description or ""
+    job.requirements = body.requirements or ""
+    job.location = body.location or ""
+    job.work_mode = mode
+    job.employment_type = body.employment_type or "full_time"
+    job.level = level
+    job.salary_min = float(body.salary_min or 0)
+    job.salary_max = float(body.salary_max or 0)
+    job.show_salary = bool(body.show_salary)
+    job.openings = openings
+    job.status = status
+    job.is_published = status == "open"
+    job.closing_date = body.closing_date or ""
+    log_audit(db, client.id, "job_updated", "job", job.id, job.reference, f"Status: {status}", request)
+    db.commit()
+    return job_to_dict(job)
+
+
+@app.delete("/api/recruitment/jobs/{job_id}")
+def delete_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    job = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.id == job_id, models.DBJobRequisition.client_id == client.id
+    ).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    linked = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.job_id == job_id).count()
+    if linked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{linked} application form(s) are attached to this job. Detach or delete them first.",
+        )
+    log_audit(db, client.id, "job_deleted", "job", job.id, job.reference, "", request)
+    db.delete(job)
+    db.commit()
+    return {"message": "Job deleted"}
+
+
+@app.get("/api/public/jobs/{client_ref}")
+def public_job_board(client_ref: str, db: Session = Depends(get_db)):
+    """Open roles for a company's careers page. Public: only published jobs,
+    and never anything that identifies internal staff."""
+    try:
+        client_id = int(client_ref)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Not found")
+    client = db.query(models.DBClient).filter(
+        models.DBClient.id == client_id, models.DBClient.is_active == True
+    ).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Not found")
+    jobs = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.client_id == client_id,
+        models.DBJobRequisition.status == "open",
+        models.DBJobRequisition.is_published == True,
+    ).order_by(models.DBJobRequisition.id.desc()).all()
+
+    today = datetime.now().date()
+    listings = []
+    for job in jobs:
+        closing = _parse_date(job.closing_date)
+        if closing and closing < today:
+            continue
+        form = db.query(models.DBRecruitmentForm).filter(
+            models.DBRecruitmentForm.job_id == job.id,
+            models.DBRecruitmentForm.is_active == True,
+        ).first()
+        listings.append({
+            "id": job.id, "reference": job.reference, "title": job.title,
+            "department": job.department.name if job.department else "",
+            "location": job.location or "", "work_mode": job.work_mode,
+            "employment_type": job.employment_type, "level": job.level or "",
+            "description": job.description or "", "requirements": job.requirements or "",
+            "salary_min": job.salary_min if job.show_salary else None,
+            "salary_max": job.salary_max if job.show_salary else None,
+            "salary_currency": job.salary_currency or client.currency or "",
+            "closing_date": job.closing_date or "",
+            "apply_token": form.form_token if form else None,
+        })
+    return {
+        "company": client.company_name or "",
+        "logo_url": client.logo_url or "",
+        "jobs": listings,
+    }
+
+
+# ============ INTERVIEWS ============
+
+INTERVIEW_MODES = ("video", "phone", "onsite")
+INTERVIEW_STATUSES = ("scheduled", "completed", "cancelled", "no_show")
+INTERVIEW_OUTCOMES = ("", "pass", "fail", "hold")
+
+
+class InterviewIn(BaseModel):
+    round_name: Optional[str] = "Interview"
+    scheduled_at: str
+    duration_minutes: Optional[int] = 45
+    mode: Optional[str] = "video"
+    location: Optional[str] = ""
+    meeting_link: Optional[str] = ""
+    interviewer_id: Optional[int] = None
+    interviewer_name: Optional[str] = ""
+
+
+def _get_submission_for_client(db, client_id, sub_id):
+    sub = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.id == sub_id,
+        models.DBFormSubmission.client_id == client_id,
+    ).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return sub
+
+
+def interview_to_dict(iv):
+    return {
+        "id": iv.id, "submission_id": iv.submission_id, "round_name": iv.round_name,
+        "scheduled_at": iv.scheduled_at, "duration_minutes": iv.duration_minutes,
+        "mode": iv.mode, "location": iv.location, "meeting_link": iv.meeting_link,
+        "interviewer_id": iv.interviewer_id, "interviewer_name": iv.interviewer_name,
+        "status": iv.status, "outcome": iv.outcome, "score": iv.score,
+        "feedback": iv.feedback, "created_at": iv.created_at,
+    }
+
+
+def _parse_datetime_minutes(value):
+    """Accept 'YYYY-MM-DD HH:MM' or the HTML datetime-local 'YYYY-MM-DDTHH:MM'."""
+    if not value:
+        return None
+    text_val = str(value).strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text_val, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+@app.get("/api/recruitment/submissions/{sub_id}/interviews")
+def list_interviews(sub_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    _get_submission_for_client(db, client.id, sub_id)
+    rows = db.query(models.DBInterview).filter(
+        models.DBInterview.submission_id == sub_id
+    ).order_by(models.DBInterview.scheduled_at.asc()).all()
+    return [interview_to_dict(r) for r in rows]
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/interviews")
+def schedule_interview(sub_id: int, request: Request, body: InterviewIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = _get_submission_for_client(db, client.id, sub_id)
+
+    when = _parse_datetime_minutes(body.scheduled_at)
+    if not when:
+        raise HTTPException(status_code=400, detail="Scheduled time must look like YYYY-MM-DD HH:MM")
+    mode = (body.mode or "video").strip().lower()
+    if mode not in INTERVIEW_MODES:
+        raise HTTPException(status_code=400, detail=f"Mode must be one of: {', '.join(INTERVIEW_MODES)}")
+    duration = int(body.duration_minutes or 45)
+    if duration < 5 or duration > 480:
+        raise HTTPException(status_code=400, detail="Duration must be between 5 and 480 minutes")
+
+    interviewer_name = (body.interviewer_name or "").strip()
+    if body.interviewer_id:
+        emp = db.query(models.DBEmployee).filter(
+            models.DBEmployee.id == body.interviewer_id,
+            models.DBEmployee.client_id == client.id,
+        ).first()
+        if not emp:
+            raise HTTPException(status_code=400, detail="Interviewer not found")
+        interviewer_name = interviewer_name or f"{emp.first_name} {emp.last_name}"
+        # Warn on a clash rather than silently double-booking someone.
+        window_start = (when - timedelta(minutes=duration)).strftime("%Y-%m-%d %H:%M")
+        window_end = (when + timedelta(minutes=duration)).strftime("%Y-%m-%d %H:%M")
+        clash = db.query(models.DBInterview).filter(
+            models.DBInterview.client_id == client.id,
+            models.DBInterview.interviewer_id == body.interviewer_id,
+            models.DBInterview.status == "scheduled",
+            models.DBInterview.scheduled_at > window_start,
+            models.DBInterview.scheduled_at < window_end,
+        ).first()
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{interviewer_name} already has an interview at {clash.scheduled_at}",
+            )
+
+    iv = models.DBInterview(
+        client_id=client.id, submission_id=sub_id,
+        round_name=body.round_name or "Interview",
+        scheduled_at=when.strftime("%Y-%m-%d %H:%M"),
+        duration_minutes=duration, mode=mode,
+        location=body.location or "", meeting_link=body.meeting_link or "",
+        interviewer_id=body.interviewer_id, interviewer_name=interviewer_name,
+    )
+    db.add(iv)
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub_id,
+        from_stage=sub.current_stage or "", to_stage=sub.current_stage or "",
+        actor="HR", note=f"{iv.round_name} scheduled for {iv.scheduled_at}",
+    ))
+    db.commit()
+    db.refresh(iv)
+    return interview_to_dict(iv)
+
+
+@app.put("/api/recruitment/interviews/{iv_id}")
+def update_interview(iv_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Record the outcome, reschedule, or cancel."""
+    client = get_client_user(request, db)
+    body = body or {}
+    iv = db.query(models.DBInterview).filter(
+        models.DBInterview.id == iv_id, models.DBInterview.client_id == client.id
+    ).first()
+    if not iv:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    if "status" in body:
+        status = (body["status"] or "").strip().lower()
+        if status not in INTERVIEW_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(INTERVIEW_STATUSES)}")
+        iv.status = status
+    if "outcome" in body:
+        outcome = (body["outcome"] or "").strip().lower()
+        if outcome not in INTERVIEW_OUTCOMES:
+            raise HTTPException(status_code=400, detail="Outcome must be pass, fail or hold")
+        iv.outcome = outcome
+    if "score" in body:
+        try:
+            score = int(body["score"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Score must be a whole number")
+        if score < 0 or score > 5:
+            raise HTTPException(status_code=400, detail="Score must be between 0 and 5")
+        iv.score = score
+    if "scheduled_at" in body and body["scheduled_at"]:
+        when = _parse_datetime_minutes(body["scheduled_at"])
+        if not when:
+            raise HTTPException(status_code=400, detail="Scheduled time must look like YYYY-MM-DD HH:MM")
+        iv.scheduled_at = when.strftime("%Y-%m-%d %H:%M")
+    for field in ("feedback", "meeting_link", "location", "round_name", "interviewer_name"):
+        if field in body and body[field] is not None:
+            setattr(iv, field, body[field])
+
+    if iv.outcome and iv.status == "scheduled":
+        iv.status = "completed"   # recording an outcome implies it happened
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=iv.submission_id,
+        from_stage="", to_stage="", actor="HR",
+        note=f"{iv.round_name}: {iv.status}" + (f" ({iv.outcome})" if iv.outcome else ""),
+    ))
+    db.commit()
+    return interview_to_dict(iv)
+
+
+@app.delete("/api/recruitment/interviews/{iv_id}")
+def delete_interview(iv_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    iv = db.query(models.DBInterview).filter(
+        models.DBInterview.id == iv_id, models.DBInterview.client_id == client.id
+    ).first()
+    if not iv:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    db.delete(iv)
+    db.commit()
+    return {"message": "Interview removed"}
+
+
+@app.get("/api/recruitment/interviews/upcoming")
+def upcoming_interviews(request: Request, days: int = 14, db: Session = Depends(get_db)):
+    """Everything scheduled in the next N days, for the recruiter's day view."""
+    client = get_client_user(request, db)
+    now = datetime.now()
+    horizon = (now + timedelta(days=max(1, min(days, 90)))).strftime("%Y-%m-%d %H:%M")
+    rows = db.query(models.DBInterview).filter(
+        models.DBInterview.client_id == client.id,
+        models.DBInterview.status == "scheduled",
+        models.DBInterview.scheduled_at >= now.strftime("%Y-%m-%d 00:00"),
+        models.DBInterview.scheduled_at <= horizon,
+    ).order_by(models.DBInterview.scheduled_at.asc()).all()
+    out = []
+    for iv in rows:
+        sub = db.query(models.DBFormSubmission).filter(
+            models.DBFormSubmission.id == iv.submission_id
+        ).first()
+        data = interview_to_dict(iv)
+        data["candidate_name"] = sub.candidate_name if sub else ""
+        data["candidate_email"] = sub.candidate_email if sub else ""
+        out.append(data)
+    return out
+
+
+# ============ OFFERS ============
+
+OFFER_STATUSES = ("draft", "sent", "accepted", "declined", "withdrawn")
+
+
+class OfferIn(BaseModel):
+    job_title: Optional[str] = ""
+    level: Optional[str] = ""
+    salary: Optional[float] = 0.0
+    start_date: Optional[str] = ""
+    expires_on: Optional[str] = ""
+    notes: Optional[str] = ""
+
+
+def offer_to_dict(o):
+    return {
+        "id": o.id, "submission_id": o.submission_id, "job_title": o.job_title,
+        "level": o.level, "salary": o.salary, "currency": o.currency,
+        "start_date": o.start_date, "expires_on": o.expires_on, "notes": o.notes,
+        "status": o.status, "sent_at": o.sent_at, "responded_at": o.responded_at,
+        "decline_reason": o.decline_reason, "created_at": o.created_at,
+    }
+
+
+@app.get("/api/recruitment/submissions/{sub_id}/offers")
+def list_offers(sub_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    _get_submission_for_client(db, client.id, sub_id)
+    rows = db.query(models.DBOffer).filter(
+        models.DBOffer.submission_id == sub_id
+    ).order_by(models.DBOffer.id.desc()).all()
+    return [offer_to_dict(o) for o in rows]
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/offers")
+def create_offer(sub_id: int, request: Request, body: OfferIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = _get_submission_for_client(db, client.id, sub_id)
+    live = db.query(models.DBOffer).filter(
+        models.DBOffer.submission_id == sub_id,
+        models.DBOffer.status.in_(["draft", "sent", "accepted"]),
+    ).first()
+    if live:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This candidate already has a {live.status} offer. Withdraw it before creating another.",
+        )
+    salary = float(body.salary or 0)
+    if salary < 0:
+        raise HTTPException(status_code=400, detail="Salary cannot be negative")
+    for label, value in (("Start date", body.start_date), ("Expiry date", body.expires_on)):
+        if value and not _parse_date(value):
+            raise HTTPException(status_code=400, detail=f"{label} must be in YYYY-MM-DD format")
+    start, expires = _parse_date(body.start_date), _parse_date(body.expires_on)
+    if start and expires and expires > start:
+        raise HTTPException(status_code=400, detail="The offer would expire after the start date")
+
+    offer = models.DBOffer(
+        client_id=client.id, submission_id=sub_id,
+        job_title=body.job_title or "", level=validate_level(body.level),
+        salary=money(salary), currency=client.currency or "",
+        start_date=body.start_date or "", expires_on=body.expires_on or "",
+        notes=body.notes or "", status="draft",
+    )
+    db.add(offer)
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub_id,
+        from_stage="", to_stage="", actor="HR",
+        note=f"Offer drafted at {money(salary):.2f}",
+    ))
+    db.commit()
+    db.refresh(offer)
+    return offer_to_dict(offer)
+
+
+@app.put("/api/recruitment/offers/{offer_id}")
+def update_offer(offer_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    body = body or {}
+    offer = db.query(models.DBOffer).filter(
+        models.DBOffer.id == offer_id, models.DBOffer.client_id == client.id
+    ).first()
+    if not offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+
+    if "status" in body:
+        status = (body["status"] or "").strip().lower()
+        if status not in OFFER_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(OFFER_STATUSES)}")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if status == "sent" and offer.status != "sent":
+            offer.sent_at = now
+        if status in ("accepted", "declined") and offer.status not in ("accepted", "declined"):
+            offer.responded_at = now
+        offer.status = status
+    if "decline_reason" in body:
+        offer.decline_reason = body["decline_reason"] or ""
+    for field in ("job_title", "start_date", "expires_on", "notes"):
+        if field in body and body[field] is not None:
+            setattr(offer, field, body[field])
+    if "salary" in body:
+        try:
+            offer.salary = money(float(body["salary"]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Salary must be a number")
+    if "level" in body:
+        offer.level = validate_level(body["level"])
+
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=offer.submission_id,
+        from_stage="", to_stage="", actor="HR",
+        note=f"Offer {offer.status}" + (f": {offer.decline_reason}" if offer.decline_reason else ""),
+    ))
+    log_audit(db, client.id, f"offer_{offer.status}", "offer", offer.id, offer.job_title, "", request)
+    db.commit()
+    return offer_to_dict(offer)
+
+
+# ============ REJECTION & CANDIDATE EMAIL ============
+
+class CandidateEmailIn(BaseModel):
+    template: Optional[str] = "custom"     # interview | offer | rejection | custom
+    subject: Optional[str] = ""
+    body: Optional[str] = ""
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/reject")
+def reject_candidate(sub_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    body = body or {}
+    sub = _get_submission_for_client(db, client.id, sub_id)
+    if sub.hired_employee_id:
+        raise HTTPException(status_code=409, detail="This candidate has already been hired")
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Please give a reason so the pipeline data stays useful")
+    sub.status = "rejected"
+    sub.rejected_reason = reason
+    sub.rejected_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub_id,
+        from_stage=sub.current_stage or "", to_stage="Rejected",
+        actor="HR", note=reason,
+    ))
+    log_audit(db, client.id, "candidate_rejected", "candidate", sub.id,
+              sub.candidate_name or sub.candidate_email, reason, request)
+    db.commit()
+    return {"message": "Candidate rejected", "status": sub.status}
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/reopen")
+def reopen_candidate(sub_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = _get_submission_for_client(db, client.id, sub_id)
+    sub.status = "new"
+    sub.rejected_reason = ""
+    sub.rejected_at = ""
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub_id,
+        from_stage="Rejected", to_stage=sub.current_stage or "Applied",
+        actor="HR", note="Application reopened",
+    ))
+    db.commit()
+    return {"message": "Candidate reopened"}
+
+
+def build_candidate_email(template, sub, client, job=None, interview=None, offer=None):
+    """Default wording for the three moments a candidate hears from you."""
+    company = client.company_name or "our team"
+    name = (sub.candidate_name or "there").split()[0] if sub.candidate_name else "there"
+    role = (job.title if job else "") or "the role"
+    if template == "interview" and interview:
+        subject = f"Interview invitation - {role} at {company}"
+        when = interview.scheduled_at or "a time we will confirm"
+        where = interview.meeting_link or interview.location or f"{interview.mode} call"
+        body = (
+            f"Hi {name},\n\n"
+            f"Thank you for applying for {role} at {company}. We would like to invite you to "
+            f"a {interview.round_name.lower()}.\n\n"
+            f"When: {when}\n"
+            f"Duration: {interview.duration_minutes} minutes\n"
+            f"Where: {where}\n\n"
+            f"If that time does not suit, reply to this email and we will rearrange.\n\n"
+            f"Best regards,\n{company}"
+        )
+    elif template == "offer" and offer:
+        subject = f"Offer of employment - {offer.job_title or role} at {company}"
+        sym = currency_symbol(offer.currency or client.currency or "GBP")
+        body = (
+            f"Hi {name},\n\n"
+            f"We are delighted to offer you the position of {offer.job_title or role} at {company}.\n\n"
+            f"Salary: {sym}{offer.salary:,.2f}\n"
+            f"Start date: {offer.start_date or 'to be agreed'}\n"
+            + (f"This offer is open until {offer.expires_on}.\n" if offer.expires_on else "")
+            + (f"\n{offer.notes}\n" if offer.notes else "")
+            + f"\nPlease reply to confirm whether you would like to accept.\n\n"
+            f"Best regards,\n{company}"
+        )
+    elif template == "rejection":
+        subject = f"Your application for {role} at {company}"
+        body = (
+            f"Hi {name},\n\n"
+            f"Thank you for taking the time to apply for {role} at {company} and for talking with us.\n\n"
+            f"On this occasion we have decided to progress other candidates. It was a competitive "
+            f"process and this is not a reflection of your ability.\n\n"
+            f"We will keep your details on file and would welcome an application from you in future.\n\n"
+            f"Best regards,\n{company}"
+        )
+    else:
+        subject = f"An update on your application - {company}"
+        body = f"Hi {name},\n\nWe wanted to give you an update on your application.\n\nBest regards,\n{company}"
+    return subject, body
+
+
+@app.get("/api/recruitment/submissions/{sub_id}/email-preview")
+def preview_candidate_email(sub_id: int, request: Request, template: str = "custom", db: Session = Depends(get_db)):
+    """Let the recruiter read and edit the wording before anything is sent."""
+    client = get_client_user(request, db)
+    sub = _get_submission_for_client(db, client.id, sub_id)
+    form = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.id == sub.form_id).first()
+    job = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.id == form.job_id
+    ).first() if form and form.job_id else None
+    interview = db.query(models.DBInterview).filter(
+        models.DBInterview.submission_id == sub_id, models.DBInterview.status == "scheduled"
+    ).order_by(models.DBInterview.scheduled_at.asc()).first()
+    offer = db.query(models.DBOffer).filter(
+        models.DBOffer.submission_id == sub_id
+    ).order_by(models.DBOffer.id.desc()).first()
+    subject, body = build_candidate_email(template, sub, client, job, interview, offer)
+    return {"to": sub.candidate_email or "", "subject": subject, "body": body}
+
+
+@app.post("/api/recruitment/submissions/{sub_id}/email")
+def email_candidate(sub_id: int, request: Request, background_tasks: BackgroundTasks,
+                    body: CandidateEmailIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    sub = _get_submission_for_client(db, client.id, sub_id)
+    if not sub.candidate_email:
+        raise HTTPException(status_code=400, detail="This candidate has no email address on file")
+    if not validate_email_address(sub.candidate_email):
+        raise HTTPException(status_code=400, detail=f"'{sub.candidate_email}' is not a valid email address")
+
+    subject = (body.subject or "").strip()
+    text_body = (body.body or "").strip()
+    if not subject or not text_body:
+        form = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.id == sub.form_id).first()
+        job = db.query(models.DBJobRequisition).filter(
+            models.DBJobRequisition.id == form.job_id
+        ).first() if form and form.job_id else None
+        interview = db.query(models.DBInterview).filter(
+            models.DBInterview.submission_id == sub_id, models.DBInterview.status == "scheduled"
+        ).order_by(models.DBInterview.scheduled_at.asc()).first()
+        offer = db.query(models.DBOffer).filter(
+            models.DBOffer.submission_id == sub_id
+        ).order_by(models.DBOffer.id.desc()).first()
+        default_subject, default_body = build_candidate_email(
+            body.template or "custom", sub, client, job, interview, offer
+        )
+        subject = subject or default_subject
+        text_body = text_body or default_body
+
+    from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+    company = client.company_name or "Recruitment"
+    html_body = (
+        '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;line-height:1.6;'
+        'max-width:600px;margin:0 auto;padding:24px;">'
+        + "".join(f"<p>{esc(p)}</p>" for p in text_body.split("\n\n") if p.strip())
+        + "</div>"
+    )
+    background_tasks.add_task(
+        send_email_background, sub.candidate_email, subject, text_body,
+        f"{company} <{from_email}>", html_body, None, "attachment.pdf", "", client.id,
+    )
+    db.add(models.DBSubmissionEvent(
+        client_id=client.id, submission_id=sub_id,
+        from_stage="", to_stage="", actor="HR",
+        note=f"Email sent: {subject}",
+    ))
+    log_audit(db, client.id, "candidate_emailed", "candidate", sub.id,
+              sub.candidate_name or sub.candidate_email, subject, request)
+    db.commit()
+    return {"message": f"Email queued to {sub.candidate_email}", "subject": subject}
+
+
+# ============ ANALYTICS & TALENT POOL ============
+
+@app.get("/api/recruitment/analytics")
+def recruitment_analytics(request: Request, job_id: int = 0, db: Session = Depends(get_db)):
+    """Funnel, time-to-hire and offer acceptance - the numbers a head of talent
+    is asked for."""
+    client = get_client_user(request, db)
+    form_query = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.client_id == client.id)
+    if job_id:
+        form_query = form_query.filter(models.DBRecruitmentForm.job_id == job_id)
+    forms = form_query.all()
+    form_ids = [f.id for f in forms]
+
+    subs = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.client_id == client.id,
+        models.DBFormSubmission.form_id.in_(form_ids or [0]),
+    ).all()
+
+    stage_counts = defaultdict(int)
+    source_counts = defaultdict(int)
+    for s in subs:
+        stage_counts[s.current_stage or "Applied"] += 1
+        source_counts[s.source or "direct"] += 1
+
+    hired = [s for s in subs if s.hired_employee_id]
+    rejected = [s for s in subs if s.status == "rejected"]
+
+    # Time to hire, measured from application to the hire event.
+    durations = []
+    for s in hired:
+        applied = _parse_date((s.created_at or "")[:10])
+        hired_on = _parse_date((getattr(s, "hired_at", "") or "")[:10])
+        if not hired_on:
+            # Records created before hired_at existed fall back to the event log.
+            event = db.query(models.DBSubmissionEvent).filter(
+                models.DBSubmissionEvent.submission_id == s.id,
+                models.DBSubmissionEvent.to_stage == "Hired",
+            ).order_by(models.DBSubmissionEvent.id.desc()).first()
+            hired_on = _parse_date((event.created_at or "")[:10]) if event else None
+        if applied and hired_on and hired_on >= applied:
+            durations.append((hired_on - applied).days)
+
+    offers = db.query(models.DBOffer).filter(models.DBOffer.client_id == client.id).all()
+    if job_id:
+        sub_ids = {s.id for s in subs}
+        offers = [o for o in offers if o.submission_id in sub_ids]
+    sent_offers = [o for o in offers if o.status in ("sent", "accepted", "declined")]
+    accepted = [o for o in offers if o.status == "accepted"]
+
+    interviews = db.query(models.DBInterview).filter(models.DBInterview.client_id == client.id).all()
+    if job_id:
+        sub_ids = {s.id for s in subs}
+        interviews = [i for i in interviews if i.submission_id in sub_ids]
+
+    total = len(subs)
+    return {
+        "total_applicants": total,
+        "by_stage": dict(stage_counts),
+        "by_source": dict(source_counts),
+        "hired": len(hired),
+        "rejected": len(rejected),
+        "in_progress": total - len(hired) - len(rejected),
+        "interviews_scheduled": sum(1 for i in interviews if i.status == "scheduled"),
+        "interviews_completed": sum(1 for i in interviews if i.status == "completed"),
+        "offers_sent": len(sent_offers),
+        "offers_accepted": len(accepted),
+        "offer_acceptance_rate": round(len(accepted) / len(sent_offers) * 100, 1) if sent_offers else 0.0,
+        "conversion_rate": round(len(hired) / total * 100, 1) if total else 0.0,
+        "avg_days_to_hire": round(sum(durations) / len(durations), 1) if durations else 0.0,
+        "open_jobs": db.query(models.DBJobRequisition).filter(
+            models.DBJobRequisition.client_id == client.id,
+            models.DBJobRequisition.status == "open",
+        ).count(),
+    }
+
+
+@app.get("/api/recruitment/talent-pool")
+def talent_pool(request: Request, q: str = "", stage: str = "", limit: int = 100,
+                db: Session = Depends(get_db)):
+    """Every candidate across every job, so a strong applicant for one role can
+    be found again for another."""
+    client = get_client_user(request, db)
+    query = db.query(models.DBFormSubmission).filter(models.DBFormSubmission.client_id == client.id)
+    if stage:
+        query = query.filter(models.DBFormSubmission.current_stage == stage)
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.filter(or_(
+            models.DBFormSubmission.candidate_name.ilike(like),
+            models.DBFormSubmission.candidate_email.ilike(like),
+            models.DBFormSubmission.answers.ilike(like),
+        ))
+    rows = query.order_by(models.DBFormSubmission.id.desc()).limit(max(1, min(limit, 500))).all()
+
+    form_titles = {
+        f.id: f.title for f in db.query(models.DBRecruitmentForm).filter(
+            models.DBRecruitmentForm.client_id == client.id
+        ).all()
+    }
+    # Flag people who have applied more than once so a recruiter sees the
+    # history instead of treating each application as a new person.
+    email_counts = defaultdict(int)
+    for r in db.query(models.DBFormSubmission.candidate_email).filter(
+        models.DBFormSubmission.client_id == client.id
+    ).all():
+        if r.candidate_email:
+            email_counts[r.candidate_email.lower()] += 1
+
+    return [{
+        "id": s.id, "candidate_name": s.candidate_name, "candidate_email": s.candidate_email,
+        "candidate_phone": getattr(s, "candidate_phone", "") or "",
+        "form_id": s.form_id, "form_title": form_titles.get(s.form_id, ""),
+        "current_stage": s.current_stage, "status": s.status,
+        "rating": getattr(s, "rating", 0) or 0,
+        "applications": email_counts.get((s.candidate_email or "").lower(), 1),
+        "hired_employee_id": getattr(s, "hired_employee_id", None),
+        "created_at": s.created_at,
+    } for s in rows]
+
 # ============ RECRUITMENT ============
 
 class RecruitmentFormCreate(BaseModel):
     title: str
     description: Optional[str] = ""
     fields: Optional[str] = "[]"
+    job_id: Optional[int] = None
     pipeline_stages: Optional[str] = '["Applied","Screening","Interview","Offer","Hired"]'
 
 class CandidateDocumentIn(BaseModel):
@@ -4487,6 +5372,7 @@ def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
             "id": f.id, "title": f.title, "description": f.description,
             "fields": f.fields, "is_active": f.is_active,
             "form_token": f.form_token, "pipeline_stages": f.pipeline_stages,
+            "job_id": f.job_id, "job_title": f.job.title if f.job else "",
             "created_at": f.created_at, "submission_count": sub_count,
             "hired_count": hired_count, "pipeline_count": pipeline_count
         })
@@ -4495,14 +5381,21 @@ def list_recruitment_forms(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/recruitment/forms")
 def create_recruitment_form(request: Request, body: RecruitmentFormCreate, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    if body.job_id:
+        job = db.query(models.DBJobRequisition).filter(
+            models.DBJobRequisition.id == body.job_id,
+            models.DBJobRequisition.client_id == client.id,
+        ).first()
+        if not job:
+            raise HTTPException(status_code=400, detail="Job not found")
     form = models.DBRecruitmentForm(
         client_id=client.id, title=body.title, description=body.description, fields=body.fields,
-        pipeline_stages=body.pipeline_stages,
+        pipeline_stages=body.pipeline_stages, job_id=body.job_id,
     )
     db.add(form)
     db.commit()
     db.refresh(form)
-    return {"id": form.id, "form_token": form.form_token, "message": "Form created"}
+    return {"id": form.id, "form_token": form.form_token, "job_id": form.job_id, "message": "Form created"}
 
 @app.put("/api/recruitment/forms/{form_id}")
 def update_recruitment_form(form_id: int, request: Request, body: dict, db: Session = Depends(get_db)):
@@ -4534,12 +5427,9 @@ def delete_recruitment_form(form_id: int, request: Request, db: Session = Depend
         models.DBFormSubmission.form_id == form_id
     ).all()]
     if sub_ids:
-        db.query(models.DBCandidateDocument).filter(
-            models.DBCandidateDocument.submission_id.in_(sub_ids)
-        ).delete(synchronize_session=False)
-        db.query(models.DBSubmissionEvent).filter(
-            models.DBSubmissionEvent.submission_id.in_(sub_ids)
-        ).delete(synchronize_session=False)
+        for model in (models.DBCandidateDocument, models.DBSubmissionEvent,
+                      models.DBInterview, models.DBOffer):
+            db.query(model).filter(model.submission_id.in_(sub_ids)).delete(synchronize_session=False)
     db.query(models.DBFormSubmission).filter(models.DBFormSubmission.form_id == form_id).delete()
     log_audit(db, client.id, "recruitment_form_deleted", "form", form.id, form.title,
               f"{len(sub_ids)} application(s) removed", request)
@@ -4567,7 +5457,7 @@ def list_form_submissions(form_id: int, request: Request, db: Session = Depends(
         .group_by(models.DBCandidateDocument.submission_id).all()
     )
     return [{
-        "id": s.id, "answers": s.answers, "file_name": s.file_name,
+        "id": s.id, "form_id": s.form_id, "answers": s.answers, "file_name": s.file_name,
         "file_type": s.file_type,
         "has_resume": bool(s.file_data) or doc_counts.get(s.id, 0) > 0,
         "document_count": doc_counts.get(s.id, 0) or (1 if s.file_data else 0),
@@ -4577,6 +5467,8 @@ def list_form_submissions(form_id: int, request: Request, db: Session = Depends(
         "status": s.status,
         "rating": getattr(s, 'rating', 0) or 0,
         "hired_employee_id": getattr(s, 'hired_employee_id', None),
+        "source": getattr(s, 'source', 'direct') or 'direct',
+        "rejected_reason": getattr(s, 'rejected_reason', '') or '',
         "current_stage": getattr(s, 'current_stage', 'Applied'),
         "stage_order": getattr(s, 'stage_order', 0),
         "notes": s.notes, "created_at": s.created_at,
@@ -4779,6 +5671,11 @@ def hire_candidate(sub_id: int, request: Request, body: dict = None, db: Session
         raise HTTPException(status_code=404, detail="Submission not found")
     if sub.hired_employee_id:
         raise HTTPException(status_code=409, detail="This candidate has already been converted to an employee")
+    if sub.status == "rejected":
+        raise HTTPException(
+            status_code=409,
+            detail="This candidate was rejected. Reopen the application before hiring them.",
+        )
 
     email = (body.get("email") or sub.candidate_email or "").strip()
     if not email or not validate_email_address(email):
@@ -4829,6 +5726,13 @@ def hire_candidate(sub_id: int, request: Request, body: dict = None, db: Session
 
     sub.hired_employee_id = emp.id
     sub.status = "hired"
+    sub.hired_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    form = db.query(models.DBRecruitmentForm).filter(models.DBRecruitmentForm.id == sub.form_id).first()
+    try:
+        stages = json.loads(form.pipeline_stages or "[]") if form else []
+    except (ValueError, TypeError):
+        stages = []
+    sub.current_stage = stages[-1] if stages else "Hired"
     db.add(models.DBSubmissionEvent(
         client_id=client.id, submission_id=sub.id,
         from_stage=sub.current_stage or "", to_stage="Hired",

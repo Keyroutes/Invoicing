@@ -4099,7 +4099,11 @@ showView = function(viewId) {
     if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
-    if (viewId === 'recruitment-view') loadRecruitmentForms();
+    if (viewId === 'recruitment-view') {
+        loadRecAnalytics();
+        var jobsTab = document.querySelector('#rec-tabs .tab');
+        switchRecTab('jobs', jobsTab);
+    }
     if (viewId === 'bills-view') loadBills();
     if (viewId === 'contacts-view') loadContacts();
 };
@@ -4774,7 +4778,20 @@ async function showRecSubmissionDetail(subId) {
         document.getElementById('rec-detail-stage').innerHTML = buildStageMoveHtml(sub.id, stage);
         renderCandidateRating(sub.rating || 0);
         await renderCandidateDocuments(subId);
+        await renderCandidateInterviews(subId);
+        await renderCandidateOffers(subId);
         await renderCandidateHistory(subId);
+        // Reject and reopen are mutually exclusive.
+        var rejected = sub.status === 'rejected';
+        var rejectBtn = document.getElementById('rec-reject-btn');
+        var reopenBtn = document.getElementById('rec-reopen-btn');
+        var rejectNote = document.getElementById('rec-reject-note');
+        if (rejectBtn) rejectBtn.style.display = rejected ? 'none' : 'inline-flex';
+        if (reopenBtn) reopenBtn.style.display = rejected ? 'inline-flex' : 'none';
+        if (rejectNote) {
+            rejectNote.style.display = rejected ? 'block' : 'none';
+            rejectNote.textContent = rejected ? 'Rejected: ' + (sub.rejected_reason || 'no reason recorded') : '';
+        }
         var hireBtn = document.getElementById('rec-hire-btn');
         if (hireBtn) hireBtn.style.display = sub.hired_employee_id ? 'none' : 'inline-flex';
         var hiredNote = document.getElementById('rec-hired-note');
@@ -6185,3 +6202,541 @@ function saveLegalSettings() {
         showToast('Failed to save legal settings', 'error');
     });
 }
+
+// ==========================================================================
+// APPLICANT TRACKING — jobs, interviews, offers, candidate email, analytics
+// ==========================================================================
+
+var _recJobs = [];
+var _recTab = 'jobs';
+var _recBoardClientId = null;
+
+function switchRecTab(tab, btn) {
+    _recTab = tab;
+    document.querySelectorAll('#rec-tabs .tab').forEach(function (t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    var panels = {
+        jobs: 'rec-jobs-panel', forms: 'rec-forms-list',
+        pool: 'rec-pool-panel', interviews: 'rec-interviews-panel'
+    };
+    Object.keys(panels).forEach(function (k) {
+        var el = document.getElementById(panels[k]);
+        if (el) el.style.display = (k === tab) ? 'block' : 'none';
+    });
+    // The candidate drill-downs belong to the Forms tab only.
+    ['rec-submissions-list', 'rec-sub-detail'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+    if (tab === 'jobs') loadJobs();
+    if (tab === 'forms') loadRecruitmentForms();
+    if (tab === 'pool') loadTalentPool();
+    if (tab === 'interviews') loadUpcomingInterviews();
+}
+window.switchRecTab = switchRecTab;
+
+// --- Analytics -------------------------------------------------------------
+async function loadRecAnalytics() {
+    var host = document.getElementById('rec-analytics-cards');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/recruitment/analytics');
+        if (!res.ok) return;
+        var a = await res.json();
+        var cards = [
+            ['Open Roles', a.open_jobs, 'var(--primary-color)'],
+            ['Candidates', a.total_applicants, ''],
+            ['In Pipeline', a.in_progress, 'var(--warning-color)'],
+            ['Hired', a.hired, 'var(--success-color)']
+        ];
+        host.innerHTML = cards.map(function (c) {
+            return '<div class="stat-card is-centered" style="cursor:default;">' +
+                   '<span class="stat-value lg"' + (c[2] ? ' style="color:' + c[2] + ';"' : '') + '>' + c[1] + '</span>' +
+                   '<span class="stat-label">' + c[0] + '</span></div>';
+        }).join('');
+        // Second line of detail that only matters once there is data.
+        if (a.total_applicants) {
+            host.insertAdjacentHTML('beforeend',
+                '<div style="grid-column:1/-1;display:flex;gap:20px;flex-wrap:wrap;font-size:0.82rem;' +
+                'color:var(--text-secondary);padding:4px 2px;">' +
+                '<span>Conversion <strong style="color:var(--text-primary);">' + a.conversion_rate + '%</strong></span>' +
+                '<span>Offer acceptance <strong style="color:var(--text-primary);">' + a.offer_acceptance_rate + '%</strong></span>' +
+                '<span>Avg days to hire <strong style="color:var(--text-primary);">' + a.avg_days_to_hire + '</strong></span>' +
+                '<span>Interviews booked <strong style="color:var(--text-primary);">' + a.interviews_scheduled + '</strong></span>' +
+                '</div>');
+        }
+    } catch (e) { /* the snapshot is optional; never block the page */ }
+}
+window.loadRecAnalytics = loadRecAnalytics;
+
+// --- Jobs ------------------------------------------------------------------
+async function loadJobs() {
+    var tbody = document.getElementById('rec-jobs-tbody');
+    if (!tbody) return;
+    try {
+        var res = await fetch('/api/recruitment/jobs');
+        _recJobs = res.ok ? await res.json() : [];
+    } catch (e) { _recJobs = []; }
+
+    // The public board is keyed by tenant id, which the session endpoint knows.
+    var link = document.getElementById('rec-board-link');
+    if (link) {
+        if (_recBoardClientId) {
+            link.href = '/jobs.html?c=' + _recBoardClientId;
+        } else {
+            try {
+                var me = await (await fetch('/api/client/me')).json();
+                if (me && me.id) {
+                    _recBoardClientId = me.id;
+                    link.href = '/jobs.html?c=' + me.id;
+                }
+            } catch (e) { /* link stays inert rather than pointing somewhere wrong */ }
+        }
+    }
+
+    if (!_recJobs.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">' +
+                          'No jobs yet. Create one to start tracking a role.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = _recJobs.map(function (j) {
+        var pill = '<span class="status-pill status-' + esc(j.status) + '" style="text-transform:capitalize;">' +
+                   esc(String(j.status).replace('_', ' ')) + '</span>';
+        return '<tr>' +
+            '<td>' + esc(j.reference) + '</td>' +
+            '<td><strong>' + esc(j.title) + '</strong>' + levelBadge(j.level) +
+                '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' +
+                esc(String(j.work_mode).replace('_', ' ')) + ' &middot; ' + esc(String(j.employment_type).replace('_', ' ')) + '</span></td>' +
+            '<td>' + esc(j.department_name || '-') + '</td>' +
+            '<td>' + esc(j.location || '-') + '</td>' +
+            '<td>' + esc(j.hiring_manager_name || '-') + '</td>' +
+            '<td class="text-right">' + (j.applicant_count || 0) +
+                '<span style="color:var(--text-secondary);font-size:0.75rem;"> / ' + (j.openings || 1) + ' open</span></td>' +
+            '<td>' + pill + '</td>' +
+            '<td class="text-right">' +
+                '<button class="btn btn-outline btn-sm" onclick="openJobModal(' + j.id + ')">Edit</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="deleteJob(' + j.id + ')" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>' +
+            '</td></tr>';
+    }).join('');
+}
+window.loadJobs = loadJobs;
+
+async function openJobModal(jobId) {
+    var modal = document.getElementById('job-modal');
+    if (!modal) return;
+    document.getElementById('job-modal-title').textContent = jobId ? 'Edit Job' : 'New Job';
+    document.getElementById('job-id').value = jobId || '';
+
+    // Populate the pickers before filling values, or the selects have no options.
+    try {
+        var depts = await (await fetch('/api/departments')).json();
+        var deptSel = document.getElementById('job-department');
+        deptSel.innerHTML = '<option value="">None</option>';
+        depts.forEach(function (d) { deptSel.insertAdjacentHTML('beforeend', '<option value="' + d.id + '">' + esc(d.name) + '</option>'); });
+        var emps = await (await fetch('/api/employees')).json();
+        var mgrSel = document.getElementById('job-manager');
+        mgrSel.innerHTML = '<option value="">None</option>';
+        emps.forEach(function (e) { mgrSel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name + ' ' + e.last_name) + '</option>'); });
+    } catch (e) { /* pickers stay empty rather than blocking the modal */ }
+    await populateLevelRoleSelects('job-level', null);
+
+    var job = jobId ? _recJobs.filter(function (j) { return j.id === jobId; })[0] : null;
+    function set(id, val) { var el = document.getElementById(id); if (el) el.value = val; }
+    set('job-title', job ? job.title : '');
+    set('job-location', job ? job.location : '');
+    set('job-department', job && job.department_id ? job.department_id : '');
+    set('job-manager', job && job.hiring_manager_id ? job.hiring_manager_id : '');
+    set('job-mode', job ? job.work_mode : 'onsite');
+    set('job-type', job ? job.employment_type : 'full_time');
+    set('job-level', job ? job.level : '');
+    set('job-openings', job ? job.openings : 1);
+    set('job-salary-min', job ? job.salary_min : 0);
+    set('job-salary-max', job ? job.salary_max : 0);
+    set('job-closing', job ? job.closing_date : '');
+    set('job-status', job ? job.status : 'draft');
+    set('job-description', job ? job.description : '');
+    set('job-requirements', job ? job.requirements : '');
+    document.getElementById('job-show-salary').checked = job ? !!job.show_salary : true;
+    modal.style.display = 'flex';
+}
+window.openJobModal = openJobModal;
+
+function closeJobModal() {
+    var m = document.getElementById('job-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeJobModal = closeJobModal;
+
+async function saveJob() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    var jobId = val('job-id');
+    var payload = {
+        title: val('job-title').trim(),
+        location: val('job-location'),
+        department_id: val('job-department') ? parseInt(val('job-department')) : null,
+        hiring_manager_id: val('job-manager') ? parseInt(val('job-manager')) : null,
+        work_mode: val('job-mode'),
+        employment_type: val('job-type'),
+        level: val('job-level'),
+        openings: parseInt(val('job-openings')) || 1,
+        salary_min: parseFloat(val('job-salary-min')) || 0,
+        salary_max: parseFloat(val('job-salary-max')) || 0,
+        closing_date: val('job-closing'),
+        status: val('job-status'),
+        description: val('job-description'),
+        requirements: val('job-requirements'),
+        show_salary: document.getElementById('job-show-salary').checked
+    };
+    if (!payload.title) { showToast('A job title is required', 'error'); return; }
+    try {
+        var res = await fetch('/api/recruitment/jobs' + (jobId ? '/' + jobId : ''), {
+            method: jobId ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast(jobId ? 'Job updated' : 'Job created: ' + data.reference, 'success');
+        closeJobModal();
+        loadJobs();
+        loadRecAnalytics();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.saveJob = saveJob;
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this job?')) return;
+    try {
+        var res = await fetch('/api/recruitment/jobs/' + jobId, { method: 'DELETE' });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Job deleted', 'success');
+        loadJobs();
+        loadRecAnalytics();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+window.deleteJob = deleteJob;
+
+// --- Talent pool -----------------------------------------------------------
+async function loadTalentPool() {
+    var tbody = document.getElementById('rec-pool-tbody');
+    if (!tbody) return;
+    var q = (document.getElementById('rec-pool-search') || {}).value || '';
+    try {
+        var res = await fetch('/api/recruitment/talent-pool?q=' + encodeURIComponent(q));
+        var rows = res.ok ? await res.json() : [];
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-secondary);">No candidates found.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(function (c) {
+            var stars = c.rating ? '★'.repeat(c.rating) : '-';
+            var statusColor = c.hired_employee_id ? 'var(--success-color)'
+                            : (c.status === 'rejected' ? 'var(--danger-color)' : 'var(--text-secondary)');
+            return '<tr>' +
+                '<td><strong>' + esc(c.candidate_name || 'Unnamed') + '</strong><br>' +
+                    '<span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(c.candidate_email || '') + '</span></td>' +
+                '<td>' + esc(c.form_title || '-') + '</td>' +
+                '<td>' + esc(c.current_stage || '-') + '</td>' +
+                '<td><span style="color:' + statusColor + ';text-transform:capitalize;">' + esc(c.status) + '</span></td>' +
+                '<td class="text-right" style="color:var(--warning-color);">' + stars + '</td>' +
+                '<td class="text-right">' + (c.applications > 1
+                    ? '<span title="Has applied more than once" style="color:var(--primary-color);font-weight:700;">' + c.applications + '</span>'
+                    : c.applications) + '</td>' +
+                '</tr>';
+        }).join('');
+    } catch (e) { tbody.innerHTML = '<tr><td colspan="6" class="loading">Failed to load</td></tr>'; }
+}
+window.loadTalentPool = loadTalentPool;
+
+// --- Upcoming interviews ---------------------------------------------------
+async function loadUpcomingInterviews() {
+    var host = document.getElementById('rec-upcoming-list');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/recruitment/interviews/upcoming?days=30');
+        var rows = res.ok ? await res.json() : [];
+        host.innerHTML = rows.length ? rows.map(function (i) {
+            return '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:12px 0;border-bottom:1px solid var(--border-color);">' +
+                '<div style="min-width:130px;font-weight:700;">' + esc(i.scheduled_at) + '</div>' +
+                '<div style="flex:1;min-width:160px;">' + esc(i.candidate_name || 'Candidate') +
+                    '<span style="color:var(--text-secondary);"> &middot; ' + esc(i.round_name) + '</span></div>' +
+                '<div style="color:var(--text-secondary);font-size:0.82rem;">' + esc(i.mode) +
+                    (i.interviewer_name ? ' with ' + esc(i.interviewer_name) : '') + '</div>' +
+                (i.meeting_link ? '<a class="link" href="' + esc(i.meeting_link) + '" target="_blank" rel="noopener">Join</a>' : '') +
+                '</div>';
+        }).join('') : '<p style="color:var(--text-secondary);font-size:0.88rem;">Nothing scheduled in the next 30 days.</p>';
+    } catch (e) { host.innerHTML = ''; }
+}
+window.loadUpcomingInterviews = loadUpcomingInterviews;
+
+// --- Interviews on a candidate --------------------------------------------
+async function renderCandidateInterviews(subId) {
+    var host = document.getElementById('rec-interview-list');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + subId + '/interviews');
+        var rows = res.ok ? await res.json() : [];
+        host.innerHTML = rows.length ? rows.map(function (i) {
+            var outcomeColor = i.outcome === 'pass' ? 'var(--success-color)'
+                             : i.outcome === 'fail' ? 'var(--danger-color)' : 'var(--warning-color)';
+            return '<div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;">' +
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+                    '<strong>' + esc(i.round_name) + '</strong>' +
+                    '<span style="color:var(--text-secondary);font-size:0.82rem;">' + esc(i.scheduled_at) + ' &middot; ' + esc(i.mode) + '</span>' +
+                    '<span style="margin-left:auto;font-size:0.75rem;text-transform:capitalize;color:var(--text-secondary);">' + esc(i.status) + '</span>' +
+                '</div>' +
+                (i.interviewer_name ? '<div style="font-size:0.78rem;color:var(--text-secondary);">with ' + esc(i.interviewer_name) + '</div>' : '') +
+                (i.outcome ? '<div style="font-size:0.8rem;color:' + outcomeColor + ';text-transform:capitalize;">' +
+                    esc(i.outcome) + (i.score ? ' · ' + i.score + '/5' : '') + '</div>' : '') +
+                (i.feedback ? '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">' + esc(i.feedback) + '</div>' : '') +
+                '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
+                    '<button class="btn btn-outline btn-sm" onclick="recordInterviewOutcome(' + i.id + ')">Record Outcome</button>' +
+                    '<button class="btn btn-outline btn-sm" onclick="deleteInterview(' + i.id + ')" style="color:var(--danger-color);border-color:var(--danger-color);">Remove</button>' +
+                '</div></div>';
+        }).join('') : '<p style="color:var(--text-secondary);font-size:0.85rem;">No interviews scheduled.</p>';
+    } catch (e) { host.innerHTML = ''; }
+}
+window.renderCandidateInterviews = renderCandidateInterviews;
+
+async function openInterviewModal() {
+    if (!recCurrentSubId) return;
+    var modal = document.getElementById('interview-modal');
+    if (!modal) return;
+    try {
+        var emps = await (await fetch('/api/employees')).json();
+        var sel = document.getElementById('iv-interviewer');
+        sel.innerHTML = '<option value="">Unassigned</option>';
+        emps.forEach(function (e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name + ' ' + e.last_name) + '</option>'); });
+    } catch (e) { /* unassigned is a valid choice */ }
+    modal.style.display = 'flex';
+}
+window.openInterviewModal = openInterviewModal;
+
+function closeInterviewModal() {
+    var m = document.getElementById('interview-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeInterviewModal = closeInterviewModal;
+
+async function saveInterview() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    if (!val('iv-when')) { showToast('Pick a date and time', 'error'); return; }
+    var payload = {
+        round_name: val('iv-round') || 'Interview',
+        scheduled_at: val('iv-when'),          // datetime-local; the API accepts the T form
+        duration_minutes: parseInt(val('iv-duration')) || 45,
+        mode: val('iv-mode'),
+        meeting_link: val('iv-link'),
+        location: val('iv-location'),
+        interviewer_id: val('iv-interviewer') ? parseInt(val('iv-interviewer')) : null
+    };
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/interviews', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Interview scheduled', 'success');
+        closeInterviewModal();
+        renderCandidateInterviews(recCurrentSubId);
+        renderCandidateHistory(recCurrentSubId);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.saveInterview = saveInterview;
+
+async function recordInterviewOutcome(ivId) {
+    var outcome = prompt('Outcome — pass, fail or hold:', 'pass');
+    if (outcome === null) return;
+    var score = prompt('Score out of 5:', '3');
+    if (score === null) return;
+    var feedback = prompt('Feedback (optional):', '') || '';
+    try {
+        var res = await fetch('/api/recruitment/interviews/' + ivId, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ outcome: outcome.trim().toLowerCase(), score: parseInt(score) || 0, feedback: feedback })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Outcome recorded', 'success');
+        renderCandidateInterviews(recCurrentSubId);
+        renderCandidateHistory(recCurrentSubId);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.recordInterviewOutcome = recordInterviewOutcome;
+
+async function deleteInterview(ivId) {
+    if (!confirm('Remove this interview?')) return;
+    try {
+        await fetch('/api/recruitment/interviews/' + ivId, { method: 'DELETE' });
+        renderCandidateInterviews(recCurrentSubId);
+    } catch (e) { showToast('Failed', 'error'); }
+}
+window.deleteInterview = deleteInterview;
+
+// --- Offers ----------------------------------------------------------------
+async function renderCandidateOffers(subId) {
+    var host = document.getElementById('rec-offer-list');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + subId + '/offers');
+        var rows = res.ok ? await res.json() : [];
+        var sym = getCurrencySymbol();
+        host.innerHTML = rows.length ? rows.map(function (o) {
+            var color = o.status === 'accepted' ? 'var(--success-color)'
+                      : o.status === 'declined' ? 'var(--danger-color)' : 'var(--warning-color)';
+            var actions = '';
+            if (o.status === 'draft') actions = '<button class="btn btn-outline btn-sm" onclick="setOfferStatus(' + o.id + ',\'sent\')">Mark Sent</button>';
+            else if (o.status === 'sent') actions =
+                '<button class="btn btn-outline btn-sm" onclick="setOfferStatus(' + o.id + ',\'accepted\')" style="color:var(--success-color);border-color:var(--success-color);">Accepted</button> ' +
+                '<button class="btn btn-outline btn-sm" onclick="setOfferStatus(' + o.id + ',\'declined\')" style="color:var(--danger-color);border-color:var(--danger-color);">Declined</button>';
+            if (o.status !== 'withdrawn' && o.status !== 'accepted') {
+                actions += ' <button class="btn btn-outline btn-sm" onclick="setOfferStatus(' + o.id + ',\'withdrawn\')">Withdraw</button>';
+            }
+            return '<div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px;">' +
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+                    '<strong>' + esc(o.job_title || 'Offer') + '</strong>' + levelBadge(o.level) +
+                    '<span style="margin-left:auto;text-transform:capitalize;color:' + color + ';font-weight:600;">' + esc(o.status) + '</span>' +
+                '</div>' +
+                '<div style="font-size:0.85rem;margin-top:4px;">' + sym +
+                    Number(o.salary || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+                    (o.start_date ? ' &middot; starts ' + esc(o.start_date) : '') +
+                    (o.expires_on ? ' &middot; expires ' + esc(o.expires_on) : '') + '</div>' +
+                (o.notes ? '<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:4px;">' + esc(o.notes) + '</div>' : '') +
+                (actions ? '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' + actions + '</div>' : '') +
+                '</div>';
+        }).join('') : '<p style="color:var(--text-secondary);font-size:0.85rem;">No offer yet.</p>';
+    } catch (e) { host.innerHTML = ''; }
+}
+window.renderCandidateOffers = renderCandidateOffers;
+
+async function openOfferModal() {
+    if (!recCurrentSubId) return;
+    var modal = document.getElementById('offer-modal');
+    if (!modal) return;
+    await populateLevelRoleSelects('of-level', null);
+    modal.style.display = 'flex';
+}
+window.openOfferModal = openOfferModal;
+
+function closeOfferModal() {
+    var m = document.getElementById('offer-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeOfferModal = closeOfferModal;
+
+async function saveOffer() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    var payload = {
+        job_title: val('of-title'),
+        level: val('of-level'),
+        salary: parseFloat(val('of-salary')) || 0,
+        start_date: val('of-start'),
+        expires_on: val('of-expires'),
+        notes: val('of-notes')
+    };
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/offers', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Offer created', 'success');
+        closeOfferModal();
+        renderCandidateOffers(recCurrentSubId);
+        renderCandidateHistory(recCurrentSubId);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.saveOffer = saveOffer;
+
+async function setOfferStatus(offerId, status) {
+    var body = { status: status };
+    if (status === 'declined') {
+        var reason = prompt('Reason for declining (optional):', '');
+        if (reason === null) return;
+        body.decline_reason = reason;
+    }
+    try {
+        var res = await fetch('/api/recruitment/offers/' + offerId, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Offer ' + status, 'success');
+        renderCandidateOffers(recCurrentSubId);
+        renderCandidateHistory(recCurrentSubId);
+        loadRecAnalytics();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.setOfferStatus = setOfferStatus;
+
+// --- Candidate email -------------------------------------------------------
+async function openCandidateEmail(template) {
+    if (!recCurrentSubId) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId +
+                              '/email-preview?template=' + encodeURIComponent(template));
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        document.getElementById('ce-to').value = data.to;
+        document.getElementById('ce-subject').value = data.subject;
+        document.getElementById('ce-body').value = data.body;
+        document.getElementById('cand-email-modal').style.display = 'flex';
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.openCandidateEmail = openCandidateEmail;
+
+function closeCandidateEmail() {
+    var m = document.getElementById('cand-email-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeCandidateEmail = closeCandidateEmail;
+
+async function sendCandidateEmail() {
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/email', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                subject: document.getElementById('ce-subject').value,
+                body: document.getElementById('ce-body').value
+            })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast(data.message, 'success');
+        closeCandidateEmail();
+        renderCandidateHistory(recCurrentSubId);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.sendCandidateEmail = sendCandidateEmail;
+
+// --- Reject / reopen -------------------------------------------------------
+async function rejectCandidate() {
+    if (!recCurrentSubId) return;
+    var reason = prompt('Why are you rejecting this candidate?\n(Recorded against the application.)', '');
+    if (reason === null) return;
+    if (!reason.trim()) { showToast('A reason is required', 'error'); return; }
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/reject', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: reason })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Candidate rejected', 'success');
+        showRecSubmissionDetail(recCurrentSubId);
+        loadRecAnalytics();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.rejectCandidate = rejectCandidate;
+
+async function reopenCandidate() {
+    if (!recCurrentSubId) return;
+    try {
+        var res = await fetch('/api/recruitment/submissions/' + recCurrentSubId + '/reopen', { method: 'POST' });
+        if (!res.ok) throw new Error('Failed');
+        showToast('Application reopened', 'success');
+        showRecSubmissionDetail(recCurrentSubId);
+    } catch (e) { showToast('Failed', 'error'); }
+}
+window.reopenCandidate = reopenCandidate;
