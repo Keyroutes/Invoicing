@@ -4315,7 +4315,39 @@ async function exportAttendance() {
 window.exportAttendance = exportAttendance;
 
 // --- Event Listeners ---
-document.addEventListener('DOMContentLoaded', function() {
+// --- Authentication guard --------------------------------------------------
+// Without this an unauthenticated visitor got the whole portal shell: every
+// API call returned 401, the errors were swallowed, and the result was a
+// fully-rendered page showing zeros and "Failed to load". That reads as a
+// broken app rather than "you need to sign in".
+
+function portalLoginPage() {
+    return window.location.pathname.indexOf('hr.html') >= 0 ? '/hr-login.html' : '/login.html';
+}
+
+async function requireAuth() {
+    try {
+        var res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (res.ok) {
+            var data = await res.json();
+            if (data && data.user) return true;
+        }
+    } catch (e) {
+        // A network failure is not the same as being signed out; let the page
+        // load and show its own error rather than bouncing to login.
+        return true;
+    }
+    // Remember where they were headed so login can return them here.
+    var next = window.location.pathname + window.location.search;
+    window.location.replace(portalLoginPage() + '?next=' + encodeURIComponent(next));
+    return false;
+}
+window.requireAuth = requireAuth;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    // Nothing else runs until we know there is a session, so the page
+    // never renders an empty shell behind a redirect.
+    if (!(await requireAuth())) return;
     checkAuthStatus();
     loadSettings();
     fetchDashboardData();

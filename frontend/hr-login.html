@@ -121,7 +121,7 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
-    <link rel="stylesheet" href="mobile.css?v=18">
+    <link rel="stylesheet" href="mobile.css?v=19">
 </head>
 <body>
     <div class="auth-container">
@@ -173,6 +173,15 @@
             document.getElementById('error-msg').style.display = 'block';
         }
 
+
+        // Return the visitor to whatever they were trying to reach, but only
+        // to a path on this site - never to an attacker-supplied URL.
+        function nextTarget(fallback) {
+            var next = params.get('next') || '';
+            if (next.charAt(0) === '/' && next.charAt(1) !== '/') return next;
+            return fallback;
+        }
+
         // Check if already logged in
         fetch('/api/auth/me').then(function(r) { return r.json(); }).then(function(data) {
             if (data.user) {
@@ -181,10 +190,10 @@
                     if (r2.ok) {
                         window.location.href = '/superadmin.html';
                     } else {
-                        window.location.href = '/hr.html';
+                        window.location.href = nextTarget('/hr.html');
                     }
                 }).catch(function() {
-                    window.location.href = '/hr.html';
+                    window.location.href = nextTarget('/hr.html');
                 });
             }
         }).catch(function() {});
