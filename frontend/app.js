@@ -2415,6 +2415,8 @@ async function viewEmployee(empId) {
             var inp = document.getElementById('emp-detail-' + k);
             if (inp) inp.value = inputMap[k];
         });
+        renderEmployeeLeavePanel(emp);
+        renderEmployeeAttendancePanel(emp);
         var typeEl = document.getElementById('emp-detail-type');
         if (typeEl) typeEl.value = emp.employment_type || 'full_time';
         var payfreqEl = document.getElementById('emp-detail-payfreq');
@@ -2597,8 +2599,7 @@ async function submitNewEmployee() {
                 window._aiOnboardingItems = null;
             }
             closeAddEmployeeModal();
-            fetchEmployees(currentEmpFilter);
-            loadHRStats();
+            hrDataChanged('employees');
         } else {
             showToast('Failed: ' + (data.detail || 'Error'), 'error');
         }
@@ -2611,7 +2612,7 @@ async function startOffboarding() {
     if (!confirm('Start offboarding for this employee?')) return;
     try {
         var res = await fetch('/api/employees/' + currentEmployeeId + '/offboard', { method: 'POST' });
-        if (res.ok) { showToast('Offboarding started', 'success'); viewEmployee(currentEmployeeId); loadHRStats(); }
+        if (res.ok) { showToast('Offboarding started', 'success'); hrDataChanged('employees', { employeeId: currentEmployeeId }); }
         else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
@@ -2708,7 +2709,7 @@ async function saveEmpEdit() {
         var data = await res.json().catch(function () { return {}; });
         // Surface the server's reason (bad level, reporting loop) rather than
         // a generic failure.
-        if (res.ok) { showToast('Employee updated', 'success'); cancelEmpEdit(); viewEmployee(currentEmployeeId); }
+        if (res.ok) { showToast('Employee updated', 'success'); cancelEmpEdit(); hrDataChanged('employees', { employeeId: currentEmployeeId }); }
         else { showToast(data.detail || 'Failed to update', 'error'); }
     } catch(e) { showToast('Error', 'error'); }
 }
@@ -2759,7 +2760,7 @@ async function deleteCurrentEmployee() {
     if (!confirm('Delete this employee and all related data?')) return;
     try {
         var res = await fetch('/api/employees/' + currentEmployeeId, { method: 'DELETE' });
-        if (res.ok) { showToast('Employee deleted', 'success'); showView('employees-view'); fetchEmployees(currentEmpFilter); loadHRStats(); }
+        if (res.ok) { showToast('Employee deleted', 'success'); showView('employees-view'); hrDataChanged('employees'); }
         else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
@@ -2899,7 +2900,7 @@ async function saveDept() {
         var method = editingDeptId ? 'PUT' : 'POST';
         var res = await fetch(url, { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         var data = await res.json();
-        if (res.ok) { showToast(editingDeptId ? 'Department updated' : 'Department created', 'success'); closeDeptModal(); fetchDepartments(); loadHRStats(); }
+        if (res.ok) { showToast(editingDeptId ? 'Department updated' : 'Department created', 'success'); closeDeptModal(); hrDataChanged('departments'); }
         else { showToast(data.detail || 'Error', 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
@@ -2951,7 +2952,7 @@ async function deleteDepartment(id, name) {
     if (!confirm('Delete department "' + name + '"? Employees will be unassigned.')) return;
     try {
         var res = await fetch('/api/departments/' + id, { method: 'DELETE' });
-        if (res.ok) { showToast('Department deleted', 'success'); fetchDepartments(); loadHRStats(); }
+        if (res.ok) { showToast('Department deleted', 'success'); hrDataChanged('departments'); }
         else { var data = await res.json(); showToast(data.detail || 'Error', 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
@@ -3370,7 +3371,7 @@ function renderPayslips(payslips) {
         var statusClass = (p.status || '').toLowerCase();
         var opens = p.open_count || 0;
         var openBadge = opens > 0 ? '<span style="color:var(--primary-color);font-weight:600;">' + opens + '</span>' : '<span style="color:var(--text-secondary);">0</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewPayslip(' + p.id + ')">' + esc(p.number) + '</a></td><td>' + esc(p.employee_name || '-') + '</td><td>' + esc(p.period_start || '') + ' to ' + esc(p.period_end || '') + '</td><td>' + esc(p.pay_date || '-') + '</td><td class="text-right">' + formatCurrency(p.gross_pay) + '</td><td class="text-right">' + formatCurrency(p.total_deductions) + '</td><td class="text-right">' + formatCurrency(p.net_pay) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(p.status) + '</span></td><td>' + esc(p.sent || '-') + '</td><td class="text-right">' + openBadge + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><a href="#" class="link" onclick="event.preventDefault();viewPayslip(' + p.id + ')">' + esc(p.number) + '</a></td><td>' + employeeLink(p.employee_id, p.employee_name || '-') + '</td><td>' + esc(p.period_start || '') + ' to ' + esc(p.period_end || '') + '</td><td>' + esc(p.pay_date || '-') + '</td><td class="text-right">' + formatCurrency(p.gross_pay) + '</td><td class="text-right">' + formatCurrency(p.total_deductions) + '</td><td class="text-right">' + formatCurrency(p.net_pay) + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(p.status) + '</span></td><td>' + esc(p.sent || '-') + '</td><td class="text-right">' + openBadge + '</td></tr>');
     });
 }
 
@@ -3629,7 +3630,7 @@ async function deletePayslip() {
     if (!confirm('Delete this payslip?')) return;
     try {
         var res = await fetch('/api/payslips/' + currentPayslipId, { method: 'DELETE' });
-        if (res.ok) { showToast('Payslip deleted', 'success'); showView('payroll-view'); fetchPayslips(currentPsFilter); }
+        if (res.ok) { showToast('Payslip deleted', 'success'); showView('payroll-view'); hrDataChanged('payroll'); }
         else { var data = await res.json(); showToast('Failed: ' + (data.detail || 'Error'), 'error'); }
     } catch (e) { showToast('Failed: ' + e, 'error'); }
 }
@@ -4000,7 +4001,7 @@ function renderAttendance(records) {
     records.forEach(function(r) {
         var statusClass = r.status === 'completed' ? 'paid' : r.status === 'present' ? 'sent' : 'draft';
         var typeBadge = r.check_type ? '<span class="status-pill status-' + (r.check_type === 'office' ? 'sent' : r.check_type === 'remote' ? 'paid' : 'draft') + '">' + r.check_type + '</span>' : '-';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + esc(r.employee_name) + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(r.employee_email || '') + '</span></td><td>' + esc(r.date) + '</td><td>' + esc(r.clock_in || '-') + '</td><td>' + esc(r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td>' + typeBadge + '</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(r.location_label || '') + '">' + (r.location_label ? esc(r.location_label.substring(0, 30)) : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(r.status) + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + employeeLink(r.employee_id, r.employee_name) + '</strong><br><span style="font-size:0.78rem;color:var(--text-secondary);">' + esc(r.employee_email || '') + '</span></td><td>' + esc(r.date) + '</td><td>' + esc(r.clock_in || '-') + '</td><td>' + esc(r.clock_out || '-') + '</td><td class="text-right">' + (r.total_hours ? r.total_hours + 'h' : '-') + '</td><td>' + typeBadge + '</td><td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(r.location_label || '') + '">' + (r.location_label ? esc(r.location_label.substring(0, 30)) : '-') + '</td><td><span class="status-pill status-' + statusClass + '">' + esc(r.status) + '</span></td><td class="text-right">' + (!r.clock_out && r.clock_in ? '<button class="btn btn-outline btn-sm" onclick="clockInOut(' + r.employee_id + ')">Clock Out</button>' : '') + '</td></tr>');
     });
 }
 
@@ -4285,7 +4286,7 @@ async function loadOvertimeLogs() {
         if (!tbody) return;
         if (logs.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:30px;color:var(--text-secondary);">No overtime logs</td></tr>'; return; }
         tbody.innerHTML = logs.map(function(l) {
-            return '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + esc(l.date) + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + esc(l.reason || '-') + '</td><td>' + esc(l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + esc(l.status) + '</span></td></tr>';
+            return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td><td>' + esc(l.date) + '</td><td><strong>' + l.hours + 'h</strong></td><td>' + esc(l.reason || '-') + '</td><td>' + esc(l.announced_by || '-') + '</td><td><span class="status-pill status-sent">' + esc(l.status) + '</span></td></tr>';
         }).join('');
     } catch (e) { console.error('Overtime logs load failed:', e); }
 }
@@ -4937,7 +4938,8 @@ async function hireCandidate() {
         if (!res.ok) throw new Error(data.detail || 'Failed');
         showToast(data.message, 'success');
         showRecSubmissionDetail(recCurrentSubId);
-        if (typeof loadHRStats === 'function') loadHRStats();
+        // A hire creates an employee and an onboarding checklist.
+        hrDataChanged('recruitment');
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.hireCandidate = hireCandidate;
@@ -5040,7 +5042,7 @@ function renderLeaveRequests() {
         var actions = l.status === 'pending'
             ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
             : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason) + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>');
+        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason) + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>');
     });
 }
 
@@ -5051,8 +5053,16 @@ async function actionLeave(id, action, empName) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: action })
         });
-        if (res.ok) { showToast('Leave request ' + action + 'd', 'success'); loadLeaveView(); loadLeaveRequests(); }
-        else { showToast('Failed to update leave', 'error'); }
+        var data = await res.json().catch(function () { return {}; });
+        // Surface the server's reason (already decided, over entitlement)
+        // instead of a generic failure.
+        if (res.ok) {
+            showToast('Leave request ' + action + 'd', 'success');
+            loadLeaveRequests();
+            hrDataChanged('leave');
+        } else {
+            showToast(data.detail || 'Failed to update leave', 'error');
+        }
     } catch (e) { showToast('Error: ' + e.message, 'error'); }
 }
 
@@ -5105,7 +5115,7 @@ function renderLeaveView() {
         var actions = l.status === 'pending'
             ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
             : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
-        return '<tr><td><strong>' + esc(l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>';
+        return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>';
     }).join('');
 }
 function filterLeaveView(filter, btn) {
@@ -6740,3 +6750,275 @@ async function reopenCandidate() {
     } catch (e) { showToast('Failed', 'error'); }
 }
 window.reopenCandidate = reopenCandidate;
+
+// ==========================================================================
+// HR DATA BUS
+// Every HR module reads the same underlying records, so a change in one place
+// leaves the others showing stale numbers. Instead of each handler remembering
+// which sibling views to refresh, mutations announce what changed and the bus
+// refreshes whatever is currently on screen plus the always-visible counters.
+// ==========================================================================
+
+// Which loaders each kind of change invalidates.
+var HR_REFRESH_MAP = {
+    employees:   ['employees-view', 'departments-view', 'orgchart-view', 'onboarding-hub-view', 'payroll-view'],
+    departments: ['departments-view', 'employees-view', 'orgchart-view'],
+    leave:       ['leave-view', 'employees-view'],
+    attendance:  ['attendance-view', 'employees-view'],
+    payroll:     ['payroll-view', 'employees-view'],
+    goals:       ['goals-view', 'employees-view'],
+    onboarding:  ['onboarding-hub-view', 'employees-view'],
+    recruitment: ['recruitment-view', 'employees-view', 'onboarding-hub-view', 'orgchart-view']
+};
+
+var HR_VIEW_LOADERS = {
+    'employees-view':      function () { fetchEmployees(currentEmpFilter); },
+    'departments-view':    function () { fetchDepartments(); },
+    'orgchart-view':       function () { loadOrgChart(); },
+    'onboarding-hub-view': function () { loadOnboardingHub(); },
+    'payroll-view':        function () { fetchPayslips(currentPsFilter); },
+    'leave-view':          function () { loadLeaveView(); },
+    'goals-view':          function () { loadGoalsView(); },
+    'attendance-view':     function () { loadAttendanceStats(); loadAttendance(); },
+    'recruitment-view':    function () { loadRecAnalytics(); }
+};
+
+function currentViewId() {
+    var active = document.querySelector('.view-section.active');
+    return active ? active.id : '';
+}
+
+/**
+ * Announce that HR data changed.
+ * @param {string} scope  key of HR_REFRESH_MAP
+ * @param {object} [opts] {employeeId} to also refresh an open profile
+ */
+function hrDataChanged(scope, opts) {
+    opts = opts || {};
+    // Headline counters sit above every HR view, so they always refresh.
+    if (typeof loadHRStats === 'function') loadHRStats();
+
+    var affected = HR_REFRESH_MAP[scope] || [];
+    var visible = currentViewId();
+    affected.forEach(function (viewId) {
+        // Only reload what the user can actually see; the rest reloads on
+        // navigation via the showView hooks.
+        if (viewId !== visible) return;
+        var loader = HR_VIEW_LOADERS[viewId];
+        if (typeof loader === 'function') {
+            try { loader(); } catch (e) { console.error('refresh failed for ' + viewId, e); }
+        }
+    });
+
+    // An open employee profile is a view onto all of this too.
+    var profileOpen = visible === 'employee-detail-view';
+    var targetId = opts.employeeId || currentEmployeeId;
+    if (profileOpen && targetId && typeof viewEmployee === 'function') {
+        viewEmployee(targetId);
+    }
+}
+window.hrDataChanged = hrDataChanged;
+
+// --- Cross-module navigation ----------------------------------------------
+// A person's name should always be a way to reach their profile.
+
+function openEmployee(empId) {
+    if (!empId) return;
+    showView('employee-detail-view');
+    viewEmployee(empId);
+}
+window.openEmployee = openEmployee;
+
+// Renders a name as a link when we know which employee it is.
+function employeeLink(empId, name) {
+    var label = esc(name || 'Unknown');
+    if (!empId) return label;
+    return '<a href="#" class="link" onclick="event.preventDefault();openEmployee(' + empId + ')">' + label + '</a>';
+}
+window.employeeLink = employeeLink;
+
+// Jump to a list already filtered to one person, so "show me their leave"
+// does not mean scrolling a global table.
+var _hrFocusEmployee = null;
+
+function focusEmployeeIn(viewId, empId, name) {
+    _hrFocusEmployee = { id: empId, name: name || '' };
+    showView(viewId);
+    setTimeout(function () { applyEmployeeFocus(viewId); }, 350);
+}
+window.focusEmployeeIn = focusEmployeeIn;
+
+function applyEmployeeFocus(viewId) {
+    if (!_hrFocusEmployee) return;
+    var name = _hrFocusEmployee.name;
+    _hrFocusEmployee = null;
+    if (!name) return;
+
+    // Some views own a search box; the rest are filtered row by row, because
+    // Leave, Goals and Attendance have no search field to drive.
+    var searchIds = { 'payroll-view': 'payslip-search', 'employees-view': 'employee-search' };
+    var input = document.getElementById(searchIds[viewId] || '');
+    if (input) {
+        input.value = name;
+        input.dispatchEvent(new Event('keyup', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+        filterRowsByName(viewId, name);
+    }
+    showFocusBanner(viewId, name);
+}
+
+// Hide rows and cards that do not mention this person. Marks what it hid so
+// clearing puts everything back without a reload.
+function filterRowsByName(viewId, name) {
+    var view = document.getElementById(viewId);
+    if (!view) return;
+    var needle = name.toLowerCase();
+    var rows = view.querySelectorAll('tbody tr, .leave-card, .goal-card');
+    rows.forEach(function (row) {
+        var match = (row.textContent || '').toLowerCase().indexOf(needle) >= 0;
+        if (!match) {
+            row.dataset.hrHidden = '1';
+            row.style.display = 'none';
+        }
+    });
+}
+
+function showFocusBanner(viewId, name) {
+    var view = document.getElementById(viewId);
+    if (!view || !name) return;
+    var existing = view.querySelector('.hr-focus-banner');
+    if (existing) existing.remove();
+    var banner = document.createElement('div');
+    banner.className = 'hr-focus-banner';
+    banner.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;' +
+        'margin-bottom:16px;border-radius:8px;background:rgba(0,240,255,0.08);' +
+        'border:1px solid rgba(0,240,255,0.3);font-size:0.85rem;';
+    banner.innerHTML = 'Showing only <strong>' + esc(name) + '</strong>' +
+        '<button type="button" class="btn btn-outline btn-sm" style="margin-left:auto;" ' +
+        'onclick="clearEmployeeFocus(&quot;' + viewId + '&quot;)">Show everyone</button>';
+    var header = view.querySelector('.invoices-header-area');
+    if (header && header.nextSibling) view.insertBefore(banner, header.nextSibling);
+    else view.insertBefore(banner, view.firstChild);
+}
+
+function clearEmployeeFocus(viewId) {
+    var view = document.getElementById(viewId);
+    if (!view) return;
+    var banner = view.querySelector('.hr-focus-banner');
+    if (banner) banner.remove();
+    view.querySelectorAll('[data-hr-hidden]').forEach(function (row) {
+        row.style.display = '';
+        delete row.dataset.hrHidden;
+    });
+    ['payslip-search', 'employee-search'].forEach(function (id) {
+        var input = document.getElementById(id);
+        if (input && view.contains(input)) {
+            input.value = '';
+            input.dispatchEvent(new Event('keyup', { bubbles: true }));
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    });
+}
+window.clearEmployeeFocus = clearEmployeeFocus;
+
+// --- Employee profile: leave and attendance -------------------------------
+// Both come from the same /api/employees/{id} payload the rest of the profile
+// uses, so the profile cannot disagree with the Leave or Attendance tabs.
+
+function renderEmployeeLeavePanel(emp) {
+    var host = document.getElementById('emp-leave-panel');
+    if (!host) return;
+    var bal = emp.leave_balance || {};
+    var requests = emp.leave_requests || [];
+
+    function bar(label, taken, total, color) {
+        var pct = total ? Math.min(100, Math.round((taken / total) * 100)) : 0;
+        return '<div style="margin-bottom:12px;">' +
+            '<div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:4px;">' +
+                '<span style="color:var(--text-secondary);">' + label + '</span>' +
+                '<strong>' + taken + ' / ' + total + ' days</strong></div>' +
+            '<div style="height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">' +
+                '<div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:3px;"></div></div></div>';
+    }
+
+    var html = '';
+    if (emp.on_leave_today) {
+        html += '<div style="padding:8px 12px;border-radius:8px;background:rgba(252,211,77,0.12);' +
+                'border:1px solid rgba(252,211,77,0.35);color:var(--warning-color);font-size:0.82rem;' +
+                'font-weight:600;margin-bottom:12px;">On approved leave today</div>';
+    }
+    html += bar('Annual', bal.annual_taken || 0, bal.annual_total || 0, 'var(--primary-color)');
+    html += bar('Sick', bal.sick_taken || 0, bal.sick_total || 0, 'var(--warning-color)');
+    if (bal.annual_pending) {
+        html += '<p style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:10px;">' +
+                bal.annual_pending + ' day(s) awaiting approval.</p>';
+    }
+
+    if (requests.length) {
+        html += '<div style="font-size:0.75rem;font-weight:700;text-transform:uppercase;' +
+                'color:var(--text-secondary);margin:14px 0 6px;">Recent requests</div>';
+        html += requests.slice(0, 5).map(function (l) {
+            var color = l.status === 'approved' ? 'var(--success-color)'
+                      : l.status === 'rejected' ? 'var(--danger-color)' : 'var(--warning-color)';
+            return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:6px 0;' +
+                   'border-bottom:1px solid var(--border-color);font-size:0.82rem;">' +
+                   '<span style="text-transform:capitalize;">' + esc(l.leave_type) + '</span>' +
+                   '<span style="color:var(--text-secondary);">' + esc(l.start_date) + ' to ' + esc(l.end_date) + '</span>' +
+                   '<span style="margin-left:auto;color:' + color + ';text-transform:capitalize;">' + esc(l.status) + '</span>' +
+                   '</div>';
+        }).join('');
+    } else {
+        html += '<p style="color:var(--text-secondary);font-size:0.85rem;">No leave requested.</p>';
+    }
+    host.innerHTML = html;
+}
+window.renderEmployeeLeavePanel = renderEmployeeLeavePanel;
+
+function renderEmployeeAttendancePanel(emp) {
+    var host = document.getElementById('emp-attendance-panel');
+    if (!host) return;
+    var a = emp.attendance_summary || {};
+    var tiles = [
+        ['Days present', a.days_present || 0, ''],
+        ['Hours', (a.hours_30d || 0) + 'h', ''],
+        ['Overtime', (a.overtime_30d || 0) + 'h', 'var(--primary-color)'],
+        ['Late', a.days_late || 0, (a.days_late ? 'var(--warning-color)' : '')]
+    ];
+    var html = '';
+    if (a.clocked_in_today) {
+        html += '<div style="padding:8px 12px;border-radius:8px;background:rgba(57,255,20,0.12);' +
+                'border:1px solid rgba(57,255,20,0.35);color:var(--success-color);font-size:0.82rem;' +
+                'font-weight:600;margin-bottom:12px;">Clocked in since ' + esc(a.today_clock_in || '') + '</div>';
+    } else if (a.today_clock_in) {
+        html += '<div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;">' +
+                'Today: ' + esc(a.today_clock_in) + ' to ' + esc(a.today_clock_out || '-') + '</div>';
+    }
+    html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">' +
+        tiles.map(function (t) {
+            return '<div style="padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;">' +
+                   '<div style="font-size:0.72rem;color:var(--text-secondary);">' + t[0] + '</div>' +
+                   '<div style="font-size:1.1rem;font-weight:700;' + (t[2] ? 'color:' + t[2] + ';' : '') + '">' + t[1] + '</div></div>';
+        }).join('') + '</div>';
+    host.innerHTML = html;
+}
+window.renderEmployeeAttendancePanel = renderEmployeeAttendancePanel;
+
+// Deep links: open the full tab already narrowed to this person.
+function viewEmployeeLeave() {
+    var name = (document.getElementById('emp-detail-name') || {}).textContent || '';
+    focusEmployeeIn('leave-view', currentEmployeeId, name);
+}
+window.viewEmployeeLeave = viewEmployeeLeave;
+
+function viewEmployeeAttendance() {
+    var name = (document.getElementById('emp-detail-name') || {}).textContent || '';
+    focusEmployeeIn('attendance-view', currentEmployeeId, name);
+}
+window.viewEmployeeAttendance = viewEmployeeAttendance;
+
+function viewEmployeePayslips() {
+    var name = (document.getElementById('emp-detail-name') || {}).textContent || '';
+    focusEmployeeIn('payroll-view', currentEmployeeId, name);
+}
+window.viewEmployeePayslips = viewEmployeePayslips;

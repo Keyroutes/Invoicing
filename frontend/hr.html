@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=16">
-    <link rel="stylesheet" href="mobile.css?v=16">
+    <link rel="stylesheet" href="styles.css?v=18">
+    <link rel="stylesheet" href="mobile.css?v=18">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -797,6 +797,26 @@
                                 </div>
                                 <div class="widget-content" id="emp-goals-list">
                                     <p style="color:var(--text-secondary);font-size:0.85rem;">No goals assigned yet.</p>
+                                </div>
+                            </div>
+                            <!-- Leave, wired to the same records as the Leave tab -->
+                            <div class="glass-widget" style="margin-top:24px;">
+                                <div class="widget-header">
+                                    <h3>Leave</h3>
+                                    <button class="btn btn-outline btn-sm" onclick="viewEmployeeLeave()">View in Leave tab</button>
+                                </div>
+                                <div class="widget-content" id="emp-leave-panel">
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;">Loading...</p>
+                                </div>
+                            </div>
+                            <!-- Attendance, last 30 days -->
+                            <div class="glass-widget" style="margin-top:24px;">
+                                <div class="widget-header">
+                                    <h3>Attendance &middot; last 30 days</h3>
+                                    <button class="btn btn-outline btn-sm" onclick="viewEmployeeAttendance()">View in Attendance tab</button>
+                                </div>
+                                <div class="widget-content" id="emp-attendance-panel">
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;">Loading...</p>
                                 </div>
                             </div>
                             <!-- Employee Documents -->
@@ -1969,7 +1989,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=16"></script>
+    <script src="app.js?v=18"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()">

@@ -2877,6 +2877,48 @@ def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
         manager_name = f"{mgr.first_name} {mgr.last_name}" if mgr else ""
     payslips = db.query(models.DBPayslip).filter(models.DBPayslip.employee_id == emp.id).order_by(models.DBPayslip.created_at.desc()).limit(12).all()
     onboarding = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
+
+    # The profile is the one place HR looks up a person, so it answers every
+    # question about them rather than sending the user hunting across tabs.
+    leave_rows = db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.employee_id == emp.id
+    ).order_by(models.DBLeaveRequest.id.desc()).limit(10).all()
+
+    today = datetime.now().date()
+    on_leave_today = False
+    for l in leave_rows:
+        if l.status != "approved":
+            continue
+        start, end = _parse_date(l.start_date), _parse_date(l.end_date)
+        if start and end and start <= today <= end:
+            on_leave_today = True
+            break
+
+    since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    attendance = db.query(models.DBAttendance).filter(
+        models.DBAttendance.employee_id == emp.id,
+        models.DBAttendance.date >= since,
+    ).order_by(models.DBAttendance.date.desc()).all()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_row = next((a for a in attendance if a.date == today_str), None)
+
+    goals = db.query(models.DBEmployeeGoal).filter(
+        models.DBEmployeeGoal.employee_id == emp.id
+    ).order_by(models.DBEmployeeGoal.id.desc()).limit(10).all()
+    documents = db.query(models.DBDocument).filter(
+        models.DBDocument.employee_id == emp.id
+    ).order_by(models.DBDocument.id.desc()).all()
+
+    # Where this person came from, if they were hired through recruitment.
+    origin = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.hired_employee_id == emp.id
+    ).first()
+
+    direct_reports = db.query(models.DBEmployee).filter(
+        models.DBEmployee.reports_to == emp.id,
+        models.DBEmployee.client_id == client.id,
+    ).all()
+
     return {
         "id": emp.id, "employee_id": emp.employee_id,
         "first_name": emp.first_name, "last_name": emp.last_name,
@@ -2902,6 +2944,39 @@ def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
                                "category": o.category, "is_completed": o.is_completed,
                                "completed_at": o.completed_at, "assigned_to": o.assigned_to,
                                "due_date": o.due_date} for o in onboarding],
+        "leave_balance": leave_balance_for(db, emp),
+        "on_leave_today": on_leave_today,
+        "leave_requests": [{
+            "id": l.id, "leave_type": l.leave_type, "start_date": l.start_date,
+            "end_date": l.end_date, "days": l.days, "status": l.status,
+            "reason": l.reason, "created_at": l.created_at,
+        } for l in leave_rows],
+        "attendance_summary": {
+            "days_present": sum(1 for a in attendance if a.clock_in),
+            "days_late": sum(1 for a in attendance if a.status == "late"),
+            "hours_30d": round(sum(a.total_hours or 0 for a in attendance), 2),
+            "overtime_30d": round(sum(a.overtime_hours or 0 for a in attendance), 2),
+            "clocked_in_today": bool(today_row and today_row.clock_in and not today_row.clock_out),
+            "today_clock_in": today_row.clock_in if today_row else "",
+            "today_clock_out": today_row.clock_out if today_row else "",
+        },
+        "goals": [{
+            "id": g.id, "title": g.title, "status": g.status,
+            "current_value": g.current_value, "target_value": g.target_value,
+            "unit": g.unit, "due_date": g.due_date, "priority": g.priority,
+        } for g in goals],
+        "documents": [{
+            "id": d.id, "title": d.title, "doc_type": d.doc_type,
+            "file_name": d.file_name, "created_at": d.created_at,
+        } for d in documents],
+        "direct_reports": [{
+            "id": r.id, "full_name": f"{r.first_name} {r.last_name}",
+            "job_title": r.job_title, "level": r.level or "", "status": r.status,
+        } for r in direct_reports],
+        "hired_from": {
+            "submission_id": origin.id, "form_id": origin.form_id,
+            "applied_on": origin.created_at,
+        } if origin else None,
     }
 
 @app.put("/api/employees/{emp_id}")
