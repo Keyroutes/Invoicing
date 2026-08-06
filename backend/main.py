@@ -676,6 +676,153 @@ def superadmin_me(request: Request, db: Session = Depends(get_db)):
 
 from sqlalchemy import func
 
+@app.get("/api/superadmin/platform-stats")
+def superadmin_platform_stats(request: Request, db: Session = Depends(get_db)):
+    """Platform-wide numbers across every module, not just invoicing.
+
+    The original insights endpoint only counted invoices, so HR and
+    recruitment usage was invisible to the operator.
+    """
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+
+    def count(model):
+        return db.query(model).count()
+
+    paid_total = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBInvoice.paid), 0)).scalar() or 0
+    outstanding = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBInvoice.due), 0)).filter(
+        models.DBInvoice.status.notin_(["Draft", "Paid", "Void"])
+    ).scalar() or 0
+    payroll_total = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBPayslip.net_pay), 0)).filter(
+        models.DBPayslip.status == "Paid"
+    ).scalar() or 0
+
+    now = datetime.now()
+    month_prefix = now.strftime("%Y-%m")
+    # Super admin and employee logins carry a NULL client_id; counting them
+    # would inflate the tenant activity figure.
+    active_30d = db.query(models.DBClientLoginLog.client_id).filter(
+        models.DBClientLoginLog.status == "success",
+        models.DBClientLoginLog.user_type == "client",
+        models.DBClientLoginLog.client_id.isnot(None),
+        models.DBClientLoginLog.created_at >= (now - timedelta(days=30)).strftime("%Y-%m-%d"),
+    ).distinct().count()
+
+    return {
+        "tenants": {
+            "total": count(models.DBClient),
+            "active": db.query(models.DBClient).filter(models.DBClient.is_active == True).count(),
+            "onboarded": db.query(models.DBClient).filter(models.DBClient.is_onboarded == True).count(),
+            "active_last_30_days": active_30d,
+        },
+        "invoicing": {
+            "invoices": count(models.DBInvoice),
+            "bills": count(models.DBBill),
+            "collected": money(paid_total),
+            "outstanding": money(outstanding),
+            "invoices_this_month": db.query(models.DBInvoice).filter(
+                models.DBInvoice.issue_date.like(month_prefix + "%")
+            ).count(),
+        },
+        "hr": {
+            "employees": count(models.DBEmployee),
+            "departments": count(models.DBDepartment),
+            "payslips": count(models.DBPayslip),
+            "payroll_paid": money(payroll_total),
+            "leave_requests": count(models.DBLeaveRequest),
+            "attendance_records": count(models.DBAttendance),
+        },
+        "recruitment": {
+            "jobs": count(models.DBJobRequisition),
+            "open_jobs": db.query(models.DBJobRequisition).filter(
+                models.DBJobRequisition.status == "open"
+            ).count(),
+            "applications": count(models.DBFormSubmission),
+            "interviews": count(models.DBInterview),
+            "offers": count(models.DBOffer),
+            "hires": db.query(models.DBFormSubmission).filter(
+                models.DBFormSubmission.hired_employee_id.isnot(None)
+            ).count(),
+        },
+    }
+
+
+@app.get("/api/superadmin/clients/{client_id}/overview")
+def superadmin_client_overview(client_id: int, request: Request, db: Session = Depends(get_db)):
+    """Everything the operator needs to answer 'how is this tenant doing?'
+    without impersonating them."""
+    sa_id = request.session.get("superadmin_id")
+    if not sa_id:
+        raise HTTPException(status_code=401, detail="Not authorized")
+    client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    def tenant_count(model):
+        return db.query(model).filter(model.client_id == client_id).count()
+
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client_id).all()
+    employees = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client_id).all()
+    today = datetime.now().date()
+    overdue = [i for i in invoices if invoice_overdue_days(i, today) > 0]
+
+    last_activity = ""
+    latest_login = db.query(models.DBClientLoginLog).filter(
+        models.DBClientLoginLog.client_id == client_id,
+        models.DBClientLoginLog.status == "success",
+    ).order_by(models.DBClientLoginLog.id.desc()).first()
+    if latest_login:
+        last_activity = latest_login.created_at
+
+    return {
+        "id": client.id,
+        "company_name": client.company_name or "",
+        "email": client.email,
+        "is_active": client.is_active,
+        "is_onboarded": client.is_onboarded,
+        "currency": client.currency or "GBP",
+        "created_at": client.created_at,
+        "last_login": client.last_login or "",
+        "login_count": client.login_count or 0,
+        "last_activity": last_activity,
+        "invoicing": {
+            "invoices": len(invoices),
+            "collected": money(sum(i.paid or 0 for i in invoices)),
+            "outstanding": money(sum(i.due or 0 for i in invoices if i.status not in ("Draft", "Paid", "Void"))),
+            "overdue_count": len(overdue),
+            "bills": tenant_count(models.DBBill),
+            "contacts": tenant_count(models.DBContact),
+        },
+        "hr": {
+            "employees": len(employees),
+            "active_employees": sum(1 for e in employees if e.status == "active"),
+            "onboarding": sum(1 for e in employees if e.status == "onboarding"),
+            "departments": tenant_count(models.DBDepartment),
+            "payslips": tenant_count(models.DBPayslip),
+            "pending_leave": db.query(models.DBLeaveRequest).filter(
+                models.DBLeaveRequest.client_id == client_id,
+                models.DBLeaveRequest.status == "pending",
+            ).count(),
+        },
+        "recruitment": {
+            "jobs": tenant_count(models.DBJobRequisition),
+            "open_jobs": db.query(models.DBJobRequisition).filter(
+                models.DBJobRequisition.client_id == client_id,
+                models.DBJobRequisition.status == "open",
+            ).count(),
+            "applications": tenant_count(models.DBFormSubmission),
+            "interviews": tenant_count(models.DBInterview),
+        },
+        "portals": {
+            "invoicing": "/app.html",
+            "hr": "/hr.html",
+            "employee": "/employee-login.html",
+            "job_board": f"/jobs.html?c={client.id}",
+        },
+    }
+
+
 @app.get("/api/superadmin/clients")
 def superadmin_clients(request: Request, db: Session = Depends(get_db)):
     sa_id = request.session.get("superadmin_id")
@@ -2395,6 +2542,107 @@ def validate_manager(db, client_id, employee_id, manager_id):
     return manager_id
 
 
+
+# --- Department / employee validation --------------------------------------
+# These fields flow straight into payroll and the employee login, so bad values
+# here surface later as wrong pay or an account nobody can sign into.
+
+def clean_department_name(name):
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="A department name is required")
+    if len(name) > 80:
+        raise HTTPException(status_code=400, detail="Department name must be 80 characters or fewer")
+    return name
+
+
+def assert_department_name_free(db, client_id, name, exclude_id=None):
+    """Case-insensitive: 'Engineering' and 'engineering' are the same team."""
+    query = db.query(models.DBDepartment).filter(
+        models.DBDepartment.client_id == client_id,
+        sqlfunc.lower(models.DBDepartment.name) == name.lower(),
+    )
+    if exclude_id:
+        query = query.filter(models.DBDepartment.id != exclude_id)
+    if query.first():
+        raise HTTPException(status_code=400, detail=f"A department called '{name}' already exists")
+
+
+def clean_employee_email(db, client_id, email, exclude_id=None):
+    email = (email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="An email address is required")
+    if not validate_email_address(email):
+        raise HTTPException(status_code=400, detail=f"'{email}' is not a valid email address")
+    query = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client_id,
+        sqlfunc.lower(models.DBEmployee.email) == email,
+    )
+    if exclude_id:
+        query = query.filter(models.DBEmployee.id != exclude_id)
+    if query.first():
+        # Case-variant duplicates also make the employee login ambiguous,
+        # because it matches on email and takes the first row.
+        raise HTTPException(status_code=400, detail="An employee with this email already exists")
+    return email
+
+
+def clean_person_name(value, label):
+    value = (value or "").strip()
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{label} is required")
+    if len(value) > 80:
+        raise HTTPException(status_code=400, detail=f"{label} must be 80 characters or fewer")
+    return value
+
+
+EMPLOYEE_MONEY_FIELDS = {
+    "salary": "Salary", "hourly_rate": "Hourly rate", "deductions": "Deductions",
+    "allowances": "Allowances", "bonus": "Bonus",
+}
+
+
+def validate_employee_money(values):
+    """Reject negatives and an out-of-range tax rate.
+
+    A 500% tax rate previously produced a payslip with a large negative net,
+    i.e. a payslip saying the employee owes the company money.
+    """
+    for field, label in EMPLOYEE_MONEY_FIELDS.items():
+        if field not in values or values[field] is None:
+            continue
+        try:
+            amount = float(values[field])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{label} must be a number")
+        if amount < 0:
+            raise HTTPException(status_code=400, detail=f"{label} cannot be negative")
+        if amount > 100_000_000:
+            raise HTTPException(status_code=400, detail=f"{label} is unrealistically large")
+    if values.get("tax_rate") is not None:
+        try:
+            rate = float(values["tax_rate"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Tax rate must be a number")
+        if rate < 0 or rate > 100:
+            raise HTTPException(status_code=400, detail="Tax rate must be between 0 and 100 percent")
+
+
+def assert_employee_code_free(db, client_id, code, exclude_id=None):
+    code = (code or "").strip()
+    if not code:
+        return ""
+    query = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client_id,
+        models.DBEmployee.employee_id == code,
+    )
+    if exclude_id:
+        query = query.filter(models.DBEmployee.id != exclude_id)
+    if query.first():
+        raise HTTPException(status_code=400, detail=f"Employee ID '{code}' is already in use")
+    return code
+
+
 # --- Departments API ---
 
 @app.get("/api/departments")
@@ -2429,12 +2677,9 @@ def get_department(dept_id: int, request: Request, db: Session = Depends(get_db)
 @app.post("/api/departments")
 def create_department(request: Request, body: DepartmentCreate, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    existing = db.query(models.DBDepartment).filter(
-        models.DBDepartment.name == body.name, models.DBDepartment.client_id == client.id
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Department already exists")
-    dept = models.DBDepartment(name=body.name, description=body.description, color=body.color, icon=body.icon, client_id=client.id)
+    name = clean_department_name(body.name)
+    assert_department_name_free(db, client.id, name)
+    dept = models.DBDepartment(name=name, description=body.description, color=body.color, icon=body.icon, client_id=client.id)
     db.add(dept)
     db.commit()
     db.refresh(dept)
@@ -2446,7 +2691,11 @@ def update_department(dept_id: int, request: Request, body: DepartmentCreate, db
     dept = db.query(models.DBDepartment).filter(models.DBDepartment.id == dept_id, models.DBDepartment.client_id == client.id).first()
     if not dept:
         raise HTTPException(status_code=404, detail="Department not found")
-    dept.name = body.name
+    name = clean_department_name(body.name)
+    # Create checked for duplicates but update did not, so a rename could
+    # produce two departments with the same name.
+    assert_department_name_free(db, client.id, name, exclude_id=dept.id)
+    dept.name = name
     dept.description = body.description
     dept.color = body.color
     dept.icon = body.icon
@@ -2525,23 +2774,23 @@ def get_employees(request: Request, q: str = "", status: str = "", db: Session =
 @app.post("/api/employees")
 def create_employee(request: Request, body: EmployeeCreate, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    existing = db.query(models.DBEmployee).filter(
-        models.DBEmployee.email == body.email, models.DBEmployee.client_id == client.id
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Employee with this email already exists")
+    first_name = clean_person_name(body.first_name, "First name")
+    last_name = clean_person_name(body.last_name, "Last name")
+    email = clean_employee_email(db, client.id, body.email)
+    validate_employee_money(body.model_dump())
+    employee_code = assert_employee_code_free(db, client.id, body.employee_id)
 
     level = validate_level(body.level)
     role = validate_role(body.role)
     reports_to = validate_manager(db, client.id, None, body.reports_to)
 
     max_num = db.query(sqlfunc.coalesce(sqlfunc.max(models.DBEmployee.id), 0)).filter(models.DBEmployee.client_id == client.id).scalar()
-    emp_number = f"EMP-{max_num + 1:04d}" if not body.employee_id else body.employee_id
+    emp_number = employee_code or f"EMP-{max_num + 1:04d}"
 
     emp = models.DBEmployee(
         client_id=client.id, employee_id=emp_number,
-        first_name=body.first_name, last_name=body.last_name,
-        email=body.email, phone=body.phone, address=body.address,
+        first_name=first_name, last_name=last_name,
+        email=email, phone=body.phone, address=body.address,
         department_id=body.department_id, reports_to=reports_to,
         job_title=body.job_title, role=role, level=level,
         employment_type=body.employment_type, pay_frequency=body.pay_frequency,
@@ -2663,6 +2912,14 @@ def update_employee(emp_id: int, request: Request, body: dict = None, db: Sessio
         raise HTTPException(status_code=404, detail="Employee not found")
     old_dept = emp.department_id
     body = body or {}
+    # Everything a blind setattr would have accepted unchecked.
+    if "first_name" in body:
+        body["first_name"] = clean_person_name(body["first_name"], "First name")
+    if "last_name" in body:
+        body["last_name"] = clean_person_name(body["last_name"], "Last name")
+    if "email" in body:
+        body["email"] = clean_employee_email(db, client.id, body["email"], exclude_id=emp.id)
+    validate_employee_money(body)
     # Hierarchy fields go through the same checks as on create; a blind
     # setattr let callers set an unknown level or build a reporting loop.
     if "level" in body:

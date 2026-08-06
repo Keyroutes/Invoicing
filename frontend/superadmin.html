@@ -317,7 +317,7 @@
             *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
         }
     </style>
-    <link rel="stylesheet" href="mobile.css?v=15">
+    <link rel="stylesheet" href="mobile.css?v=16">
 </head>
 <body>
     <div class="admin-header">
@@ -352,6 +352,12 @@
                 <div class="stat-value" id="stat-outstanding">0</div>
             </div>
         </div>
+        <div class="section-header" style="margin-top:32px;">
+            <h2>Platform Usage</h2>
+            <span style="font-size:0.78rem;color:#64748b;">Across every tenant</span>
+        </div>
+        <div class="stats-grid" id="platform-grid"></div>
+
         <div class="stats-grid" style="margin-top:16px;">
             <div class="stat-card accent">
                 <div class="stat-label">Today Logins</div>
@@ -459,6 +465,7 @@
             <button class="close-btn" onclick="closeModal()">&times;</button>
             <h2 id="modal-client-name">Client Details</h2>
             <div class="detail-grid" id="modal-details"></div>
+            <div id="modal-overview" style="margin-top:20px;"></div>
             <h3 style="margin-top:24px;font-size:0.9rem;color:#94a3b8;">Invoices</h3>
             <div class="table-responsive"><table class="invoices-mini-table">
                 <thead><tr><th>Number</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead>
@@ -508,6 +515,95 @@
                 document.getElementById('stat-invoices').textContent = data.total_invoices;
                 document.getElementById('stat-outstanding').textContent = data.total_outstanding.toLocaleString();
             } catch (e) { console.error(e); }
+        }
+
+
+        // Platform usage spans all modules; the original insights call only
+        // knew about invoicing.
+        async function loadPlatformStats() {
+            try {
+                var res = await fetch('/api/superadmin/platform-stats');
+                if (!res.ok) return;
+                var d = await res.json();
+                var cards = [
+                    ['accent', 'Employees', d.hr.employees, d.hr.departments + ' departments'],
+                    ['success', 'Payslips Issued', d.hr.payslips, 'Payroll paid ' + d.hr.payroll_paid.toLocaleString()],
+                    ['warning', 'Open Roles', d.recruitment.open_jobs, d.recruitment.applications + ' applications'],
+                    ['accent', 'Active (30d)', d.tenants.active_last_30_days, 'of ' + d.tenants.total + ' tenants']
+                ];
+                document.getElementById('platform-grid').innerHTML = cards.map(function (c) {
+                    return '<div class="stat-card ' + c[0] + '">' +
+                           '<div class="stat-label">' + c[1] + '</div>' +
+                           '<div class="stat-value">' + c[2] + '</div>' +
+                           '<div class="stat-sub">' + esc(c[3]) + '</div></div>';
+                }).join('');
+            } catch (e) { /* the strip is informational */ }
+        }
+
+        // Per-tenant health, so the operator can answer "how are they doing?"
+        // without impersonating them.
+        async function loadClientOverview(id) {
+            var host = document.getElementById('modal-overview');
+            if (!host) return;
+            host.innerHTML = '<div style="color:#64748b;font-size:0.85rem;">Loading usage...</div>';
+            try {
+                var res = await fetch('/api/superadmin/clients/' + id + '/overview');
+                if (!res.ok) { host.innerHTML = ''; return; }
+                var d = await res.json();
+                function group(title, pairs) {
+                    return '<div style="flex:1;min-width:190px;background:rgba(255,255,255,0.03);' +
+                           'border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:14px 16px;">' +
+                           '<div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;' +
+                           'letter-spacing:0.5px;color:#64748b;margin-bottom:8px;">' + title + '</div>' +
+                           pairs.map(function (pair) {
+                               return '<div style="display:flex;justify-content:space-between;gap:12px;font-size:0.82rem;padding:2px 0;">' +
+                                      '<span style="color:#94a3b8;">' + pair[0] + '</span>' +
+                                      '<strong>' + pair[1] + '</strong></div>';
+                           }).join('') + '</div>';
+                }
+                var portals = d.portals || {};
+                host.innerHTML =
+                    '<h3 style="margin-bottom:12px;font-size:0.9rem;color:#94a3b8;">Usage</h3>' +
+                    '<div style="display:flex;gap:12px;flex-wrap:wrap;">' +
+                    group('Invoicing', [
+                        ['Invoices', d.invoicing.invoices],
+                        ['Collected', d.invoicing.collected.toLocaleString()],
+                        ['Outstanding', d.invoicing.outstanding.toLocaleString()],
+                        ['Overdue', d.invoicing.overdue_count]
+                    ]) +
+                    group('People', [
+                        ['Employees', d.hr.employees],
+                        ['Active', d.hr.active_employees],
+                        ['Departments', d.hr.departments],
+                        ['Pending leave', d.hr.pending_leave]
+                    ]) +
+                    group('Recruitment', [
+                        ['Jobs', d.recruitment.jobs],
+                        ['Open', d.recruitment.open_jobs],
+                        ['Applications', d.recruitment.applications],
+                        ['Interviews', d.recruitment.interviews]
+                    ]) +
+                    '</div>' +
+                    '<h3 style="margin:20px 0 10px;font-size:0.9rem;color:#94a3b8;">Portals</h3>' +
+                    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+                    '<button class="action-btn" onclick="openPortalAs(' + id + ', &quot;' + portals.invoicing + '&quot;)">Invoicing Portal</button>' +
+                    '<button class="action-btn" onclick="openPortalAs(' + id + ', &quot;' + portals.hr + '&quot;)">HR Portal</button>' +
+                    '<a class="action-btn" href="' + esc(portals.employee) + '" target="_blank" rel="noopener">Employee Portal</a>' +
+                    '<a class="action-btn" href="' + esc(portals.job_board) + '" target="_blank" rel="noopener">Public Job Board</a>' +
+                    '</div>' +
+                    '<p style="font-size:0.72rem;color:#475569;margin-top:8px;">' +
+                    'Opening a tenant portal signs you in as that client (support mode).</p>';
+            } catch (e) { host.innerHTML = ''; }
+        }
+
+        // Impersonate first, then open the portal, so the session is right.
+        async function openPortalAs(id, path) {
+            if (!confirm('Open this tenant portal as them? You will be signed in as the client.')) return;
+            try {
+                var res = await fetch('/api/superadmin/impersonate/' + id, { method: 'POST' });
+                if (!res.ok) throw new Error('failed');
+                window.open(path, '_blank', 'noopener');
+            } catch (e) { alert('Could not open that portal'); }
         }
 
         async function loadClients() {
@@ -578,6 +674,7 @@
                     invHtml = '<tr><td colspan="4" style="text-align:center;color:#475569;padding:20px;">No invoices yet</td></tr>';
                 }
                 document.getElementById('modal-invoices').innerHTML = invHtml;
+                loadClientOverview(id);
                 document.getElementById('client-modal').classList.add('show');
             } catch (e) { alert('Error loading client'); }
         }
@@ -732,6 +829,7 @@
 
         checkAuth();
         loadInsights();
+        loadPlatformStats();
         loadClients();
         loadLoginStats();
         loadLoginLogs();
