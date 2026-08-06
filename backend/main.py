@@ -2825,6 +2825,10 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
             title=title, category=category, assigned_to=assignee,
         ))
 
+    # Ask the new starter for whatever HR has decided it needs from them.
+    seed_default_requirements(db, client.id)
+    assign_document_requests(db, client.id, emp)
+
     if body.department_id:
         pending_goals = db.query(models.DBDepartmentGoal).filter(
             models.DBDepartmentGoal.department_id == body.department_id,
@@ -2908,6 +2912,9 @@ def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
     documents = db.query(models.DBDocument).filter(
         models.DBDocument.employee_id == emp.id
     ).order_by(models.DBDocument.id.desc()).all()
+    doc_requests = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.employee_id == emp.id
+    ).order_by(models.DBDocumentRequest.id.asc()).all()
 
     # Where this person came from, if they were hired through recruitment.
     origin = db.query(models.DBFormSubmission).filter(
@@ -2967,8 +2974,13 @@ def get_employee(emp_id: int, request: Request, db: Session = Depends(get_db)):
         } for g in goals],
         "documents": [{
             "id": d.id, "title": d.title, "doc_type": d.doc_type,
-            "file_name": d.file_name, "created_at": d.created_at,
+            "file_name": d.file_name, "uploaded_by": d.uploaded_by,
+            "created_at": d.created_at,
         } for d in documents],
+        "document_requests": [request_to_dict(r) for r in doc_requests],
+        "documents_outstanding": sum(
+            1 for r in doc_requests if r.status in ("pending", "rejected")
+        ),
         "direct_reports": [{
             "id": r.id, "full_name": f"{r.first_name} {r.last_name}",
             "job_title": r.job_title, "level": r.level or "", "status": r.status,
@@ -5611,6 +5623,439 @@ def talent_pool(request: Request, q: str = "", stage: str = "", limit: int = 100
         "hired_employee_id": getattr(s, "hired_employee_id", None),
         "created_at": s.created_at,
     } for s in rows]
+
+# ============ ONBOARDING DOCUMENT REQUIREMENTS ============
+# HR decides what a new starter must provide; the employee uploads it from
+# their own portal; HR reviews it. The requirement is the template, the request
+# is one person's obligation against it.
+
+DOC_REQUEST_STATUSES = ("pending", "submitted", "approved", "rejected")
+DEFAULT_DOCUMENT_REQUIREMENTS = [
+    ("Photo ID", "Passport or driving licence", "identity", True, 3),
+    ("Proof of right to work", "Visa, share code or citizenship document", "compliance", True, 3),
+    ("Bank details", "So payroll can pay you", "finance", True, 5),
+    ("Signed contract", "Your countersigned employment contract", "contract", True, 7),
+    ("Proof of address", "Utility bill or bank statement from the last 3 months", "identity", False, 14),
+]
+
+
+class DocumentRequirementIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    doc_type: Optional[str] = "other"
+    is_mandatory: Optional[bool] = True
+    due_days: Optional[int] = 7
+    applies_to: Optional[str] = "all"
+    department_id: Optional[int] = None
+    level: Optional[str] = ""
+    is_active: Optional[bool] = True
+    sort_order: Optional[int] = 0
+
+
+def requirement_to_dict(r):
+    return {
+        "id": r.id, "name": r.name, "description": r.description or "",
+        "doc_type": r.doc_type, "is_mandatory": bool(r.is_mandatory),
+        "due_days": r.due_days, "applies_to": r.applies_to,
+        "department_id": r.department_id,
+        "department_name": r.department.name if r.department else "",
+        "level": r.level or "", "is_active": bool(r.is_active),
+        "sort_order": r.sort_order, "created_at": r.created_at,
+    }
+
+
+def request_to_dict(req, include_file=False):
+    data = {
+        "id": req.id, "employee_id": req.employee_id,
+        "requirement_id": req.requirement_id, "document_id": req.document_id,
+        "name": req.name, "description": req.description or "",
+        "doc_type": req.doc_type, "is_mandatory": bool(req.is_mandatory),
+        "due_date": req.due_date or "", "status": req.status,
+        "submitted_at": req.submitted_at or "", "reviewed_at": req.reviewed_at or "",
+        "reviewed_by": req.reviewed_by or "", "review_note": req.review_note or "",
+        "created_at": req.created_at,
+    }
+    doc = req.document
+    if doc:
+        data["file_name"] = doc.file_name
+        data["file_type"] = doc.file_type
+        data["file_size"] = doc.file_size or 0
+        if include_file:
+            data["file_data"] = doc.file_data
+    # Overdue is derived, never stored, so it cannot go stale.
+    due = _parse_date(req.due_date)
+    data["is_overdue"] = bool(
+        due and req.status in ("pending", "rejected") and due < datetime.now().date()
+    )
+    return data
+
+
+def validate_requirement(body, db, client_id):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="A document name is required")
+    if len(name) > 120:
+        raise HTTPException(status_code=400, detail="Document name must be 120 characters or fewer")
+    applies = (body.applies_to or "all").strip().lower()
+    if applies not in ("all", "department", "level"):
+        raise HTTPException(status_code=400, detail="Applies to must be all, department or level")
+    try:
+        due_days = int(body.due_days if body.due_days is not None else 7)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Due days must be a whole number")
+    if due_days < 0 or due_days > 365:
+        raise HTTPException(status_code=400, detail="Due days must be between 0 and 365")
+    if applies == "department":
+        if not body.department_id:
+            raise HTTPException(status_code=400, detail="Choose a department for this rule")
+        dept = db.query(models.DBDepartment).filter(
+            models.DBDepartment.id == body.department_id,
+            models.DBDepartment.client_id == client_id,
+        ).first()
+        if not dept:
+            raise HTTPException(status_code=400, detail="Department not found")
+    level = validate_level(body.level)
+    if applies == "level" and not level:
+        raise HTTPException(status_code=400, detail="Choose a level for this rule")
+    return name, applies, due_days, level
+
+
+def requirement_applies_to_employee(req, emp):
+    if not req.is_active:
+        return False
+    if req.applies_to == "department":
+        return bool(req.department_id) and emp.department_id == req.department_id
+    if req.applies_to == "level":
+        return bool(req.level) and (emp.level or "") == req.level
+    return True
+
+
+def assign_document_requests(db, client_id, emp, requirements=None):
+    """Create the outstanding requests for one employee, skipping any they
+    already have so this is safe to re-run after a department or level change."""
+    if requirements is None:
+        requirements = db.query(models.DBDocumentRequirement).filter(
+            models.DBDocumentRequirement.client_id == client_id,
+            models.DBDocumentRequirement.is_active == True,
+        ).order_by(models.DBDocumentRequirement.sort_order.asc()).all()
+
+    existing = {
+        r.requirement_id for r in db.query(models.DBDocumentRequest).filter(
+            models.DBDocumentRequest.employee_id == emp.id
+        ).all() if r.requirement_id
+    }
+    start = _parse_date(emp.start_date) or datetime.now().date()
+    created = []
+    for req in requirements:
+        if req.id in existing or not requirement_applies_to_employee(req, emp):
+            continue
+        created.append(models.DBDocumentRequest(
+            client_id=client_id, employee_id=emp.id, requirement_id=req.id,
+            name=req.name, description=req.description or "", doc_type=req.doc_type,
+            is_mandatory=bool(req.is_mandatory),
+            due_date=(start + timedelta(days=req.due_days or 0)).strftime("%Y-%m-%d"),
+        ))
+    for row in created:
+        db.add(row)
+    return created
+
+
+def seed_default_requirements(db, client_id):
+    """First time HR opens the settings there is something sensible to edit,
+    rather than an empty screen that looks broken."""
+    existing = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.client_id == client_id
+    ).count()
+    if existing:
+        return []
+    rows = []
+    for order, (name, desc, dtype, mandatory, days) in enumerate(DEFAULT_DOCUMENT_REQUIREMENTS):
+        row = models.DBDocumentRequirement(
+            client_id=client_id, name=name, description=desc, doc_type=dtype,
+            is_mandatory=mandatory, due_days=days, sort_order=order,
+        )
+        db.add(row)
+        rows.append(row)
+    db.flush()
+    return rows
+
+
+# --- HR: manage requirements ------------------------------------------------
+
+@app.get("/api/onboarding/requirements")
+def list_document_requirements(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    rows = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.client_id == client.id
+    ).order_by(models.DBDocumentRequirement.sort_order.asc(),
+               models.DBDocumentRequirement.id.asc()).all()
+    if not rows:
+        rows = seed_default_requirements(db, client.id)
+        db.commit()
+    return [requirement_to_dict(r) for r in rows]
+
+
+@app.post("/api/onboarding/requirements")
+def create_document_requirement(request: Request, body: DocumentRequirementIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    name, applies, due_days, level = validate_requirement(body, db, client.id)
+    clash = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.client_id == client.id,
+        sqlfunc.lower(models.DBDocumentRequirement.name) == name.lower(),
+    ).first()
+    if clash:
+        raise HTTPException(status_code=400, detail=f"'{name}' is already on the list")
+    row = models.DBDocumentRequirement(
+        client_id=client.id, name=name, description=body.description or "",
+        doc_type=body.doc_type or "other", is_mandatory=bool(body.is_mandatory),
+        due_days=due_days, applies_to=applies,
+        department_id=body.department_id if applies == "department" else None,
+        level=level if applies == "level" else "",
+        is_active=bool(body.is_active), sort_order=int(body.sort_order or 0),
+    )
+    db.add(row)
+    log_audit(db, client.id, "doc_requirement_created", "requirement", None, name, "", request)
+    db.commit()
+    db.refresh(row)
+    return requirement_to_dict(row)
+
+
+@app.put("/api/onboarding/requirements/{req_id}")
+def update_document_requirement(req_id: int, request: Request, body: DocumentRequirementIn, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    row = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.id == req_id,
+        models.DBDocumentRequirement.client_id == client.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    name, applies, due_days, level = validate_requirement(body, db, client.id)
+    clash = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.client_id == client.id,
+        models.DBDocumentRequirement.id != req_id,
+        sqlfunc.lower(models.DBDocumentRequirement.name) == name.lower(),
+    ).first()
+    if clash:
+        raise HTTPException(status_code=400, detail=f"'{name}' is already on the list")
+    row.name = name
+    row.description = body.description or ""
+    row.doc_type = body.doc_type or "other"
+    row.is_mandatory = bool(body.is_mandatory)
+    row.due_days = due_days
+    row.applies_to = applies
+    row.department_id = body.department_id if applies == "department" else None
+    row.level = level if applies == "level" else ""
+    row.is_active = bool(body.is_active)
+    row.sort_order = int(body.sort_order or 0)
+    db.commit()
+    return requirement_to_dict(row)
+
+
+@app.delete("/api/onboarding/requirements/{req_id}")
+def delete_document_requirement(req_id: int, request: Request, db: Session = Depends(get_db)):
+    """Outstanding requests go with it; anything already submitted is kept so
+    the record of what someone provided is not destroyed."""
+    client = get_client_user(request, db)
+    row = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.id == req_id,
+        models.DBDocumentRequirement.client_id == client.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.requirement_id == req_id,
+        models.DBDocumentRequest.status == "pending",
+    ).delete(synchronize_session=False)
+    db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.requirement_id == req_id
+    ).update({"requirement_id": None}, synchronize_session=False)
+    log_audit(db, client.id, "doc_requirement_deleted", "requirement", row.id, row.name, "", request)
+    db.delete(row)
+    db.commit()
+    return {"message": "Requirement removed"}
+
+
+@app.post("/api/employees/{emp_id}/document-requests/sync")
+def sync_employee_document_requests(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    """Apply the current requirements to one employee - used after their
+    department or level changes, or for staff who predate a new rule."""
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    created = assign_document_requests(db, client.id, emp)
+    db.commit()
+    return {"message": f"{len(created)} document request(s) added", "added": len(created)}
+
+
+@app.get("/api/employees/{emp_id}/document-requests")
+def list_employee_document_requests(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    rows = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.employee_id == emp_id
+    ).order_by(models.DBDocumentRequest.id.asc()).all()
+    return [request_to_dict(r) for r in rows]
+
+
+# --- HR: the review queue ---------------------------------------------------
+
+@app.get("/api/onboarding/document-queue")
+def document_review_queue(request: Request, status: str = "submitted", db: Session = Depends(get_db)):
+    """What employees have sent in, waiting on HR. This is the auto-fetch the
+    employee portal feeds."""
+    client = get_client_user(request, db)
+    query = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client.id
+    )
+    if status and status != "all":
+        query = query.filter(models.DBDocumentRequest.status == status)
+    rows = query.order_by(models.DBDocumentRequest.submitted_at.desc(),
+                          models.DBDocumentRequest.id.desc()).all()
+
+    emp_names = {
+        e.id: f"{e.first_name} {e.last_name}"
+        for e in db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).all()
+    }
+    out = []
+    for r in rows:
+        data = request_to_dict(r)
+        data["employee_name"] = emp_names.get(r.employee_id, "")
+        out.append(data)
+    return out
+
+
+@app.get("/api/onboarding/document-requests/{req_id}/file")
+def download_document_request_file(req_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    row = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.id == req_id,
+        models.DBDocumentRequest.client_id == client.id,
+    ).first()
+    if not row or not row.document:
+        raise HTTPException(status_code=404, detail="No file submitted for this document")
+    return {
+        "file_name": row.document.file_name, "file_type": row.document.file_type,
+        "file_data": row.document.file_data, "name": row.name,
+    }
+
+
+@app.post("/api/onboarding/document-requests/{req_id}/review")
+def review_document_request(req_id: int, request: Request, body: dict = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    body = body or {}
+    row = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.id == req_id,
+        models.DBDocumentRequest.client_id == client.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document request not found")
+    if row.status not in ("submitted", "approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Nothing has been submitted for this document yet")
+
+    decision = (body.get("decision") or "").strip().lower()
+    if decision not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Decision must be approve or reject")
+    note = (body.get("note") or "").strip()
+    if decision == "reject" and not note:
+        raise HTTPException(
+            status_code=400,
+            detail="Give a reason so the employee knows what to resubmit",
+        )
+
+    row.status = "approved" if decision == "approve" else "rejected"
+    row.reviewed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row.reviewed_by = body.get("reviewed_by") or "HR"
+    row.review_note = note
+
+    db.add(models.DBNotification(
+        client_id=client.id, employee_id=row.employee_id,
+        title=f"Document {row.status}: {row.name}",
+        message=note or (f"Your {row.name} has been approved." if decision == "approve"
+                         else f"Your {row.name} needs resubmitting."),
+        type="success" if decision == "approve" else "warning",
+    ))
+    log_audit(db, client.id, f"document_{row.status}", "document_request", row.id,
+              row.name, f"Employee {row.employee_id}", request)
+    db.commit()
+    return request_to_dict(row)
+
+
+# --- Employee portal: see and satisfy your own requirements ------------------
+
+@app.get("/api/employee/document-requests")
+def employee_document_requests(request: Request, db: Session = Depends(get_db)):
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    rows = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.employee_id == emp_id
+    ).order_by(models.DBDocumentRequest.id.asc()).all()
+    outstanding = sum(1 for r in rows if r.status in ("pending", "rejected"))
+    return {
+        "requests": [request_to_dict(r) for r in rows],
+        "outstanding": outstanding,
+        "complete": len(rows) > 0 and outstanding == 0,
+        "limits": {
+            "max_mb": MAX_DOCUMENT_BYTES // 1048576,
+            "allowed": sorted(ALLOWED_DOCUMENT_EXTENSIONS),
+        },
+    }
+
+
+class EmployeeDocumentUpload(BaseModel):
+    file_name: str
+    file_type: Optional[str] = ""
+    file_data: str
+
+
+@app.post("/api/employee/document-requests/{req_id}/upload")
+def employee_upload_document(req_id: int, body: EmployeeDocumentUpload, request: Request,
+                             db: Session = Depends(get_db)):
+    """The employee satisfies one requirement. Reuses the same size and type
+    checks as candidate uploads, since this is also a file from outside HR."""
+    emp_id = request.session.get('employee_id')
+    if not emp_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    row = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.id == req_id,
+        models.DBDocumentRequest.employee_id == emp_id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Document request not found")
+    if row.status == "approved":
+        raise HTTPException(status_code=409, detail="This document has already been approved")
+
+    size = validate_candidate_document(body)
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
+
+    doc = models.DBDocument(
+        client_id=row.client_id, employee_id=emp_id,
+        title=row.name, doc_type=row.doc_type,
+        file_name=body.file_name, file_type=body.file_type or "",
+        file_size=size, file_data=body.file_data,
+        uploaded_by=f"{emp.first_name} {emp.last_name}" if emp else "Employee",
+    )
+    db.add(doc)
+    db.flush()
+
+    row.document_id = doc.id
+    row.status = "submitted"
+    row.submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row.reviewed_at = ""
+    row.reviewed_by = ""
+    row.review_note = ""
+    log_audit(db, row.client_id, "document_submitted", "document_request", row.id,
+              row.name, f"Employee {emp_id}", request, user_type="employee",
+              user_name=f"{emp.first_name} {emp.last_name}" if emp else "")
+    db.commit()
+    return {"message": f"{row.name} submitted for review", "status": row.status}
 
 # ============ RECRUITMENT ============
 

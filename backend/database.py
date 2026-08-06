@@ -719,6 +719,53 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Onboarding document requirements and per-employee requests
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS document_requirements (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        name VARCHAR NOT NULL,
+                        description VARCHAR DEFAULT '',
+                        doc_type VARCHAR DEFAULT 'other',
+                        is_mandatory BOOLEAN DEFAULT TRUE,
+                        due_days INTEGER DEFAULT 7,
+                        applies_to VARCHAR DEFAULT 'all',
+                        department_id INTEGER REFERENCES departments(id),
+                        level VARCHAR DEFAULT '',
+                        is_active BOOLEAN DEFAULT TRUE,
+                        sort_order INTEGER DEFAULT 0,
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_reqs_client ON document_requirements (client_id)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS document_requests (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        employee_id INTEGER REFERENCES employees(id) NOT NULL,
+                        requirement_id INTEGER REFERENCES document_requirements(id),
+                        document_id INTEGER REFERENCES employee_documents(id),
+                        name VARCHAR NOT NULL,
+                        description VARCHAR DEFAULT '',
+                        doc_type VARCHAR DEFAULT 'other',
+                        is_mandatory BOOLEAN DEFAULT TRUE,
+                        due_date VARCHAR DEFAULT '',
+                        status VARCHAR DEFAULT 'pending',
+                        submitted_at VARCHAR DEFAULT '',
+                        reviewed_at VARCHAR DEFAULT '',
+                        reviewed_by VARCHAR DEFAULT '',
+                        review_note VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_employee ON document_requests (employee_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_status ON document_requests (status)"))
+                conn.execute(text("ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_size INTEGER DEFAULT 0"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Employee seniority level
             try:
                 conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS level VARCHAR DEFAULT ''"))

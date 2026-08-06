@@ -655,9 +655,63 @@ class DBDocument(Base):
     doc_type = Column(String, default="other")
     file_name = Column(String, default="")
     file_type = Column(String, default="")
+    file_size = Column(Integer, default=0)
     file_data = Column(Text, default="")
     uploaded_by = Column(String, default="HR")
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBDocumentRequirement(Base):
+    """What HR asks new starters to provide.
+
+    This is the template. Each employee gets their own request row against it,
+    so a policy change does not rewrite what someone already submitted.
+    """
+    __tablename__ = "document_requirements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, default="")
+    doc_type = Column(String, default="other")
+    is_mandatory = Column(Boolean, default=True)
+    due_days = Column(Integer, default=7)          # days after start date
+    applies_to = Column(String, default="all")     # all | department | level
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    level = Column(String, default="")
+    is_active = Column(Boolean, default=True, index=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    department = relationship("DBDepartment")
+
+
+class DBDocumentRequest(Base):
+    """One employee's obligation to provide one document, and its review."""
+    __tablename__ = "document_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    requirement_id = Column(Integer, ForeignKey("document_requirements.id"), nullable=True, index=True)
+    document_id = Column(Integer, ForeignKey("employee_documents.id"), nullable=True)
+
+    name = Column(String, nullable=False)          # copied so it survives template edits
+    description = Column(String, default="")
+    doc_type = Column(String, default="other")
+    is_mandatory = Column(Boolean, default=True)
+    due_date = Column(String, default="")
+
+    status = Column(String, default="pending", index=True)  # pending|submitted|approved|rejected
+    submitted_at = Column(String, default="")
+    reviewed_at = Column(String, default="")
+    reviewed_by = Column(String, default="")
+    review_note = Column(String, default="")
+
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    employee = relationship("DBEmployee")
+    document = relationship("DBDocument")
 
 
 class DBBill(Base):

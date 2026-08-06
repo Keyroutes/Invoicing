@@ -45,7 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=19">
+    <link rel="stylesheet" href="mobile.css?v=20">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -355,12 +355,29 @@
 
     <!-- Tab: Documents -->
     <div id="tab-documents" class="tab-panel hidden fade-in">
+      <!-- What HR has asked this person to provide -->
+      <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden mb-6">
+        <div class="p-6 border-b border-gray-100 flex items-center gap-3 flex-wrap">
+          <div>
+            <h3 class="font-semibold text-gray-900">Required Documents</h3>
+            <p class="text-xs text-gray-400 mt-0.5" id="reqHint">Upload what HR needs from you.</p>
+          </div>
+          <span id="reqBadge" class="ml-auto text-xs font-semibold px-3 py-1 rounded-full bg-gray-100 text-gray-500"></span>
+        </div>
+        <div id="reqList" class="divide-y divide-gray-50">
+          <div class="p-8 text-center text-gray-400 text-sm">Loading...</div>
+        </div>
+      </div>
+
       <div class="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <div class="p-6 border-b border-gray-100">
-          <h3 class="font-semibold text-gray-900">My Documents</h3>
+          <h3 class="font-semibold text-gray-900">All My Documents</h3>
         </div>
         <div id="docList" class="divide-y divide-gray-50"></div>
       </div>
+      <input type="file" id="reqFileInput" class="hidden"
+             accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt"
+             onchange="handleRequirementFile(this)">
     </div>
 
     <!-- Tab: Onboarding -->
@@ -441,6 +458,133 @@
     var elapsedInterval = null, breakInterval = null, breakStartTime = null;
 
     function apiGet(url) { return fetch(url, { credentials: 'same-origin' }); }
+
+    // Escape anything user- or HR-supplied before it goes into innerHTML.
+    function esc(v) {
+      if (v === null || v === undefined) return '';
+      return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // --- Required documents ------------------------------------------------
+    // HR decides the list; this is where the employee satisfies it. Uploads go
+    // straight to the HR review queue.
+    var _reqLimits = { max_mb: 5, allowed: [] };
+    var _pendingReqId = null;
+
+    async function loadDocumentRequests() {
+      var list = document.getElementById('reqList');
+      var badge = document.getElementById('reqBadge');
+      var hint = document.getElementById('reqHint');
+      if (!list) return;
+      try {
+        var res = await apiGet('/api/employee/document-requests');
+        var data = await res.json();
+        _reqLimits = data.limits || _reqLimits;
+        var rows = data.requests || [];
+
+        if (hint) {
+          hint.textContent = rows.length
+            ? 'Accepted: ' + (_reqLimits.allowed || []).join(', ') + ' · max ' + _reqLimits.max_mb + 'MB each'
+            : 'Nothing is required from you right now.';
+        }
+        if (badge) {
+          if (!rows.length) { badge.textContent = ''; }
+          else if (data.complete) {
+            badge.textContent = 'All submitted';
+            badge.className = 'ml-auto text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-600';
+          } else {
+            badge.textContent = data.outstanding + ' outstanding';
+            badge.className = 'ml-auto text-xs font-semibold px-3 py-1 rounded-full bg-amber-50 text-amber-600';
+          }
+        }
+        if (!rows.length) {
+          list.innerHTML = '<div class="p-8 text-center text-gray-400 text-sm">No documents requested.</div>';
+          return;
+        }
+
+        var styles = {
+          pending:   ['bg-gray-100 text-gray-600', 'Not submitted'],
+          submitted: ['bg-blue-50 text-blue-600', 'Awaiting review'],
+          approved:  ['bg-emerald-50 text-emerald-600', 'Approved'],
+          rejected:  ['bg-red-50 text-red-600', 'Needs resubmitting']
+        };
+
+        list.innerHTML = rows.map(function (r) {
+          var st = styles[r.status] || styles.pending;
+          var canUpload = r.status !== 'approved';
+          var due = r.due_date
+            ? '<span class="' + (r.is_overdue ? 'text-red-500 font-medium' : 'text-gray-400') + '">Due ' + esc(r.due_date) + '</span>'
+            : '';
+          return '<div class="p-4 flex items-start gap-3 flex-wrap">' +
+            '<div class="flex-1 min-w-[180px]">' +
+              '<div class="text-sm font-semibold text-gray-900">' + esc(r.name) +
+                (r.is_mandatory ? '<span class="text-red-500 ml-1">*</span>' : '') + '</div>' +
+              (r.description ? '<div class="text-xs text-gray-400 mt-0.5">' + esc(r.description) + '</div>' : '') +
+              '<div class="text-xs mt-1 flex gap-3 flex-wrap">' + due +
+                (r.file_name ? '<span class="text-gray-400">' + esc(r.file_name) + '</span>' : '') + '</div>' +
+              (r.status === 'rejected' && r.review_note
+                ? '<div class="text-xs text-red-500 mt-1">HR: ' + esc(r.review_note) + '</div>' : '') +
+            '</div>' +
+            '<span class="text-xs font-medium px-2.5 py-1 rounded-full ' + st[0] + '">' + st[1] + '</span>' +
+            (canUpload
+              ? '<button onclick="pickDocumentFor(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg min-h-[36px]">' +
+                (r.status === 'pending' ? 'Upload' : 'Replace') + '</button>'
+              : '') +
+          '</div>';
+        }).join('');
+      } catch (e) {
+        list.innerHTML = '<div class="p-8 text-center text-gray-400 text-sm">Could not load your documents.</div>';
+      }
+    }
+
+    function pickDocumentFor(requestId) {
+      _pendingReqId = requestId;
+      var input = document.getElementById('reqFileInput');
+      input.value = '';        // so re-picking the same file still fires change
+      input.click();
+    }
+
+    async function handleRequirementFile(input) {
+      var file = input.files && input.files[0];
+      if (!file || !_pendingReqId) return;
+      var maxBytes = (_reqLimits.max_mb || 5) * 1024 * 1024;
+      if (file.size > maxBytes) {
+        alert('"' + file.name + '" is larger than ' + (_reqLimits.max_mb || 5) + 'MB.');
+        return;
+      }
+      var ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+      if ((_reqLimits.allowed || []).length && (_reqLimits.allowed || []).indexOf(ext) < 0) {
+        alert('"' + file.name + '" is not an accepted file type.');
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = async function (e) {
+        var reqId = _pendingReqId;
+        _pendingReqId = null;
+        try {
+          var res = await fetch('/api/employee/document-requests/' + reqId + '/upload', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file_name: file.name, file_type: file.type,
+              file_data: e.target.result.split(',')[1]
+            })
+          });
+          var data = await res.json();
+          if (!res.ok) throw new Error(data.detail || 'Upload failed');
+          // Refresh both lists so the new file shows in each straight away.
+          loadDocumentRequests();
+          loadDocuments();
+          loadNotifications();
+        } catch (err) {
+          alert(err.message);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
     function apiPost(url, body) { return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: body ? JSON.stringify(body) : '{}' }); }
     function apiPatch(url, body) { return fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) }); }
 
@@ -453,7 +597,7 @@
       if (btn) { btn.classList.add('tab-active'); btn.classList.remove('text-gray-500'); }
       if (tab === 'goals') loadGoals();
       if (tab === 'leave') loadLeave();
-      if (tab === 'documents') loadDocuments();
+      if (tab === 'documents') { loadDocuments(); loadDocumentRequests(); }
       if (tab === 'team') loadTeamPresence();
       if (tab === 'profile') loadProfileTab();
     }

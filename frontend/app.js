@@ -2417,6 +2417,7 @@ async function viewEmployee(empId) {
         });
         renderEmployeeLeavePanel(emp);
         renderEmployeeAttendancePanel(emp);
+        renderEmployeeDocRequests(emp);
         var typeEl = document.getElementById('emp-detail-type');
         if (typeEl) typeEl.value = emp.employment_type || 'full_time';
         var payfreqEl = document.getElementById('emp-detail-payfreq');
@@ -4096,7 +4097,7 @@ showView = function(viewId) {
     if (viewId === 'leave-view') loadLeaveView();
     if (viewId === 'goals-view') loadGoalsView();
     if (viewId === 'departments-view') fetchDepartments();
-    if (viewId === 'onboarding-hub-view') loadOnboardingHub();
+    if (viewId === 'onboarding-hub-view') { loadOnboardingHub(); loadDocumentQueue(); }
     if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
@@ -6807,7 +6808,7 @@ var HR_VIEW_LOADERS = {
     'employees-view':      function () { fetchEmployees(currentEmpFilter); },
     'departments-view':    function () { fetchDepartments(); },
     'orgchart-view':       function () { loadOrgChart(); },
-    'onboarding-hub-view': function () { loadOnboardingHub(); },
+    'onboarding-hub-view': function () { loadOnboardingHub(); loadDocumentQueue(); },
     'payroll-view':        function () { fetchPayslips(currentPsFilter); },
     'leave-view':          function () { loadLeaveView(); },
     'goals-view':          function () { loadGoalsView(); },
@@ -7054,3 +7055,294 @@ function viewEmployeePayslips() {
     focusEmployeeIn('payroll-view', currentEmployeeId, name);
 }
 window.viewEmployeePayslips = viewEmployeePayslips;
+
+// ==========================================================================
+// ONBOARDING DOCUMENTS
+// HR defines what new starters must provide; employees upload it from their
+// own portal; the submissions land in this queue for review.
+// ==========================================================================
+
+var _docRequirements = [];
+
+// --- Review queue -----------------------------------------------------------
+
+async function loadDocumentQueue() {
+    var host = document.getElementById('doc-queue-list');
+    if (!host) return;
+    var status = (document.getElementById('doc-queue-filter') || {}).value || 'submitted';
+    host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">Loading...</p>';
+    try {
+        var res = await fetch('/api/onboarding/document-queue?status=' + encodeURIComponent(status));
+        var rows = res.ok ? await res.json() : [];
+        if (!rows.length) {
+            host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">' +
+                (status === 'submitted' ? 'Nothing waiting for review.' : 'Nothing here.') + '</p>';
+            return;
+        }
+        var colors = {
+            pending: 'var(--text-secondary)', submitted: 'var(--primary-color)',
+            approved: 'var(--success-color)', rejected: 'var(--danger-color)'
+        };
+        host.innerHTML = rows.map(function (r) {
+            var actions = '';
+            if (r.status === 'submitted' || r.status === 'approved' || r.status === 'rejected') {
+                if (r.document_id) {
+                    actions += '<button class="btn btn-outline btn-sm" onclick="downloadRequestFile(' + r.id + ')">Download</button> ';
+                }
+            }
+            if (r.status === 'submitted') {
+                actions += '<button class="btn btn-outline btn-sm" style="color:var(--success-color);border-color:var(--success-color);" onclick="reviewDocument(' + r.id + ',\'approve\')">Approve</button> ' +
+                           '<button class="btn btn-outline btn-sm" style="color:var(--danger-color);border-color:var(--danger-color);" onclick="reviewDocument(' + r.id + ',\'reject\')">Reject</button>';
+            }
+            var meta = [];
+            if (r.file_name) meta.push(esc(r.file_name));
+            if (r.submitted_at) meta.push('sent ' + esc(r.submitted_at.slice(0, 16)));
+            else if (r.due_date) meta.push((r.is_overdue ? 'overdue since ' : 'due ') + esc(r.due_date));
+            if (r.review_note) meta.push('note: ' + esc(r.review_note));
+
+            return '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0;' +
+                   'border-bottom:1px solid var(--border-color);">' +
+                '<div style="flex:1;min-width:190px;">' +
+                    '<strong>' + employeeLink(r.employee_id, r.employee_name) + '</strong>' +
+                    '<span style="color:var(--text-secondary);"> &middot; ' + esc(r.name) + '</span>' +
+                    (r.is_mandatory ? '' : '<span style="font-size:0.72rem;color:var(--text-secondary);"> (optional)</span>') +
+                    (meta.length ? '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">' +
+                        meta.join(' &middot; ') + '</div>' : '') +
+                '</div>' +
+                '<span style="font-size:0.75rem;text-transform:capitalize;color:' + (colors[r.status] || '') +
+                    ';font-weight:600;' + (r.is_overdue && r.status === 'pending' ? 'color:var(--danger-color);' : '') + '">' +
+                    esc(r.status) + (r.is_overdue && r.status === 'pending' ? ' · overdue' : '') + '</span>' +
+                (actions ? '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + actions + '</div>' : '') +
+            '</div>';
+        }).join('');
+    } catch (e) {
+        host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">Could not load submissions.</p>';
+    }
+}
+window.loadDocumentQueue = loadDocumentQueue;
+
+async function downloadRequestFile(reqId) {
+    try {
+        var res = await fetch('/api/onboarding/document-requests/' + reqId + '/file');
+        var doc = await res.json();
+        if (!res.ok) throw new Error(doc.detail || 'Failed');
+        var bytes = atob(doc.file_data);
+        var arr = new Uint8Array(bytes.length);
+        for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([arr], { type: doc.file_type || 'application/octet-stream' }));
+        var a = document.createElement('a');
+        a.href = url; a.download = doc.file_name || 'document'; a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.downloadRequestFile = downloadRequestFile;
+
+async function reviewDocument(reqId, decision) {
+    var note = '';
+    if (decision === 'reject') {
+        // The employee has to know what to fix, so a reason is required.
+        note = prompt('Why is this being rejected?\n(The employee sees this.)', '');
+        if (note === null) return;
+        if (!note.trim()) { showToast('A reason is required', 'error'); return; }
+    }
+    try {
+        var res = await fetch('/api/onboarding/document-requests/' + reqId + '/review', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decision: decision, note: note })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Document ' + data.status, 'success');
+        loadDocumentQueue();
+        hrDataChanged('onboarding');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.reviewDocument = reviewDocument;
+
+// --- Requirement settings ---------------------------------------------------
+
+async function openRequirementsModal() {
+    var modal = document.getElementById('requirements-modal');
+    if (!modal) return;
+    try {
+        var depts = await (await fetch('/api/departments')).json();
+        var sel = document.getElementById('req-department');
+        sel.innerHTML = '<option value="">Select...</option>';
+        depts.forEach(function (d) {
+            sel.insertAdjacentHTML('beforeend', '<option value="' + d.id + '">' + esc(d.name) + '</option>');
+        });
+    } catch (e) { /* department scoping stays unavailable rather than blocking */ }
+    await populateLevelRoleSelects('req-level', null);
+    resetRequirementForm();
+    await loadRequirements();
+    modal.style.display = 'flex';
+}
+window.openRequirementsModal = openRequirementsModal;
+
+function closeRequirementsModal() {
+    var m = document.getElementById('requirements-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeRequirementsModal = closeRequirementsModal;
+
+async function loadRequirements() {
+    var host = document.getElementById('requirements-list');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/onboarding/requirements');
+        _docRequirements = res.ok ? await res.json() : [];
+    } catch (e) { _docRequirements = []; }
+
+    if (!_docRequirements.length) {
+        host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">Nothing required yet.</p>';
+        return;
+    }
+    host.innerHTML = _docRequirements.map(function (r) {
+        var scope = r.applies_to === 'department' ? (r.department_name || 'a department')
+                  : r.applies_to === 'level' ? ('level ' + r.level) : 'everyone';
+        return '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 0;' +
+               'border-bottom:1px solid var(--border-color);' + (r.is_active ? '' : 'opacity:0.5;') + '">' +
+            '<div style="flex:1;min-width:170px;">' +
+                '<strong>' + esc(r.name) + '</strong>' +
+                (r.is_mandatory ? '<span style="color:var(--danger-color);"> *</span>'
+                                : '<span style="font-size:0.72rem;color:var(--text-secondary);"> optional</span>') +
+                '<div style="font-size:0.75rem;color:var(--text-secondary);">' +
+                    esc(r.doc_type) + ' &middot; due ' + r.due_days + ' days after start &middot; ' + esc(scope) +
+                    (r.is_active ? '' : ' &middot; inactive') + '</div>' +
+            '</div>' +
+            '<button class="btn btn-outline btn-sm" onclick="editRequirement(' + r.id + ')">Edit</button> ' +
+            '<button class="btn btn-outline btn-sm" style="color:var(--danger-color);border-color:var(--danger-color);" ' +
+                'onclick="deleteRequirement(' + r.id + ')">Remove</button>' +
+        '</div>';
+    }).join('');
+}
+window.loadRequirements = loadRequirements;
+
+function onRequirementScopeChange() {
+    var scope = (document.getElementById('req-applies') || {}).value;
+    var dept = document.getElementById('req-dept-group');
+    var lvl = document.getElementById('req-level-group');
+    if (dept) dept.style.display = scope === 'department' ? 'flex' : 'none';
+    if (lvl) lvl.style.display = scope === 'level' ? 'flex' : 'none';
+}
+window.onRequirementScopeChange = onRequirementScopeChange;
+
+function resetRequirementForm() {
+    ['req-id', 'req-name', 'req-description'].forEach(function (id) {
+        var el = document.getElementById(id); if (el) el.value = '';
+    });
+    var days = document.getElementById('req-days'); if (days) days.value = 7;
+    var type = document.getElementById('req-type'); if (type) type.value = 'identity';
+    var applies = document.getElementById('req-applies'); if (applies) applies.value = 'all';
+    var mand = document.getElementById('req-mandatory'); if (mand) mand.checked = true;
+    var btn = document.getElementById('req-save-btn'); if (btn) btn.textContent = 'Add Document';
+    onRequirementScopeChange();
+}
+
+function editRequirement(id) {
+    var r = _docRequirements.filter(function (x) { return x.id === id; })[0];
+    if (!r) return;
+    function set(elId, v) { var el = document.getElementById(elId); if (el) el.value = v; }
+    set('req-id', r.id);
+    set('req-name', r.name);
+    set('req-description', r.description);
+    set('req-type', r.doc_type);
+    set('req-days', r.due_days);
+    set('req-applies', r.applies_to);
+    set('req-department', r.department_id || '');
+    set('req-level', r.level || '');
+    document.getElementById('req-mandatory').checked = !!r.is_mandatory;
+    document.getElementById('req-save-btn').textContent = 'Save Changes';
+    onRequirementScopeChange();
+}
+window.editRequirement = editRequirement;
+
+async function saveRequirement() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    var id = val('req-id');
+    var payload = {
+        name: val('req-name').trim(),
+        description: val('req-description'),
+        doc_type: val('req-type'),
+        due_days: parseInt(val('req-days')) || 0,
+        applies_to: val('req-applies'),
+        department_id: val('req-department') ? parseInt(val('req-department')) : null,
+        level: val('req-level'),
+        is_mandatory: document.getElementById('req-mandatory').checked,
+        is_active: true
+    };
+    if (!payload.name) { showToast('Give the document a name', 'error'); return; }
+    try {
+        var res = await fetch('/api/onboarding/requirements' + (id ? '/' + id : ''), {
+            method: id ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast(id ? 'Document updated' : 'Document added', 'success');
+        resetRequirementForm();
+        loadRequirements();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.saveRequirement = saveRequirement;
+
+async function deleteRequirement(id) {
+    if (!confirm('Remove this document requirement?\nAnything already submitted is kept.')) return;
+    try {
+        var res = await fetch('/api/onboarding/requirements/' + id, { method: 'DELETE' });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast('Requirement removed', 'success');
+        loadRequirements();
+        loadDocumentQueue();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.deleteRequirement = deleteRequirement;
+
+// --- Employee profile: their outstanding paperwork --------------------------
+
+function renderEmployeeDocRequests(emp) {
+    var host = document.getElementById('emp-doc-requests');
+    if (!host) return;
+    var rows = emp.document_requests || [];
+    if (!rows.length) {
+        host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No documents requested.</p>';
+        return;
+    }
+    var colors = {
+        pending: 'var(--text-secondary)', submitted: 'var(--primary-color)',
+        approved: 'var(--success-color)', rejected: 'var(--danger-color)'
+    };
+    host.innerHTML = rows.map(function (r) {
+        return '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:8px 0;' +
+               'border-bottom:1px solid var(--border-color);font-size:0.85rem;">' +
+            '<span style="flex:1;min-width:130px;">' + esc(r.name) +
+                (r.is_mandatory ? '<span style="color:var(--danger-color);"> *</span>' : '') + '</span>' +
+            (r.due_date ? '<span style="font-size:0.75rem;color:' +
+                (r.is_overdue ? 'var(--danger-color)' : 'var(--text-secondary)') + ';">due ' + esc(r.due_date) + '</span>' : '') +
+            '<span style="text-transform:capitalize;color:' + (colors[r.status] || '') + ';font-weight:600;">' +
+                esc(r.status) + '</span>' +
+            (r.document_id ? ' <button class="btn btn-outline btn-sm" onclick="downloadRequestFile(' + r.id + ')">Get</button>' : '') +
+            (r.status === 'submitted'
+                ? ' <button class="btn btn-outline btn-sm" style="color:var(--success-color);border-color:var(--success-color);" onclick="reviewDocument(' + r.id + ',\'approve\')">Approve</button>' +
+                  ' <button class="btn btn-outline btn-sm" style="color:var(--danger-color);border-color:var(--danger-color);" onclick="reviewDocument(' + r.id + ',\'reject\')">Reject</button>'
+                : '') +
+        '</div>';
+    }).join('');
+}
+window.renderEmployeeDocRequests = renderEmployeeDocRequests;
+
+// Re-apply the current requirement rules to one person, for staff who predate
+// a new rule or whose department or level changed.
+async function syncEmployeeDocRequests() {
+    if (!currentEmployeeId) return;
+    try {
+        var res = await fetch('/api/employees/' + currentEmployeeId + '/document-requests/sync', { method: 'POST' });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed');
+        showToast(data.message, data.added ? 'success' : 'info');
+        viewEmployee(currentEmployeeId);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.syncEmployeeDocRequests = syncEmployeeDocRequests;
