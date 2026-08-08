@@ -485,6 +485,7 @@ function renderDashboard(data) {
     setText('dash-pending-count', s.pending_count || 0);
     setText('dash-draft-count', s.draft_count || 0);
     renderCashFlowChart(data.cash_flow);
+    if (typeof loadAIInsights === 'function') loadAIInsights();
 }
 
 function renderCashFlowChart(cashFlowData) {
@@ -1745,7 +1746,9 @@ function addLineItemRow() {
         '</select></td>' +
         '<td style="display:none;" class="item-tax-amount">0.00</td>' +
         '<td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td>' +
-        '<td style="padding:8px;text-align:center;">' +
+        '<td style="padding:8px;text-align:center;white-space:nowrap;">' +
+        '<button type="button" class="btn-icon ai-desc" title="Tidy this description with AI" ' +
+        'onclick="aiDescribeLineItem(this)" style="color:var(--primary-color);cursor:pointer;background:none;border:none;">&#10022;</button>' +
         '<button type="button" class="btn-icon delete-row" style="color:var(--danger-color);cursor:pointer;background:none;border:none;">' +
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
         '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
@@ -7621,3 +7624,217 @@ function handleInsufficientCredit(detail) {
     setTimeout(openTopUpModal, 600);
 }
 window.handleInsufficientCredit = handleInsufficientCredit;
+
+// ==========================================================================
+// AI ASSISTANT
+// Answers from the tenant's own data. The previous version was an inline
+// script that never ran: an unescaped quote in font-family:'Rajdhani' broke
+// the whole block, so toggleAIChat was never defined and the orb did nothing.
+// It also only ever replied "simulation mode".
+// ==========================================================================
+
+var _aiChatReady = false;
+
+function toggleAIChat() {
+    var w = document.getElementById('ai-chat-window');
+    if (!w) return;
+    var opening = w.style.display !== 'flex';
+    w.style.display = opening ? 'flex' : 'none';
+    if (opening) {
+        if (!_aiChatReady) { initAIChat(); _aiChatReady = true; }
+        var input = document.getElementById('ai-chat-input');
+        if (input) input.focus();
+    }
+}
+window.toggleAIChat = toggleAIChat;
+
+function aiChatBubble(text, who) {
+    var msgs = document.getElementById('ai-chat-messages');
+    if (!msgs) return null;
+    var el = document.createElement('div');
+    if (who === 'user') {
+        el.style.cssText = 'align-self:flex-end;background:rgba(255,255,255,0.1);padding:8px 12px;' +
+            'border-radius:4px;border-right:2px solid var(--text-secondary);max-width:85%;overflow-wrap:anywhere;';
+    } else {
+        el.style.cssText = 'align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;' +
+            'border-radius:4px;border-left:2px solid var(--primary-color);max-width:90%;' +
+            'white-space:pre-wrap;overflow-wrap:anywhere;';
+    }
+    el.textContent = text;          // textContent, so a reply can never inject markup
+    msgs.appendChild(el);
+    msgs.scrollTop = msgs.scrollHeight;
+    return el;
+}
+
+async function initAIChat() {
+    aiChatBubble('Ask me about your invoices, people or hiring. I answer from your own data.', 'ai');
+    try {
+        var res = await fetch('/api/ai/suggestions');
+        if (!res.ok) return;
+        var data = await res.json();
+        var host = document.getElementById('ai-chat-suggestions');
+        if (!host) return;
+        host.innerHTML = '';
+        (data.suggestions || []).forEach(function (q) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'btn btn-outline btn-sm';
+            b.style.cssText = 'font-size:0.72rem;padding:4px 9px;';
+            b.textContent = q;
+            b.onclick = function () {
+                document.getElementById('ai-chat-input').value = q;
+                sendAIChat();
+            };
+            host.appendChild(b);
+        });
+    } catch (e) { /* suggestions are optional */ }
+}
+
+async function sendAIChat() {
+    var input = document.getElementById('ai-chat-input');
+    if (!input) return;
+    var question = input.value.trim();
+    if (!question) return;
+    input.value = '';
+
+    var suggestions = document.getElementById('ai-chat-suggestions');
+    if (suggestions) suggestions.innerHTML = '';
+
+    aiChatBubble(question, 'user');
+    var thinking = aiChatBubble('Thinking...', 'ai');
+
+    try {
+        var res = await fetch('/api/ai/assistant', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: question })
+        });
+        var data = await res.json();
+        if (thinking) thinking.remove();
+
+        if (res.status === 402) {
+            aiChatBubble(data.detail || 'Not enough wallet credit for the assistant.', 'ai');
+            if (typeof handleInsufficientCredit === 'function') handleInsufficientCredit(data.detail);
+            return;
+        }
+        if (!res.ok) { aiChatBubble(data.detail || 'Sorry, that did not work.', 'ai'); return; }
+        aiChatBubble(data.answer, 'ai');
+    } catch (e) {
+        if (thinking) thinking.remove();
+        aiChatBubble('Could not reach the assistant. Check your connection.', 'ai');
+    }
+}
+window.sendAIChat = sendAIChat;
+
+// --- AI helpers attached to specific screens -------------------------------
+
+// Dashboard: a short read on where the business stands.
+async function loadAIInsights() {
+    var host = document.getElementById('ai-insights-panel');
+    if (!host) return;
+    host.innerHTML = '<span style="color:var(--text-secondary);font-size:0.85rem;">Reading your numbers...</span>';
+    try {
+        var res = await fetch('/api/ai/insights');
+        var d = await res.json();
+        if (!res.ok || !d.available) {
+            host.closest('.glass-widget, .widget').style.display = 'none';
+            return;
+        }
+        var colors = { high: 'var(--danger-color)', medium: 'var(--warning-color)', low: 'var(--text-secondary)' };
+        host.innerHTML = '<p style="font-size:0.92rem;margin-bottom:12px;">' + esc(d.headline) + '</p>' +
+            (d.actions || []).map(function (a) {
+                return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;' +
+                       'border-top:1px solid var(--border-color);font-size:0.85rem;">' +
+                    '<span style="color:' + (colors[a.priority] || '') + ';font-size:0.7rem;font-weight:700;' +
+                    'text-transform:uppercase;min-width:52px;">' + esc(a.priority || '') + '</span>' +
+                    '<span>' + esc(a.text) + '</span></div>';
+            }).join('');
+    } catch (e) {
+        var w = host.closest('.glass-widget, .widget');
+        if (w) w.style.display = 'none';
+    }
+}
+window.loadAIInsights = loadAIInsights;
+
+// Recruitment: draft a job advert from the requisition fields.
+async function aiWriteJobDescription() {
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    var title = val('job-title');
+    if (!title) { showToast('Enter a job title first', 'error'); return; }
+    showToast('Drafting the advert...', 'info');
+    try {
+        var res = await fetch('/api/ai/job-description', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: title,
+                department: (document.getElementById('job-department') || {}).selectedOptions
+                    ? document.getElementById('job-department').selectedOptions[0].textContent : '',
+                level: val('job-level'), location: val('job-location'),
+                work_mode: val('job-work-mode'), employment_type: val('job-employment-type')
+            })
+        });
+        var d = await res.json();
+        if (!res.ok) { reportApiError(res, d, 'Could not draft the advert'); return; }
+        if (!d.available) { showToast('AI is not configured on this server', 'error'); return; }
+        var desc = document.getElementById('job-description');
+        var reqs = document.getElementById('job-requirements');
+        if (desc) desc.value = d.description || '';
+        if (reqs) reqs.value = (d.requirements || []).map(function (r) { return '- ' + r; }).join('\n');
+        showToast('Draft written - edit before publishing', 'success');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.aiWriteJobDescription = aiWriteJobDescription;
+
+// Recruitment: interview questions for the candidate on screen.
+async function aiInterviewQuestions() {
+    if (!recCurrentSubId) { showToast('Open a candidate first', 'error'); return; }
+    var form = recFormsLookup[recFormsSubId];
+    showToast('Preparing questions...', 'info');
+    try {
+        var res = await fetch('/api/ai/interview-questions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_title: form ? form.title : 'the role',
+                submission_id: recCurrentSubId
+            })
+        });
+        var d = await res.json();
+        if (!res.ok) { reportApiError(res, d, 'Could not prepare questions'); return; }
+        if (!d.available) { showToast('AI is not configured on this server', 'error'); return; }
+        var host = document.getElementById('ai-screen-result');
+        if (!host) return;
+        host.innerHTML = '<div style="padding:16px;">' +
+            '<strong style="font-size:0.9rem;">Suggested interview questions</strong>' +
+            (d.questions || []).map(function (q) {
+                return '<div style="padding:10px 0;border-top:1px solid var(--border-color);">' +
+                    '<div style="font-size:0.87rem;">' + esc(q.question) + '</div>' +
+                    '<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:2px;">' +
+                    esc(q.area || '') + (q.looking_for ? ' - ' + esc(q.looking_for) : '') + '</div></div>';
+            }).join('') + '</div>';
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.aiInterviewQuestions = aiInterviewQuestions;
+
+// Invoice builder: tidy a rough note into a line description.
+async function aiDescribeLineItem(button) {
+    var row = button.closest('.line-item-row');
+    if (!row) return;
+    var field = row.querySelector('.item-desc');
+    var name = row.querySelector('.item-name');
+    var rough = (field && field.value.trim()) || (name && name.value.trim()) || '';
+    if (!rough) { showToast('Type a few words first', 'error'); return; }
+    try {
+        var res = await fetch('/api/ai/describe-item', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: rough })
+        });
+        var d = await res.json();
+        if (!res.ok) { reportApiError(res, d, 'Could not rewrite that'); return; }
+        if (!d.available) { showToast('AI is not configured on this server', 'error'); return; }
+        if (field) {
+            field.value = d.description;
+            field.style.height = 'auto';
+            field.style.height = field.scrollHeight + 'px';
+        }
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.aiDescribeLineItem = aiDescribeLineItem;

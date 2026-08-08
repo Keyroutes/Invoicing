@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=21">
-    <link rel="stylesheet" href="mobile.css?v=21">
+    <link rel="stylesheet" href="styles.css?v=22">
+    <link rel="stylesheet" href="mobile.css?v=22">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -120,6 +120,13 @@
                             <span class="stat-value lg" style="color:var(--text-secondary);" id="dash-draft-count">0</span>
                             <span class="stat-label">Drafts</span>
                         </button>
+                    </div>
+                    <div class="glass-widget mb-24" id="ai-insights-widget">
+                        <div class="widget-header">
+                            <h3>AI Insights</h3>
+                            <button class="btn btn-outline btn-sm" onclick="loadAIInsights()" style="margin-left:auto;">Refresh</button>
+                        </div>
+                        <div class="widget-content" id="ai-insights-panel"></div>
                     </div>
                     <div class="grid-layout">
                         <section class="widget span-2" id="cash-flow-widget">
@@ -1860,6 +1867,7 @@
                                     <div class="widget-content" id="ai-screen-result">
                                         <p style="font-size:0.85rem;color:var(--text-secondary);">Click below to score this candidate against the job requirements.</p>
                                         <button class="btn btn-primary btn-sm" onclick="aiScreenResume()" style="margin-top:8px;">AI Screen Candidate</button>
+                                        <button class="btn btn-outline btn-sm" onclick="aiInterviewQuestions()" style="margin-top:8px;">Interview Questions</button>
                                     </div>
                                 </div>
                             </div>
@@ -2055,10 +2063,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=21"></script>
+    <script src="app.js?v=22"></script>
 
     <!-- AI Core Orb -->
-    <div class="ai-core" onclick="toggleAIChat()">
+    <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"></path>
             <path d="M12 22a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2z"></path>
@@ -2071,41 +2079,19 @@
     <!-- AI Chat Window -->
     <div class="ai-chat-window" id="ai-chat-window">
         <div style="padding-bottom:12px;border-bottom:1px solid var(--primary-color);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
-            <strong style="color:var(--primary-light);font-family:'Rajdhani',sans-serif;font-size:1.1rem;letter-spacing:1px;">CORE ASSISTANT</strong>
-            <button onclick="toggleAIChat()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;">&times;</button>
+            <strong style="color:var(--primary-light);font-family:Rajdhani,sans-serif;font-size:1.1rem;letter-spacing:1px;">ASSISTANT</strong>
+            <button onclick="toggleAIChat()" aria-label="Close assistant" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1.2rem;min-width:32px;min-height:32px;">&times;</button>
         </div>
-        <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-size:0.85rem;" id="ai-chat-messages">
-            <div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);">
-                Systems nominal. How can I assist you today?
-            </div>
-        </div>
-        <div style="margin-top:12px;display:flex;gap:8px;">
-            <input type="text" placeholder="Query system..." class="table-input" style="flex:1;background:rgba(0,0,0,0.5);border:1px solid rgba(0,240,255,0.3);color:white;" id="ai-chat-input">
-            <button class="btn btn-primary btn-sm" onclick="sendAIChat()" style="min-width:0;padding:0 12px;"><i class="bi bi-send"></i></button>
+        <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-size:0.85rem;" id="ai-chat-messages"></div>
+        <div id="ai-chat-suggestions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;"></div>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+            <input type="text" placeholder="Ask about your data..." class="table-input"
+                   style="flex:1;background:rgba(0,0,0,0.5);border:1px solid rgba(0,240,255,0.3);color:white;"
+                   id="ai-chat-input" onkeydown="if(event.key==='Enter')sendAIChat()">
+            <button class="btn btn-primary btn-sm" onclick="sendAIChat()" aria-label="Send"
+                    style="min-width:0;padding:0 12px;">&#10148;</button>
         </div>
     </div>
-    <script>
-        function toggleAIChat() {
-            var w = document.getElementById('ai-chat-window');
-            w.style.display = w.style.display === 'flex' ? 'none' : 'flex';
-        }
-        function sendAIChat() {
-            var inp = document.getElementById('ai-chat-input');
-            if(!inp.value.trim()) return;
-            var msgs = document.getElementById('ai-chat-messages');
-            msgs.innerHTML += '<div style="align-self:flex-end;background:rgba(255,255,255,0.1);padding:8px 12px;border-radius:4px;border-right:2px solid var(--text-secondary);">' + inp.value + '</div>';
-            inp.value = '';
-            setTimeout(() => {
-                msgs.innerHTML += '<div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);color:var(--primary-color);font-family:'Rajdhani',sans-serif;">PROCESSING...</div>';
-                msgs.scrollTop = msgs.scrollHeight;
-                setTimeout(() => {
-                    msgs.lastChild.remove();
-                    msgs.innerHTML += '<div style="align-self:flex-start;background:rgba(0,240,255,0.1);padding:8px 12px;border-radius:4px;border-left:2px solid var(--primary-color);">Data query logged. This feature is currently in simulation mode.</div>';
-                    msgs.scrollTop = msgs.scrollHeight;
-                }, 1000);
-            }, 500);
-        }
-    </script>
 
     <div style="position:fixed;bottom:16px;right:16px;font-size:0.75rem;color:var(--text-secondary);opacity:0.6;pointer-events:none;z-index:9999;">Powered by Aniprotech</div>
 

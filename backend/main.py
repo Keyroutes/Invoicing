@@ -5691,6 +5691,16 @@ DEFAULT_PRICING = [
      "Charged per AI-written email."),
     ("ai_attendance_summary", "AI attendance summary", "hr",      30, 5,
      "Charged per attendance summary generated."),
+    ("ai_assistant",      "AI assistant question",   "platform",  10, 30,
+     "Charged per question answered by the in-app assistant."),
+    ("ai_insights",       "AI business insights",    "platform",  25, 10,
+     "Charged per dashboard insight generated."),
+    ("ai_job_description","AI job description",      "hr",        30, 5,
+     "Charged per job advert drafted."),
+    ("ai_interview_questions", "AI interview questions", "hr",    30, 5,
+     "Charged per interview question set."),
+    ("ai_describe_item",  "AI line item wording",    "invoicing", 10, 20,
+     "Charged per invoice description rewritten."),
 ]
 
 PLATFORM_CURRENCY = os.getenv("PLATFORM_CURRENCY", "GBP").upper()
@@ -8714,6 +8724,355 @@ async def meeting_websocket(websocket: WebSocket, room_id: str):
             "name": display_name,
             "participants": participants
         })
+
+# ============================================================================
+# AI ASSISTANT
+# A general assistant over a tenant's own data.
+#
+# The important constraint: it is *grounded*. Real figures are gathered first
+# and passed in as context, and the model is told to answer only from them. An
+# ungrounded chatbot pointed at business data will confidently invent balances
+# and headcounts, which is worse than having no assistant at all.
+# ============================================================================
+
+
+def build_business_context(db, client):
+    """A compact, factual snapshot of this tenant. Everything the assistant is
+    allowed to reason about."""
+    today = datetime.now().date()
+    sym = currency_symbol(client.currency or "GBP")
+
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
+    overdue = [i for i in invoices if invoice_overdue_days(i, today) > 0]
+    outstanding = sum(i.due or 0 for i in invoices if i.status in OPEN_INVOICE_STATUSES)
+    collected = sum(i.paid or 0 for i in invoices)
+
+    employees = db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).all()
+    active = [e for e in employees if e.status == "active"]
+    onboarding = [e for e in employees if e.status == "onboarding"]
+
+    pending_leave = db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.client_id == client.id,
+        models.DBLeaveRequest.status == "pending",
+    ).all()
+    on_leave_today = []
+    for l in db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.client_id == client.id,
+        models.DBLeaveRequest.status == "approved",
+    ).all():
+        start, end = _parse_date(l.start_date), _parse_date(l.end_date)
+        if start and end and start <= today <= end:
+            emp = next((e for e in employees if e.id == l.employee_id), None)
+            if emp:
+                on_leave_today.append(f"{emp.first_name} {emp.last_name}")
+
+    payslips = db.query(models.DBPayslip).filter(models.DBPayslip.client_id == client.id).all()
+    unpaid_payslips = [p for p in payslips if p.status != "Paid"]
+
+    open_jobs = db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.client_id == client.id,
+        models.DBJobRequisition.status == "open",
+    ).all()
+    applications = db.query(models.DBFormSubmission).filter(
+        models.DBFormSubmission.client_id == client.id
+    ).all()
+
+    wallet = get_wallet(db, client.id)
+    outstanding_docs = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client.id,
+        models.DBDocumentRequest.status.in_(["pending", "rejected"]),
+    ).count()
+    awaiting_review = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client.id,
+        models.DBDocumentRequest.status == "submitted",
+    ).count()
+
+    lines = [
+        f"Company: {client.company_name or client.email}",
+        f"Today: {today.isoformat()}",
+        f"Currency: {client.currency or 'GBP'} ({sym})",
+        "",
+        "INVOICING",
+        f"- Invoices: {len(invoices)} total, {sum(1 for i in invoices if i.status == 'Paid')} paid, "
+        f"{sum(1 for i in invoices if i.status == 'Draft')} draft",
+        f"- Outstanding: {sym}{outstanding:.2f}",
+        f"- Collected all time: {sym}{collected:.2f}",
+        f"- Overdue: {len(overdue)} invoice(s), {sym}{sum(i.due or 0 for i in overdue):.2f}",
+    ]
+    for i in sorted(overdue, key=lambda x: invoice_overdue_days(x, today), reverse=True)[:5]:
+        lines.append(f"  - {i.number} to {i.to_contact}: {sym}{i.due:.2f}, "
+                     f"{invoice_overdue_days(i, today)} days overdue, due {i.due_date}")
+
+    lines += [
+        "",
+        "PEOPLE",
+        f"- Employees: {len(employees)} ({len(active)} active, {len(onboarding)} onboarding)",
+        f"- Departments: {db.query(models.DBDepartment).filter(models.DBDepartment.client_id == client.id).count()}",
+        f"- Pending leave requests: {len(pending_leave)}",
+        f"- On approved leave today: {', '.join(on_leave_today) if on_leave_today else 'nobody'}",
+        f"- Payslips: {len(payslips)} total, {len(unpaid_payslips)} not yet marked paid",
+        f"- Onboarding documents outstanding: {outstanding_docs}, awaiting HR review: {awaiting_review}",
+    ]
+    for l in pending_leave[:5]:
+        emp = next((e for e in employees if e.id == l.employee_id), None)
+        if emp:
+            lines.append(f"  - {emp.first_name} {emp.last_name}: {l.leave_type} "
+                         f"{l.start_date} to {l.end_date} ({l.days} days)")
+
+    lines += [
+        "",
+        "RECRUITMENT",
+        f"- Open roles: {len(open_jobs)}",
+        f"- Applications: {len(applications)}, hired: {sum(1 for a in applications if a.hired_employee_id)}",
+    ]
+    for j in open_jobs[:5]:
+        lines.append(f"  - {j.reference} {j.title} ({j.location or 'no location set'})")
+
+    lines += [
+        "",
+        "ACCOUNT",
+        f"- Wallet balance: {currency_symbol(wallet.currency)}{to_major(wallet.balance_minor, wallet.currency):.2f}",
+    ]
+    return "\n".join(lines)
+
+
+
+def as_text(value, separator=None):
+    """Models legitimately return a multi-paragraph field as either a string
+    or a list of strings. Accept both rather than dropping the content."""
+    if separator is None:
+        separator = chr(10) + chr(10)
+    if isinstance(value, list):
+        return separator.join(str(v).strip() for v in value if str(v).strip())
+    return str(value or "").strip()
+
+
+def as_list(value):
+    """Same tolerance for fields that should be a list of short strings."""
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [line.strip(" -*") for line in text.splitlines() if line.strip(" -*")]
+
+
+ASSISTANT_SYSTEM = (
+    "You are the assistant inside a combined invoicing and HR platform. "
+    "Answer using ONLY the CONTEXT below, which contains this company's real, current data. "
+    "Never invent numbers, names, dates or totals. If the answer is not in the context, "
+    "say plainly that you do not have that information and name the screen where the user can find it "
+    "(Invoices, Employees, Leave, Payroll, Recruitment, Wallet). "
+    "Be brief and concrete: two or three sentences, or a short list. Quote figures exactly as given. "
+    "Do not give legal, tax or financial advice; suggest a qualified professional instead."
+)
+
+
+class AssistantQuery(BaseModel):
+    question: str
+
+
+@app.post("/api/ai/assistant")
+def ai_assistant(body: AssistantQuery, request: Request, db: Session = Depends(get_db)):
+    """Answer a question about this tenant's own data."""
+    client = get_client_user(request, db)
+    question = (body.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Ask a question")
+    if len(question) > 500:
+        raise HTTPException(status_code=400, detail="Please keep the question under 500 characters")
+
+    ensure_can_afford(db, client.id, "ai_assistant")
+
+    context = build_business_context(db, client)
+    answer = llm_chat([
+        {"role": "system", "content": ASSISTANT_SYSTEM},
+        {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {question}"},
+    ], temperature=0.2, max_tokens=400)
+
+    if not answer:
+        return {
+            "answer": "The AI assistant is not available right now. "
+                      "An administrator needs to configure the AI key.",
+            "available": False,
+        }
+    charge_after_success(db, client.id, "ai_assistant", 1, question[:60])
+    return {"answer": answer, "available": True}
+
+
+@app.get("/api/ai/suggestions")
+def ai_suggestions(request: Request, db: Session = Depends(get_db)):
+    """Starter questions worth asking, chosen from what is actually going on
+    rather than a fixed list."""
+    client = get_client_user(request, db)
+    today = datetime.now().date()
+    out = []
+
+    invoices = db.query(models.DBInvoice).filter(models.DBInvoice.client_id == client.id).all()
+    if any(invoice_overdue_days(i, today) > 0 for i in invoices):
+        out.append("Which invoices are overdue and by how long?")
+    if invoices:
+        out.append("How much am I owed in total?")
+
+    if db.query(models.DBLeaveRequest).filter(
+        models.DBLeaveRequest.client_id == client.id,
+        models.DBLeaveRequest.status == "pending",
+    ).count():
+        out.append("Who has leave waiting for approval?")
+    if db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).count():
+        out.append("Who is off today?")
+    if db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client.id,
+        models.DBDocumentRequest.status == "submitted",
+    ).count():
+        out.append("Which onboarding documents need reviewing?")
+    if db.query(models.DBJobRequisition).filter(
+        models.DBJobRequisition.client_id == client.id,
+        models.DBJobRequisition.status == "open",
+    ).count():
+        out.append("What roles am I hiring for?")
+
+    out.append("Summarise where the business stands today")
+    return {"suggestions": out[:5]}
+
+
+@app.get("/api/ai/insights")
+def ai_insights(request: Request, db: Session = Depends(get_db)):
+    """A short read on the business for the dashboard, from real figures."""
+    client = get_client_user(request, db)
+    ensure_can_afford(db, client.id, "ai_insights")
+
+    context = build_business_context(db, client)
+    result = llm_json([
+        {"role": "system", "content":
+            "You are a business analyst. Using ONLY the context, return JSON with: "
+            "headline (one sentence on where the business stands), "
+            "actions (list of up to 4 objects with 'text' and 'priority' of high|medium|low, "
+            "each naming a specific figure or name from the context). "
+            "Never invent data. Return ONLY valid JSON."},
+        {"role": "user", "content": context},
+    ])
+    if not result:
+        return {"available": False, "headline": "", "actions": []}
+    charge_after_success(db, client.id, "ai_insights")
+    return {
+        "available": True,
+        "headline": result.get("headline", ""),
+        "actions": (result.get("actions") or [])[:4],
+    }
+
+
+# --- Recruitment writing help ----------------------------------------------
+
+@app.post("/api/ai/job-description")
+def ai_job_description(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Draft a job advert from the requisition details."""
+    client = get_client_user(request, db)
+    body = body or {}
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="A job title is required")
+    ensure_can_afford(db, client.id, "ai_job_description")
+
+    detail = ", ".join(filter(None, [
+        f"department: {body.get('department')}" if body.get("department") else "",
+        f"level: {body.get('level')}" if body.get("level") else "",
+        f"location: {body.get('location')}" if body.get("location") else "",
+        f"work mode: {body.get('work_mode')}" if body.get("work_mode") else "",
+        f"employment type: {body.get('employment_type')}" if body.get("employment_type") else "",
+    ]))
+    result = llm_json([
+        {"role": "system", "content":
+            "You write job adverts. Return ONLY valid JSON with keys: "
+            "description (2-3 short paragraphs about the role and the team), "
+            "requirements (list of 5-8 short bullet strings). "
+            "Write plainly, avoid cliches, and do not invent salary, benefits or company history."},
+        {"role": "user", "content":
+            f"Company: {client.company_name or 'our company'}\nRole: {title}\n{detail}"},
+    ])
+    if not result:
+        return {"available": False, "description": "", "requirements": []}
+    charge_after_success(db, client.id, "ai_job_description", 1, title)
+    return {
+        "available": True,
+        "description": as_text(result.get("description")),
+        "requirements": as_list(result.get("requirements")),
+    }
+
+
+@app.post("/api/ai/interview-questions")
+def ai_interview_questions(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Questions tailored to one candidate against one role."""
+    client = get_client_user(request, db)
+    body = body or {}
+    job_title = (body.get("job_title") or "").strip()
+    if not job_title:
+        raise HTTPException(status_code=400, detail="A job title is required")
+    ensure_can_afford(db, client.id, "ai_interview_questions")
+
+    candidate = ""
+    sub_id = body.get("submission_id")
+    if sub_id:
+        sub = db.query(models.DBFormSubmission).filter(
+            models.DBFormSubmission.id == sub_id,
+            models.DBFormSubmission.client_id == client.id,
+        ).first()
+        if sub:
+            try:
+                answers = json.loads(sub.answers or "{}")
+                candidate = "\n".join(f"{k}: {v}" for k, v in answers.items())[:1500]
+            except (ValueError, TypeError):
+                candidate = ""
+
+    result = llm_json([
+        {"role": "system", "content":
+            "You are an interviewer. Return ONLY valid JSON with key 'questions': a list of 6-8 objects, "
+            "each with 'question', 'area' (technical|experience|behavioural|role fit) and "
+            "'looking_for' (one line on what a good answer shows). "
+            "Base them on the role and, where given, the candidate's own answers. "
+            "Avoid anything touching age, health, family, religion or nationality."},
+        {"role": "user", "content":
+            f"Role: {job_title}\nRound: {body.get('round_name') or 'general interview'}\n"
+            + (f"Candidate said:\n{candidate}" if candidate else "No candidate detail provided.")},
+    ])
+    if not result:
+        return {"available": False, "questions": []}
+    charge_after_success(db, client.id, "ai_interview_questions", 1, job_title)
+    questions = result.get("questions") or []
+    normalised = []
+    for q in questions[:8]:
+        if isinstance(q, dict):
+            normalised.append({
+                "question": as_text(q.get("question")),
+                "area": as_text(q.get("area")),
+                "looking_for": as_text(q.get("looking_for")),
+            })
+        else:
+            normalised.append({"question": as_text(q), "area": "", "looking_for": ""})
+    return {"available": True, "questions": normalised}
+
+
+@app.post("/api/ai/describe-item")
+def ai_describe_item(request: Request, body: dict = None, db: Session = Depends(get_db)):
+    """Turn a rough note into a presentable invoice line description."""
+    client = get_client_user(request, db)
+    body = body or {}
+    rough = (body.get("text") or "").strip()
+    if not rough:
+        raise HTTPException(status_code=400, detail="Write a few words first")
+    ensure_can_afford(db, client.id, "ai_describe_item")
+
+    answer = llm_chat([
+        {"role": "system", "content":
+            "Rewrite the user's rough note as a single clear invoice line description. "
+            "One sentence, under 20 words, factual. Return only the description, no quotes or preamble. "
+            "Do not invent quantities, prices or dates."},
+        {"role": "user", "content": rough},
+    ], temperature=0.3, max_tokens=60)
+    if not answer:
+        return {"available": False, "description": ""}
+    charge_after_success(db, client.id, "ai_describe_item", 1, rough[:40])
+    return {"available": True, "description": answer.strip().strip('"')}
 
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
