@@ -1143,8 +1143,8 @@ function generateInvoicePDF(isDummy) {
 
     // ── Data Extraction ──────────────────────────────────────────
     var contact    = isDummy ? 'Mr Frederick William Harris\n54 Cheshire Field Close\nWest Heath, Birmingham, B31 3TR' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
-    var custEmail  = isDummy ? 'demo@example.com' : (document.getElementById('view-inv-email') ? document.getElementById('view-inv-email').textContent : '');
-    var custPhone  = isDummy ? '+44 121 000 0000' : (document.getElementById('view-inv-phone') ? document.getElementById('view-inv-phone').textContent : '');
+    var custEmail  = isDummy ? 'demo@example.com' : (document.getElementById('view-inv-email-display') ? document.getElementById('view-inv-email-display').textContent : '');
+    var custPhone  = isDummy ? '+44 121 000 0000' : (document.getElementById('view-inv-phone-display') ? document.getElementById('view-inv-phone-display').textContent : '');
     var issueDate  = isDummy ? '26 May 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
     var dueDate    = isDummy ? '2 Jun 2026'  : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
     var numberText = isDummy ? 'INV-0273' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
@@ -2071,10 +2071,7 @@ async function saveSettings() {
         company_address: document.getElementById('settings-company-address') ? document.getElementById('settings-company-address').value : '',
         company_abn: document.getElementById('settings-company-abn') ? document.getElementById('settings-company-abn').value : '',
         company_website: document.getElementById('settings-company-website') ? document.getElementById('settings-company-website').value : '',
-        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'USD',
-        tax_rate: document.getElementById('setting-tax-rate') ? document.getElementById('setting-tax-rate').value : '20',
-        default_payment_terms: document.getElementById('setting-payment-terms') ? document.getElementById('setting-payment-terms').value : '14',
-        invoice_prefix: document.getElementById('setting-invoice-prefix') ? document.getElementById('setting-invoice-prefix').value : 'INV-'
+        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'USD'
     };
     _appCurrency = payload.currency || _appCurrency;
     try {
@@ -2108,9 +2105,6 @@ async function loadSettings() {
         if (data.company_abn !== undefined) { var el = document.getElementById('settings-company-abn'); if (el) el.value = data.company_abn; }
         if (data.company_website !== undefined) { var el = document.getElementById('settings-company-website'); if (el) el.value = data.company_website; }
         if (data.currency !== undefined) { var el = document.getElementById('setting-currency'); if (el) el.value = data.currency; if (_curPickers['settingsCurrency']) setCurrencyPickerDisplay('settingsCurrency', data.currency); }
-        if (data.tax_rate !== undefined) { var el = document.getElementById('setting-tax-rate'); if (el) el.value = data.tax_rate; }
-        if (data.default_payment_terms !== undefined) { var el = document.getElementById('setting-payment-terms'); if (el) el.value = data.default_payment_terms; }
-        if (data.invoice_prefix !== undefined) { var el = document.getElementById('setting-invoice-prefix'); if (el) el.value = data.invoice_prefix; }
         
         // Render bank details
         var bankContainer = document.getElementById('settings-bank-details-container');
@@ -2351,10 +2345,6 @@ function renderEmployees(employees) {
     if (!tbody) return;
     tbody.innerHTML = '';
     
-    // Render the HR Chart if present
-    if (typeof renderHRChart === 'function') {
-        renderHRChart(employees);
-    }
     
     if (employees.length === 0) {
         tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No employees found.</td></tr>';
@@ -5047,42 +5037,6 @@ window.moveCandidateStage = moveCandidateStage;
 window.showMoveStageMenu = showMoveStageMenu;
 
 // ==================== LEAVE REQUESTS ====================
-var allLeaveRequests = [];
-var currentLeaveFilter = 'all';
-
-async function loadLeaveRequests() {
-    try {
-        var res = await fetch('/api/leave/requests', { credentials: 'same-origin' });
-        if (!res.ok) return;
-        allLeaveRequests = await res.json();
-        renderLeaveRequests();
-    } catch (e) { console.error('loadLeaveRequests error:', e); }
-}
-
-function filterLeaveRequests(filter, btn) {
-    currentLeaveFilter = filter;
-    document.querySelectorAll('#leave-tabs .tab').forEach(function(t) { t.classList.remove('active'); });
-    if (btn) btn.classList.add('active');
-    renderLeaveRequests();
-}
-
-function renderLeaveRequests() {
-    var tbody = document.getElementById('leave-requests-table-body');
-    if (!tbody) return;
-    var filtered = currentLeaveFilter === 'all' ? allLeaveRequests : allLeaveRequests.filter(function(l) { return l.status === currentLeaveFilter; });
-    tbody.innerHTML = '';
-    if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No leave requests found.</td></tr>';
-        return;
-    }
-    filtered.forEach(function(l) {
-        var statusClass = l.status === 'approved' ? 'status-active' : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
-        var actions = l.status === 'pending'
-            ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
-            : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
-        tbody.insertAdjacentHTML('beforeend', '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason) + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>');
-    });
-}
 
 async function actionLeave(id, action, empName) {
     if (!confirm('Are you sure you want to ' + action + ' this leave request for ' + empName + '?')) return;
@@ -5096,7 +5050,6 @@ async function actionLeave(id, action, empName) {
         // instead of a generic failure.
         if (res.ok) {
             showToast('Leave request ' + action + 'd', 'success');
-            loadLeaveRequests();
             hrDataChanged('leave');
         } else {
             showToast(data.detail || 'Failed to update leave', 'error');
@@ -5104,8 +5057,6 @@ async function actionLeave(id, action, empName) {
     } catch (e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-window.loadLeaveRequests = loadLeaveRequests;
-window.filterLeaveRequests = filterLeaveRequests;
 window.actionLeave = actionLeave;
 
 // --- Dedicated Leave View ---
@@ -5148,13 +5099,7 @@ function renderLeaveView() {
     var tbody = document.getElementById('leave-view-table-body');
     if (!tbody) return;
     if (filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No leave requests found.</td></tr>'; return; }
-    tbody.innerHTML = filtered.map(function(l) {
-        var statusClass = l.status === 'approved' ? 'status-active' : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
-        var actions = l.status === 'pending'
-            ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button><button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
-            : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + (l.approved_by || '') + '</span>';
-        return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td><td>' + l.leave_type.charAt(0).toUpperCase() + l.leave_type.slice(1) + '</td><td>' + l.start_date + '</td><td>' + l.end_date + '</td><td><strong>' + l.days + '</strong></td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td><td><span class="status-pill ' + statusClass + '">' + l.status + '</span></td><td class="text-right">' + actions + '</td></tr>';
-    }).join('');
+    tbody.innerHTML = filtered.map(leaveRowHtml).join('');
 }
 function filterLeaveView(filter, btn) {
     _leaveViewFilter = filter;
@@ -5534,12 +5479,15 @@ async function aiPersonalizeEmail(invoiceNumber, clientName, total, dueDate) {
             body: JSON.stringify({ client_name: clientName, invoice_number: invoiceNumber, total: total, due_date: dueDate, is_first_time: false, tone: 'professional' })
         });
         var data = await res.json();
+        // Held rather than threaded through an onclick attribute; the body is
+        // multi-line free text and would not survive the quoting.
+        _lastAiEmail = { subject: data.subject || '', body: data.body || '' };
         if (el) {
             el.innerHTML = '<div style="padding:12px;">' +
                 '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:4px;">Subject: ' + esc(data.subject || '') + '</div>' +
                 '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-color);border-radius:8px;padding:12px;font-size:0.85rem;white-space:pre-wrap;">' + esc(data.body || '') + '</div>' +
                 '<div style="display:flex;gap:8px;margin-top:8px;">' +
-                    '<button class="btn btn-primary btn-sm" onclick="useAiEmail(\'' + esc(data.subject || '') + '\')">Use This Email</button>' +
+                    '<button class="btn btn-primary btn-sm" onclick="useAiEmail()">Copy Email</button>' +
                     '<button class="btn btn-outline btn-sm" onclick="aiPersonalizeEmail(\'' + invoiceNumber + '\',\'' + esc(clientName) + '\',' + total + ',\'' + dueDate + '\')">Regenerate</button>' +
                 '</div></div>';
             el.style.display = 'block';
@@ -5550,12 +5498,20 @@ async function aiPersonalizeEmail(invoiceNumber, clientName, total, dueDate) {
 }
 window.aiPersonalizeEmail = aiPersonalizeEmail;
 
-function useAiEmail(subject, body) {
-    var subjEl = document.getElementById('invoice-email-subject');
-    var bodyEl = document.getElementById('invoice-email-body');
-    if (subjEl) subjEl.value = subject;
-    if (bodyEl) bodyEl.value = body;
-    showToast('Email populated', 'success');
+var _lastAiEmail = null;
+
+function useAiEmail() {
+    if (!_lastAiEmail) { showToast('Generate an email first', 'error'); return; }
+    var text = 'Subject: ' + _lastAiEmail.subject + '\n\n' + _lastAiEmail.body;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+            showToast('Email copied to clipboard', 'success');
+        }, function () {
+            showToast('Could not copy - select the text above instead', 'error');
+        });
+    } else {
+        showToast('Could not copy - select the text above instead', 'error');
+    }
 }
 
 // --- AI: Overdue Follow-up ---
@@ -6136,54 +6092,6 @@ function renderInvoiceChart(revenue, outstanding, invoices) {
             scales: {
                 y: { grid: { color: 'rgba(255,255,255,0.05)' }, border: { dash: [4, 4] } },
                 x: { grid: { color: 'rgba(255,255,255,0.05)' } }
-            }
-        }
-    });
-}
-
-let _hrChart = null;
-function renderHRChart(employees) {
-    var ctx = document.getElementById('hrChart');
-    if (!ctx) return;
-    if (typeof Chart === 'undefined') return;
-    if (_hrChart) _hrChart.destroy();
-    
-    // Simulate department distribution
-    var depts = {};
-    employees.forEach(e => {
-        var d = e.department_name || 'Unassigned';
-        depts[d] = (depts[d] || 0) + 1;
-    });
-    
-    _hrChart = new Chart(ctx, {
-        type: 'radar',
-        data: {
-            labels: Object.keys(depts),
-            datasets: [{
-                label: 'Workforce Distribution',
-                data: Object.values(depts),
-                backgroundColor: 'rgba(57, 255, 20, 0.2)',
-                borderColor: '#39ff14',
-                pointBackgroundColor: '#39ff14',
-                pointBorderColor: '#fff',
-                pointHoverBackgroundColor: '#fff',
-                pointHoverBorderColor: '#39ff14',
-                borderWidth: 2
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            maintainAspectRatio: false,
-            scales: {
-                r: {
-                    angleLines: { color: 'rgba(255,255,255,0.1)' },
-                    grid: { color: 'rgba(255,255,255,0.1)' },
-                    pointLabels: { color: '#00f0ff', font: { family: "'Rajdhani', sans-serif", size: 13 } },
-                    ticks: { display: false }
-                }
-            },
-            plugins: {
-                legend: { labels: { color: '#f8fafc', font: { family: "'Rajdhani', sans-serif" } } }
             }
         }
     });
@@ -7969,3 +7877,27 @@ async function loadExpiringDocuments() {
     } catch (e) { host.innerHTML = ''; }
 }
 window.loadExpiringDocuments = loadExpiringDocuments;
+
+// One row builder for both leave tables. They were duplicated, and a change
+// to the wrong copy is easy to miss.
+function leaveRowHtml(l) {
+    var statusClass = l.status === 'approved' ? 'status-active'
+                    : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
+    var actions = l.status === 'pending'
+        ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" ' +
+          'onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button>' +
+          '<button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" ' +
+          'onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
+        : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + esc(l.approved_by || '') + '</span>';
+    var type = String(l.leave_type || '');
+    return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td>' +
+        '<td>' + esc(type.charAt(0).toUpperCase() + type.slice(1)) + '</td>' +
+        '<td>' + esc(l.start_date) + '</td>' +
+        '<td>' + esc(l.end_date) + '</td>' +
+        '<td><strong>' + esc(l.days) + '</strong></td>' +
+        '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" ' +
+            'title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td>' +
+        '<td><span class="status-pill ' + statusClass + '">' + esc(l.status) + '</span></td>' +
+        '<td class="text-right">' + actions + '</td></tr>';
+}
+window.leaveRowHtml = leaveRowHtml;

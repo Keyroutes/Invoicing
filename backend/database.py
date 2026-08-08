@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -38,6 +39,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Populated by ensure_columns(). A migration that silently did not run is
+# indistinguishable from one that succeeded, so failures are recorded and
+# surfaced on /api/health rather than disappearing.
+MIGRATION_ERRORS = []
+
+
+def migration_report():
+    return list(MIGRATION_ERRORS)
+
 
 def ensure_columns():
     """Add missing columns to existing tables."""
@@ -106,7 +118,7 @@ def ensure_columns():
                 conn.execute(text("UPDATE invoices SET tracking_id = gen_random_uuid()::text WHERE tracking_id IS NULL OR tracking_id = ''"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 1: {sys.exc_info()[1]}")
 
             # Make settings.key non-unique (now per-client)
             try:
@@ -116,13 +128,13 @@ def ensure_columns():
                     conn.commit()
                     print(f"Dropped unique index on settings.key: {row[0]}")
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 2: {sys.exc_info()[1]}")
             try:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_settings_key ON settings (key)"))
                 conn.commit()
                 print("Created non-unique index ix_settings_key")
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 3: {sys.exc_info()[1]}")
 
             # Drop old global unique constraint on invoices.number (now per-client unique)
             try:
@@ -134,7 +146,7 @@ def ensure_columns():
                         conn.commit()
                         print(f"Dropped old index: {idx_name}")
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 4: {sys.exc_info()[1]}")
 
             # Add composite unique constraint (client_id, number) if not exists
             try:
@@ -142,7 +154,7 @@ def ensure_columns():
                 conn.commit()
                 print("Added composite unique constraint (client_id, number)")
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 5: {sys.exc_info()[1]}")
 
             # Create performance indexes on foreign keys (safe to run multiple times)
             idx_statements = [
@@ -156,7 +168,7 @@ def ensure_columns():
                 try:
                     conn.execute(text(stmt))
                 except Exception:
-                    pass
+                    MIGRATION_ERRORS.append(f"migration step 6: {sys.exc_info()[1]}")
             conn.commit()
 
             # Create HR tables if they don't exist
@@ -285,7 +297,7 @@ def ensure_columns():
                 try:
                     conn.execute(text(sql))
                 except Exception:
-                    pass
+                    MIGRATION_ERRORS.append(f"migration step 7: {sys.exc_info()[1]}")
             conn.commit()
 
             # Create indexes for HR tables
@@ -310,7 +322,7 @@ def ensure_columns():
                 try:
                     conn.execute(text(stmt))
                 except Exception:
-                    pass
+                    MIGRATION_ERRORS.append(f"migration step 8: {sys.exc_info()[1]}")
             conn.commit()
 
             # Add new columns to existing tables
@@ -338,7 +350,7 @@ def ensure_columns():
                 try:
                     conn.execute(text(stmt))
                 except Exception:
-                    pass
+                    MIGRATION_ERRORS.append(f"migration step 9: {sys.exc_info()[1]}")
             conn.commit()
 
             # Create client_login_logs table
@@ -362,7 +374,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_login_logs_created_at ON client_login_logs (created_at)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 10: {sys.exc_info()[1]}")
 
             # Create overtime_logs table
             try:
@@ -383,7 +395,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_overtime_logs_employee_id ON overtime_logs (employee_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 11: {sys.exc_info()[1]}")
 
             # Recruitment tables
             try:
@@ -404,7 +416,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recruitment_forms_form_token ON recruitment_forms (form_token)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 12: {sys.exc_info()[1]}")
 
             try:
                 conn.execute(text("""
@@ -429,7 +441,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_form_submissions_form_id ON form_submissions (form_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 13: {sys.exc_info()[1]}")
 
             try:
                 conn.execute(text("ALTER TABLE recruitment_forms ADD COLUMN IF NOT EXISTS pipeline_stages TEXT DEFAULT '[]'"))
@@ -437,7 +449,7 @@ def ensure_columns():
                 conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS stage_order INTEGER DEFAULT 0"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 14: {sys.exc_info()[1]}")
 
             # Department color/icon
             try:
@@ -445,14 +457,14 @@ def ensure_columns():
                 conn.execute(text("ALTER TABLE departments ADD COLUMN IF NOT EXISTS icon VARCHAR DEFAULT 'building'"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 15: {sys.exc_info()[1]}")
 
             # Onboarding item sort_order
             try:
                 conn.execute(text("ALTER TABLE onboarding_items ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 16: {sys.exc_info()[1]}")
 
             # Onboarding templates table
             try:
@@ -468,7 +480,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_onboarding_templates_client_id ON onboarding_templates (client_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 17: {sys.exc_info()[1]}")
 
             # employee_goals.department_id
             try:
@@ -476,14 +488,14 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_employee_goals_department_id ON employee_goals (department_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 18: {sys.exc_info()[1]}")
 
             # Invoices bank_details
             try:
                 conn.execute(text("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS bank_details TEXT DEFAULT ''"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 19: {sys.exc_info()[1]}")
 
             # Bills tables
             try:
@@ -512,7 +524,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bills_status ON bills (status)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 20: {sys.exc_info()[1]}")
 
             try:
                 conn.execute(text("""
@@ -528,7 +540,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bill_line_items_bill_id ON bill_line_items (bill_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 21: {sys.exc_info()[1]}")
 
             # Department goals table
             try:
@@ -554,14 +566,14 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_department_goals_department_id ON department_goals (department_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 22: {sys.exc_info()[1]}")
 
             # clients.currency
             try:
                 conn.execute(text("ALTER TABLE clients ADD COLUMN IF NOT EXISTS currency VARCHAR DEFAULT 'GBP'"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 23: {sys.exc_info()[1]}")
 
             # Invoice payment ledger
             try:
@@ -582,7 +594,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_invoice_id ON payments (invoice_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 24: {sys.exc_info()[1]}")
 
             # Leave entitlement / balance tracking
             try:
@@ -591,7 +603,7 @@ def ensure_columns():
                 conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS sick_leave_entitlement DOUBLE PRECISION DEFAULT 10"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 25: {sys.exc_info()[1]}")
 
             # Recruitment: job requisitions, interviews and offers
             try:
@@ -680,7 +692,7 @@ def ensure_columns():
                     conn.execute(text(f"ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS {col}"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 26: {sys.exc_info()[1]}")
 
             # Recruitment: candidate documents, pipeline history, rating
             try:
@@ -717,7 +729,7 @@ def ensure_columns():
                 conn.execute(text("ALTER TABLE form_submissions ADD COLUMN IF NOT EXISTS hired_employee_id INTEGER"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 27: {sys.exc_info()[1]}")
 
             # Onboarding document requirements and per-employee requests
             try:
@@ -778,7 +790,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_expires ON document_requests (expires_on)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 28: {sys.exc_info()[1]}")
 
             # Wallet, metered billing and top-up orders
             try:
@@ -853,7 +865,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topup_provider_order ON topup_orders (provider_order_id)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 29: {sys.exc_info()[1]}")
 
             # Employee seniority level
             try:
@@ -861,7 +873,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_employees_level ON employees (level)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 30: {sys.exc_info()[1]}")
 
             # Payslip period guard + YTD support
             try:
@@ -869,7 +881,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_payslips_period ON payslips (employee_id, period_start, period_end)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 31: {sys.exc_info()[1]}")
 
             # Audit logs table
             try:
@@ -892,7 +904,7 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs (created_at)"))
                 conn.commit()
             except Exception:
-                pass
+                MIGRATION_ERRORS.append(f"migration step 32: {sys.exc_info()[1]}")
 
     except Exception as e:
         print(f"Column check skipped: {e}")

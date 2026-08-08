@@ -101,13 +101,24 @@ def generate_secret_key() -> str:
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY or SECRET_KEY == "generate_a_random_secret_string":
     SECRET_KEY = generate_secret_key()
+    # Writing to .env only helps on a machine with a persistent disk. On a
+    # container platform the file is discarded on redeploy, so a generated key
+    # differs every boot and every session is invalidated - all users are
+    # silently signed out. Say so loudly rather than logging it as info.
+    persisted = False
     try:
         env_path = os.path.join(os.path.dirname(__file__), ".env")
         with open(env_path, "a") as f:
             f.write(f"\nSECRET_KEY={SECRET_KEY}\n")
-        logger.info("Generated and persisted new SECRET_KEY to .env")
+        persisted = True
     except Exception:
-        logger.warning("Generated new SECRET_KEY but could not persist to .env - set SECRET_KEY in .env for persistence")
+        pass
+    logger.warning(
+        "SECRET_KEY was not set, so a temporary one was generated%s. "
+        "Every restart will sign all users out. Set SECRET_KEY in the "
+        "environment to fix this.",
+        " and written to .env" if persisted else "",
+    )
 
 def ensure_admin_user():
     try:
@@ -2082,10 +2093,23 @@ def health_check(db: Session = Depends(get_db)):
     from sqlalchemy import text as sql_text
     try:
         db.execute(sql_text("SELECT 1"))
-        return {"status": "ok", "database": "ok"}
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         return JSONResponse(status_code=503, content={"status": "degraded", "database": "unavailable"})
+
+    # Schema updates are applied non-fatally so a partial failure cannot stop
+    # the app booting, but a migration that never ran must not look identical
+    # to one that succeeded.
+    try:
+        from database import migration_report
+        problems = migration_report()
+    except Exception:
+        problems = []
+    body = {"status": "ok", "database": "ok"}
+    if problems:
+        body["status"] = "ok_with_warnings"
+        body["migration_warnings"] = len(problems)
+    return body
 
 @app.get("/api/auth/me")
 def get_current_user(request: Request, db: Session = Depends(get_db)):
