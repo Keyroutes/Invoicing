@@ -766,6 +766,81 @@ def ensure_columns():
             except Exception:
                 pass
 
+            # Wallet, metered billing and top-up orders
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS wallets (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id) NOT NULL UNIQUE,
+                        balance_minor INTEGER DEFAULT 0,
+                        currency VARCHAR DEFAULT 'GBP',
+                        low_balance_minor INTEGER DEFAULT 500,
+                        is_suspended BOOLEAN DEFAULT FALSE,
+                        lifetime_topped_up_minor INTEGER DEFAULT 0,
+                        lifetime_spent_minor INTEGER DEFAULT 0,
+                        created_at VARCHAR DEFAULT (NOW()::TEXT),
+                        updated_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS wallet_transactions (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id) NOT NULL,
+                        wallet_id INTEGER REFERENCES wallets(id),
+                        direction VARCHAR DEFAULT 'debit',
+                        amount_minor INTEGER DEFAULT 0,
+                        balance_after_minor INTEGER DEFAULT 0,
+                        currency VARCHAR DEFAULT 'GBP',
+                        action_key VARCHAR DEFAULT '',
+                        module VARCHAR DEFAULT '',
+                        description VARCHAR DEFAULT '',
+                        reference VARCHAR DEFAULT '',
+                        quantity INTEGER DEFAULT 1,
+                        performed_by VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_wallet_tx_client ON wallet_transactions (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_wallet_tx_created ON wallet_transactions (created_at)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_wallet_tx_action ON wallet_transactions (action_key)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS pricing_rules (
+                        id SERIAL PRIMARY KEY,
+                        action_key VARCHAR NOT NULL UNIQUE,
+                        label VARCHAR NOT NULL,
+                        description VARCHAR DEFAULT '',
+                        module VARCHAR DEFAULT 'platform',
+                        unit_price_minor INTEGER DEFAULT 0,
+                        currency VARCHAR DEFAULT 'GBP',
+                        free_allowance INTEGER DEFAULT 0,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        sort_order INTEGER DEFAULT 0,
+                        updated_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS topup_orders (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id) NOT NULL,
+                        provider VARCHAR DEFAULT '',
+                        amount_minor INTEGER DEFAULT 0,
+                        currency VARCHAR DEFAULT 'GBP',
+                        status VARCHAR DEFAULT 'created',
+                        provider_order_id VARCHAR DEFAULT '',
+                        provider_payment_id VARCHAR DEFAULT '',
+                        checkout_url VARCHAR DEFAULT '',
+                        failure_reason VARCHAR DEFAULT '',
+                        credited BOOLEAN DEFAULT FALSE,
+                        credited_at VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topup_client ON topup_orders (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_topup_provider_order ON topup_orders (provider_order_id)"))
+                conn.commit()
+            except Exception:
+                pass
+
             # Employee seniority level
             try:
                 conn.execute(text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS level VARCHAR DEFAULT ''"))

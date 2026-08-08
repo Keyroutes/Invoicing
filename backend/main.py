@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import secrets
 import uuid
 import smtplib
@@ -1631,6 +1632,10 @@ Powered by Aniprotech"""
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{inv.number}.pdf" if pdf_b64 else "invoice.pdf"
 
+    # Metered before the send is queued; charging afterwards would mean a
+    # refused charge still delivered the email.
+    require_credit(db, client.id, "invoice_send", 1, inv.number)
+
     background_tasks.add_task(send_email_background, inv.email, subject, body, from_header, html_body, pdf_b64, pdf_filename, logo_data, client_id=client.id)
 
     # Re-sending a receipt must not walk a settled invoice back to unpaid.
@@ -1677,6 +1682,7 @@ def send_invoice_whatsapp(number: str, background_tasks: BackgroundTasks, reques
     ws_cur = (inv.currency or (inv_client.currency if inv_client else "") or "GBP").upper()
     ws_sym = currency_symbol(ws_cur)
     message = f"Hello {inv.to_contact},\n\nPlease find the details of your invoice {inv.number} below:\n\nTotal Due: {ws_sym}{inv.due:.2f}\nDue Date: {inv.due_date}\n\nThank you for your business!"
+    require_credit(db, client.id, "invoice_whatsapp", 1, inv.number)
     background_tasks.add_task(send_whatsapp_background, inv.phone_number, message)
 
     if inv.status == "Draft":
@@ -3604,6 +3610,11 @@ def run_payroll(request: Request, body: PayrollRunRequest, db: Session = Depends
                 "reason": "no salary and no hours recorded for this period - payslip is zero",
             })
 
+    if created:
+        # Priced per payslip; charged once for the batch so a part-run cannot
+        # be billed twice.
+        require_credit(db, client.id, "payroll_run", len(created),
+                       f"{body.period_start}..{body.period_end}")
     log_audit(db, client.id, "payroll_run", "payslip", None, f"{body.period_start}..{body.period_end}",
               f"{len(created)} payslips, net {total_net:.2f}", request)
     db.commit()
@@ -3881,6 +3892,8 @@ Best regards,
 
     pdf_b64 = payload.pdf_data if payload.pdf_data else None
     pdf_filename = f"{ps.number}.pdf" if pdf_b64 else "payslip.pdf"
+
+    require_credit(db, client.id, "payslip_send", 1, ps.number)
 
     background_tasks.add_task(send_email_background, emp.email, subject, body_text, from_header, html_body, pdf_b64, pdf_filename, logo_data, client_id=client.id)
     ps.status = "Sent" if ps.status == "Draft" else ps.status
@@ -5490,6 +5503,7 @@ def email_candidate(sub_id: int, request: Request, background_tasks: BackgroundT
         + "".join(f"<p>{esc(p)}</p>" for p in text_body.split("\n\n") if p.strip())
         + "</div>"
     )
+    require_credit(db, client.id, "candidate_email", 1, sub.candidate_email)
     background_tasks.add_task(
         send_email_background, sub.candidate_email, subject, text_body,
         f"{company} <{from_email}>", html_body, None, "attachment.pdf", "", client.id,
@@ -5623,6 +5637,984 @@ def talent_pool(request: Request, q: str = "", stage: str = "", limit: int = 100
         "hired_employee_id": getattr(s, "hired_employee_id", None),
         "created_at": s.created_at,
     } for s in rows]
+
+# ============================================================================
+# WALLET & METERED BILLING
+# Tenants hold a prepaid balance. Actions that cost the platform real money
+# (sending mail, WhatsApp, AI calls, payroll processing) are metered against
+# it. The operator sets the prices; tenants can only top up and spend.
+#
+# All arithmetic is in integer minor units. A running balance must reconcile
+# exactly, and repeated float addition drifts.
+# ============================================================================
+
+CURRENCY_MINOR_UNITS = {"JPY": 1, "KRW": 1, "VND": 1, "CLP": 1, "ISK": 1}
+
+
+def minor_units(currency):
+    """How many minor units make one major unit. Most currencies are 100."""
+    return CURRENCY_MINOR_UNITS.get((currency or "GBP").upper(), 100)
+
+
+def to_minor(amount, currency="GBP"):
+    """Decimal amount -> integer minor units, rounded half-up."""
+    try:
+        d = Decimal(str(amount or 0))
+    except (InvalidOperation, ValueError, TypeError):
+        return 0
+    return int((d * minor_units(currency)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def to_major(amount_minor, currency="GBP"):
+    """Integer minor units -> decimal amount for display."""
+    return round((amount_minor or 0) / minor_units(currency), 2)
+
+
+# The catalogue of things that can be charged for. Prices are set by the
+# operator; these are only the starting values and the wording tenants see.
+DEFAULT_PRICING = [
+    ("invoice_send",      "Send invoice by email",   "invoicing", 5,  50,
+     "Charged when an invoice is emailed to a customer."),
+    ("invoice_whatsapp",  "Send invoice on WhatsApp", "invoicing", 15, 0,
+     "Charged per WhatsApp message delivered."),
+    ("payslip_send",      "Send payslip by email",   "hr",        5,  50,
+     "Charged when a payslip is emailed to an employee."),
+    ("payroll_run",       "Payroll run (per payslip)", "hr",      10, 10,
+     "Charged for each payslip generated in a payroll run."),
+    ("candidate_email",   "Email a candidate",       "hr",        5,  25,
+     "Charged per interview invitation, offer or rejection sent."),
+    ("ai_resume_screen",  "AI resume screening",     "hr",        40, 5,
+     "Charged per candidate screened by AI."),
+    ("ai_onboarding",     "AI onboarding checklist", "hr",        30, 5,
+     "Charged per generated onboarding plan."),
+    ("ai_email_draft",    "AI email drafting",       "invoicing", 25, 10,
+     "Charged per AI-written email."),
+    ("ai_attendance_summary", "AI attendance summary", "hr",      30, 5,
+     "Charged per attendance summary generated."),
+]
+
+PLATFORM_CURRENCY = os.getenv("PLATFORM_CURRENCY", "GBP").upper()
+
+
+def seed_pricing_rules(db):
+    """Make sure every known action has a price row, without disturbing any the
+    operator has already edited."""
+    existing = {r.action_key for r in db.query(models.DBPricingRule).all()}
+    created = []
+    for order, (key, label, module, price, allowance, desc) in enumerate(DEFAULT_PRICING):
+        if key in existing:
+            continue
+        row = models.DBPricingRule(
+            action_key=key, label=label, description=desc, module=module,
+            unit_price_minor=price, currency=PLATFORM_CURRENCY,
+            free_allowance=allowance, is_active=True, sort_order=order,
+        )
+        db.add(row)
+        created.append(row)
+    if created:
+        db.flush()
+    return created
+
+
+def get_wallet(db, client_id, create=True):
+    wallet = db.query(models.DBWallet).filter(models.DBWallet.client_id == client_id).first()
+    if wallet or not create:
+        return wallet
+    wallet = models.DBWallet(
+        client_id=client_id, balance_minor=0, currency=PLATFORM_CURRENCY,
+        low_balance_minor=to_minor(os.getenv("WALLET_LOW_BALANCE", "5"), PLATFORM_CURRENCY),
+    )
+    db.add(wallet)
+    db.flush()
+    return wallet
+
+
+def month_usage(db, client_id, action_key):
+    """Units of one action already consumed this calendar month, for the free
+    allowance."""
+    prefix = datetime.now().strftime("%Y-%m")
+    rows = db.query(models.DBWalletTransaction).filter(
+        models.DBWalletTransaction.client_id == client_id,
+        models.DBWalletTransaction.action_key == action_key,
+        models.DBWalletTransaction.direction == "debit",
+        models.DBWalletTransaction.created_at.like(prefix + "%"),
+    ).all()
+    return sum(r.quantity or 1 for r in rows)
+
+
+def quote_action(db, client_id, action_key, quantity=1):
+    """What an action would cost right now, after any free allowance.
+
+    Returns (rule, chargeable_units, cost_minor). An unpriced or disabled
+    action costs nothing, so metering can be rolled out gradually without
+    blocking anyone.
+    """
+    rule = db.query(models.DBPricingRule).filter(
+        models.DBPricingRule.action_key == action_key
+    ).first()
+    if not rule or not rule.is_active or rule.unit_price_minor <= 0:
+        return rule, 0, 0
+    quantity = max(1, int(quantity or 1))
+    used = month_usage(db, client_id, action_key)
+    remaining_free = max(0, (rule.free_allowance or 0) - used)
+    chargeable = max(0, quantity - remaining_free)
+    return rule, chargeable, chargeable * rule.unit_price_minor
+
+
+class InsufficientCredit(Exception):
+    def __init__(self, needed_minor, balance_minor, currency, label):
+        self.needed_minor = needed_minor
+        self.balance_minor = balance_minor
+        self.currency = currency
+        self.label = label
+        super().__init__("Insufficient wallet balance")
+
+
+def charge_wallet(db, client_id, action_key, quantity=1, reference="", performed_by=""):
+    """Debit the wallet for one action.
+
+    Raises InsufficientCredit when the balance will not cover it, so callers
+    can refuse the action *before* doing the work rather than after.
+    """
+    rule, chargeable, cost = quote_action(db, client_id, action_key, quantity)
+    if cost <= 0:
+        return None
+
+    wallet = get_wallet(db, client_id)
+    if wallet.balance_minor < cost:
+        raise InsufficientCredit(cost, wallet.balance_minor, wallet.currency, rule.label)
+
+    wallet.balance_minor -= cost
+    wallet.lifetime_spent_minor = (wallet.lifetime_spent_minor or 0) + cost
+    wallet.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    tx = models.DBWalletTransaction(
+        client_id=client_id, wallet_id=wallet.id, direction="debit",
+        amount_minor=cost, balance_after_minor=wallet.balance_minor,
+        currency=wallet.currency, action_key=action_key,
+        module=rule.module if rule else "", description=rule.label if rule else action_key,
+        reference=reference, quantity=chargeable, performed_by=performed_by,
+    )
+    db.add(tx)
+    return tx
+
+
+def credit_wallet(db, client_id, amount_minor, description, reference="",
+                  performed_by="", action_key="topup"):
+    """Add credit. Used by successful payments and by operator adjustments."""
+    amount_minor = int(amount_minor or 0)
+    if amount_minor <= 0:
+        raise HTTPException(status_code=400, detail="Credit amount must be greater than zero")
+    wallet = get_wallet(db, client_id)
+    wallet.balance_minor += amount_minor
+    if action_key == "topup":
+        wallet.lifetime_topped_up_minor = (wallet.lifetime_topped_up_minor or 0) + amount_minor
+    wallet.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    tx = models.DBWalletTransaction(
+        client_id=client_id, wallet_id=wallet.id, direction="credit",
+        amount_minor=amount_minor, balance_after_minor=wallet.balance_minor,
+        currency=wallet.currency, action_key=action_key, module="platform",
+        description=description, reference=reference, quantity=1,
+        performed_by=performed_by,
+    )
+    db.add(tx)
+    return tx
+
+
+def insufficient_credit_response(exc):
+    """One consistent 402 so the UI can always offer a top-up."""
+    return HTTPException(
+        status_code=402,
+        detail=(
+            f"Not enough wallet credit for {exc.label}. "
+            f"Needs {currency_symbol(exc.currency)}{to_major(exc.needed_minor, exc.currency):.2f}, "
+            f"balance is {currency_symbol(exc.currency)}{to_major(exc.balance_minor, exc.currency):.2f}. "
+            "Top up your wallet to continue."
+        ),
+    )
+
+
+def require_credit(db, client_id, action_key, quantity=1, reference="", performed_by=""):
+    """Charge, converting the shortfall into the standard 402."""
+    try:
+        return charge_wallet(db, client_id, action_key, quantity, reference, performed_by)
+    except InsufficientCredit as exc:
+        raise insufficient_credit_response(exc)
+
+
+def wallet_state(db, client, include_rules=True):
+    wallet = get_wallet(db, client.id)
+    data = {
+        "balance": to_major(wallet.balance_minor, wallet.currency),
+        "balance_minor": wallet.balance_minor,
+        "currency": wallet.currency,
+        "symbol": currency_symbol(wallet.currency),
+        "low_balance": to_major(wallet.low_balance_minor, wallet.currency),
+        "is_low": wallet.balance_minor <= (wallet.low_balance_minor or 0),
+        "is_empty": wallet.balance_minor <= 0,
+        "is_suspended": bool(wallet.is_suspended),
+        "lifetime_topped_up": to_major(wallet.lifetime_topped_up_minor, wallet.currency),
+        "lifetime_spent": to_major(wallet.lifetime_spent_minor, wallet.currency),
+    }
+    if include_rules:
+        rules = db.query(models.DBPricingRule).filter(
+            models.DBPricingRule.is_active == True
+        ).order_by(models.DBPricingRule.sort_order.asc()).all()
+        if not rules:
+            rules = seed_pricing_rules(db)
+            db.commit()
+        data["pricing"] = [{
+            "action_key": r.action_key, "label": r.label, "description": r.description,
+            "module": r.module,
+            "unit_price": to_major(r.unit_price_minor, r.currency),
+            "free_allowance": r.free_allowance,
+            "used_this_month": month_usage(db, client.id, r.action_key),
+        } for r in rules]
+    return data
+
+
+# --- Tenant-facing wallet ---------------------------------------------------
+
+@app.get("/api/wallet")
+def get_my_wallet(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    state = wallet_state(db, client)
+    db.commit()
+    return state
+
+
+@app.get("/api/wallet/transactions")
+def wallet_transactions(request: Request, limit: int = 100, direction: str = "",
+                        db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    query = db.query(models.DBWalletTransaction).filter(
+        models.DBWalletTransaction.client_id == client.id
+    )
+    if direction in ("credit", "debit"):
+        query = query.filter(models.DBWalletTransaction.direction == direction)
+    rows = query.order_by(models.DBWalletTransaction.id.desc()).limit(
+        max(1, min(limit, 500))
+    ).all()
+    return [{
+        "id": t.id, "direction": t.direction,
+        "amount": to_major(t.amount_minor, t.currency),
+        "balance_after": to_major(t.balance_after_minor, t.currency),
+        "currency": t.currency, "action_key": t.action_key, "module": t.module,
+        "description": t.description, "reference": t.reference,
+        "quantity": t.quantity, "created_at": t.created_at,
+    } for t in rows]
+
+
+@app.get("/api/wallet/usage")
+def wallet_usage(request: Request, months: int = 3, db: Session = Depends(get_db)):
+    """What the tenant has actually spent, grouped by action and by month."""
+    client = get_client_user(request, db)
+    wallet = get_wallet(db, client.id)
+    months = max(1, min(months, 12))
+    cutoff = (datetime.now() - timedelta(days=31 * months)).strftime("%Y-%m")
+    rows = db.query(models.DBWalletTransaction).filter(
+        models.DBWalletTransaction.client_id == client.id,
+        models.DBWalletTransaction.direction == "debit",
+        models.DBWalletTransaction.created_at >= cutoff,
+    ).all()
+
+    by_action, by_month = defaultdict(lambda: {"units": 0, "spent_minor": 0}), defaultdict(int)
+    for r in rows:
+        slot = by_action[r.action_key or "other"]
+        slot["units"] += r.quantity or 1
+        slot["spent_minor"] += r.amount_minor or 0
+        by_month[(r.created_at or "")[:7]] += r.amount_minor or 0
+
+    return {
+        "currency": wallet.currency,
+        "symbol": currency_symbol(wallet.currency),
+        "total_spent": to_major(sum(v["spent_minor"] for v in by_action.values()), wallet.currency),
+        "by_action": [{
+            "action_key": k, "units": v["units"],
+            "spent": to_major(v["spent_minor"], wallet.currency),
+        } for k, v in sorted(by_action.items(), key=lambda kv: -kv[1]["spent_minor"])],
+        "by_month": [{"month": m, "spent": to_major(v, wallet.currency)}
+                     for m, v in sorted(by_month.items())],
+    }
+
+
+@app.get("/api/wallet/quote")
+def wallet_quote(request: Request, action: str, quantity: int = 1,
+                 db: Session = Depends(get_db)):
+    """What would this cost, and can I afford it? Lets the UI warn before the
+    user commits to a bulk action such as a payroll run."""
+    client = get_client_user(request, db)
+    wallet = get_wallet(db, client.id)
+    rule, chargeable, cost = quote_action(db, client.id, action, quantity)
+    db.commit()
+    return {
+        "action": action,
+        "label": rule.label if rule else action,
+        "quantity": max(1, int(quantity or 1)),
+        "chargeable_units": chargeable,
+        "cost": to_major(cost, wallet.currency),
+        "currency": wallet.currency,
+        "symbol": currency_symbol(wallet.currency),
+        "balance": to_major(wallet.balance_minor, wallet.currency),
+        "affordable": wallet.balance_minor >= cost,
+        "free_remaining": max(0, (rule.free_allowance or 0) - month_usage(db, client.id, action)) if rule else 0,
+    }
+
+
+# --- Operator: pricing ------------------------------------------------------
+
+def require_superadmin(request):
+    if not request.session.get("superadmin_id"):
+        raise HTTPException(status_code=401, detail="Not authorized")
+
+
+class PricingRuleIn(BaseModel):
+    action_key: Optional[str] = ""
+    label: Optional[str] = ""
+    description: Optional[str] = ""
+    module: Optional[str] = "platform"
+    unit_price: Optional[float] = 0.0
+    free_allowance: Optional[int] = 0
+    is_active: Optional[bool] = True
+    sort_order: Optional[int] = 0
+
+
+@app.get("/api/superadmin/pricing")
+def list_pricing(request: Request, db: Session = Depends(get_db)):
+    require_superadmin(request)
+    rows = db.query(models.DBPricingRule).order_by(
+        models.DBPricingRule.sort_order.asc(), models.DBPricingRule.id.asc()
+    ).all()
+    if not rows:
+        rows = seed_pricing_rules(db)
+        db.commit()
+    return [{
+        "id": r.id, "action_key": r.action_key, "label": r.label,
+        "description": r.description, "module": r.module,
+        "unit_price": to_major(r.unit_price_minor, r.currency),
+        "unit_price_minor": r.unit_price_minor, "currency": r.currency,
+        "free_allowance": r.free_allowance, "is_active": bool(r.is_active),
+        "sort_order": r.sort_order, "updated_at": r.updated_at,
+    } for r in rows]
+
+
+@app.put("/api/superadmin/pricing/{rule_id}")
+def update_pricing(rule_id: int, request: Request, body: PricingRuleIn,
+                   db: Session = Depends(get_db)):
+    require_superadmin(request)
+    rule = db.query(models.DBPricingRule).filter(models.DBPricingRule.id == rule_id).first()
+    if not rule:
+        raise HTTPException(status_code=404, detail="Pricing rule not found")
+    if body.unit_price is not None:
+        price = float(body.unit_price)
+        if price < 0:
+            raise HTTPException(status_code=400, detail="Price cannot be negative")
+        if price > 1000:
+            raise HTTPException(status_code=400, detail="That price looks wrong - over 1000 per action")
+        rule.unit_price_minor = to_minor(price, rule.currency)
+    if body.free_allowance is not None:
+        allowance = int(body.free_allowance)
+        if allowance < 0 or allowance > 100000:
+            raise HTTPException(status_code=400, detail="Free allowance must be between 0 and 100000")
+        rule.free_allowance = allowance
+    if body.label:
+        rule.label = body.label.strip()
+    if body.description is not None:
+        rule.description = body.description
+    if body.is_active is not None:
+        rule.is_active = bool(body.is_active)
+    if body.sort_order is not None:
+        rule.sort_order = int(body.sort_order)
+    rule.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    db.commit()
+    return {"message": f"{rule.label} updated", "unit_price": to_major(rule.unit_price_minor, rule.currency)}
+
+
+@app.post("/api/superadmin/pricing")
+def create_pricing(request: Request, body: PricingRuleIn, db: Session = Depends(get_db)):
+    require_superadmin(request)
+    key = (body.action_key or "").strip().lower().replace(" ", "_")
+    if not key:
+        raise HTTPException(status_code=400, detail="An action key is required")
+    if db.query(models.DBPricingRule).filter(models.DBPricingRule.action_key == key).first():
+        raise HTTPException(status_code=400, detail=f"'{key}' already has a price")
+    price = float(body.unit_price or 0)
+    if price < 0:
+        raise HTTPException(status_code=400, detail="Price cannot be negative")
+    rule = models.DBPricingRule(
+        action_key=key, label=(body.label or key).strip(),
+        description=body.description or "", module=body.module or "platform",
+        unit_price_minor=to_minor(price, PLATFORM_CURRENCY), currency=PLATFORM_CURRENCY,
+        free_allowance=int(body.free_allowance or 0), is_active=bool(body.is_active),
+        sort_order=int(body.sort_order or 0),
+    )
+    db.add(rule)
+    db.commit()
+    return {"message": f"{rule.label} added", "id": rule.id}
+
+
+# --- Operator: wallets ------------------------------------------------------
+
+@app.get("/api/superadmin/wallets")
+def list_wallets(request: Request, db: Session = Depends(get_db)):
+    require_superadmin(request)
+    clients = db.query(models.DBClient).all()
+    wallets = {w.client_id: w for w in db.query(models.DBWallet).all()}
+    out = []
+    for c in clients:
+        w = wallets.get(c.id)
+        out.append({
+            "client_id": c.id,
+            "company_name": c.company_name or c.email,
+            "email": c.email,
+            "balance": to_major(w.balance_minor, w.currency) if w else 0.0,
+            "currency": w.currency if w else PLATFORM_CURRENCY,
+            "is_low": bool(w and w.balance_minor <= (w.low_balance_minor or 0)),
+            "lifetime_topped_up": to_major(w.lifetime_topped_up_minor, w.currency) if w else 0.0,
+            "lifetime_spent": to_major(w.lifetime_spent_minor, w.currency) if w else 0.0,
+            "is_suspended": bool(w and w.is_suspended),
+        })
+    out.sort(key=lambda r: r["balance"])
+    return out
+
+
+@app.post("/api/superadmin/wallets/{client_id}/adjust")
+def adjust_wallet(client_id: int, request: Request, body: dict = None,
+                  db: Session = Depends(get_db)):
+    """Operator credit or debit: refunds, goodwill, corrections. Every
+    adjustment is a ledger row, never a silent balance edit."""
+    require_superadmin(request)
+    body = body or {}
+    client = db.query(models.DBClient).filter(models.DBClient.id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    try:
+        amount = float(body.get("amount", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Amount must be a number")
+    if amount == 0:
+        raise HTTPException(status_code=400, detail="Amount cannot be zero")
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Give a reason - this lands on the tenant's statement")
+
+    wallet = get_wallet(db, client_id)
+    amount_minor = to_minor(abs(amount), wallet.currency)
+    if amount > 0:
+        credit_wallet(db, client_id, amount_minor, reason, performed_by="superadmin",
+                      action_key="adjustment")
+    else:
+        if wallet.balance_minor < amount_minor:
+            raise HTTPException(status_code=400, detail="That would take the balance below zero")
+        wallet.balance_minor -= amount_minor
+        wallet.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        db.add(models.DBWalletTransaction(
+            client_id=client_id, wallet_id=wallet.id, direction="debit",
+            amount_minor=amount_minor, balance_after_minor=wallet.balance_minor,
+            currency=wallet.currency, action_key="adjustment", module="platform",
+            description=reason, performed_by="superadmin",
+        ))
+    log_audit(db, client_id, "wallet_adjusted", "wallet", client_id,
+              client.company_name or client.email, f"{amount:+.2f}: {reason}",
+              request, user_type="superadmin", user_name="superadmin")
+    db.commit()
+    return {
+        "message": "Wallet adjusted",
+        "balance": to_major(wallet.balance_minor, wallet.currency),
+    }
+
+
+@app.get("/api/superadmin/revenue")
+def platform_revenue(request: Request, months: int = 6, db: Session = Depends(get_db)):
+    """What the platform has actually earned, by month and by action."""
+    require_superadmin(request)
+    months = max(1, min(months, 24))
+    cutoff = (datetime.now() - timedelta(days=31 * months)).strftime("%Y-%m")
+    rows = db.query(models.DBWalletTransaction).filter(
+        models.DBWalletTransaction.created_at >= cutoff
+    ).all()
+
+    spend_by_month, topup_by_month, by_action = defaultdict(int), defaultdict(int), defaultdict(int)
+    for r in rows:
+        month = (r.created_at or "")[:7]
+        if r.direction == "debit" and r.action_key != "adjustment":
+            spend_by_month[month] += r.amount_minor or 0
+            by_action[r.action_key or "other"] += r.amount_minor or 0
+        elif r.direction == "credit" and r.action_key == "topup":
+            topup_by_month[month] += r.amount_minor or 0
+
+    all_months = sorted(set(spend_by_month) | set(topup_by_month))
+    outstanding = db.query(sqlfunc.coalesce(sqlfunc.sum(models.DBWallet.balance_minor), 0)).scalar() or 0
+    return {
+        "currency": PLATFORM_CURRENCY,
+        "symbol": currency_symbol(PLATFORM_CURRENCY),
+        "total_topped_up": to_major(sum(topup_by_month.values()), PLATFORM_CURRENCY),
+        "total_consumed": to_major(sum(spend_by_month.values()), PLATFORM_CURRENCY),
+        "outstanding_liability": to_major(outstanding, PLATFORM_CURRENCY),
+        "months": [{
+            "month": m,
+            "topped_up": to_major(topup_by_month.get(m, 0), PLATFORM_CURRENCY),
+            "consumed": to_major(spend_by_month.get(m, 0), PLATFORM_CURRENCY),
+        } for m in all_months],
+        "by_action": [{"action_key": k, "revenue": to_major(v, PLATFORM_CURRENCY)}
+                      for k, v in sorted(by_action.items(), key=lambda kv: -kv[1])],
+    }
+
+# ============================================================================
+# PAYMENT GATEWAYS
+# Top-ups go through Stripe, Razorpay or PayPal. Keys come from the
+# environment; with none set the endpoints say so plainly rather than
+# pretending to work.
+#
+# Crediting only ever happens from a verified provider callback, never from
+# the browser. A client-side "payment succeeded" is not proof of payment.
+# ============================================================================
+
+TOPUP_MIN_MAJOR = float(os.getenv("TOPUP_MIN", "5"))
+TOPUP_MAX_MAJOR = float(os.getenv("TOPUP_MAX", "5000"))
+
+
+def gateway_config():
+    """Which providers are usable right now, based on the keys present."""
+    return {
+        "stripe": {
+            "secret": os.getenv("STRIPE_SECRET_KEY", ""),
+            "publishable": os.getenv("STRIPE_PUBLISHABLE_KEY", ""),
+            "webhook_secret": os.getenv("STRIPE_WEBHOOK_SECRET", ""),
+        },
+        "razorpay": {
+            "key_id": os.getenv("RAZORPAY_KEY_ID", ""),
+            "key_secret": os.getenv("RAZORPAY_KEY_SECRET", ""),
+            "webhook_secret": os.getenv("RAZORPAY_WEBHOOK_SECRET", ""),
+        },
+        "paypal": {
+            "client_id": os.getenv("PAYPAL_CLIENT_ID", ""),
+            "secret": os.getenv("PAYPAL_SECRET", ""),
+            "mode": os.getenv("PAYPAL_MODE", "sandbox"),
+        },
+    }
+
+
+def enabled_providers():
+    cfg = gateway_config()
+    return {
+        "stripe": bool(cfg["stripe"]["secret"]),
+        "razorpay": bool(cfg["razorpay"]["key_id"] and cfg["razorpay"]["key_secret"]),
+        "paypal": bool(cfg["paypal"]["client_id"] and cfg["paypal"]["secret"]),
+    }
+
+
+@app.get("/api/wallet/providers")
+def wallet_providers(request: Request, db: Session = Depends(get_db)):
+    """What the top-up screen should offer. Being explicit about what is not
+    configured beats a button that fails on click."""
+    client = get_client_user(request, db)
+    wallet = get_wallet(db, client.id)
+    db.commit()
+    enabled = enabled_providers()
+    cfg = gateway_config()
+    return {
+        "currency": wallet.currency,
+        "symbol": currency_symbol(wallet.currency),
+        "min_amount": TOPUP_MIN_MAJOR,
+        "max_amount": TOPUP_MAX_MAJOR,
+        "suggested": [10, 25, 50, 100, 250],
+        "providers": [
+            {"key": "stripe", "label": "Card (Stripe)", "enabled": enabled["stripe"],
+             "publishable_key": cfg["stripe"]["publishable"] if enabled["stripe"] else ""},
+            {"key": "razorpay", "label": "Razorpay (UPI, cards, netbanking)",
+             "enabled": enabled["razorpay"],
+             "key_id": cfg["razorpay"]["key_id"] if enabled["razorpay"] else ""},
+            {"key": "paypal", "label": "PayPal", "enabled": enabled["paypal"]},
+        ],
+        "any_enabled": any(enabled.values()),
+    }
+
+
+def validate_topup_amount(amount, currency):
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Amount must be a number")
+    if amount < TOPUP_MIN_MAJOR:
+        raise HTTPException(status_code=400, detail=f"Minimum top-up is {currency_symbol(currency)}{TOPUP_MIN_MAJOR:.2f}")
+    if amount > TOPUP_MAX_MAJOR:
+        raise HTTPException(status_code=400, detail=f"Maximum top-up is {currency_symbol(currency)}{TOPUP_MAX_MAJOR:.2f}")
+    return to_minor(amount, currency)
+
+
+def provider_unavailable(name, missing):
+    return HTTPException(
+        status_code=503,
+        detail=f"{name} is not configured on this server. Missing: {', '.join(missing)}.",
+    )
+
+
+class TopUpIn(BaseModel):
+    amount: float
+    provider: str
+
+
+@app.post("/api/wallet/topup")
+def create_topup(body: TopUpIn, request: Request, db: Session = Depends(get_db)):
+    """Create a payment at the chosen provider and hand back what the browser
+    needs to complete it. No credit is added here."""
+    client = get_client_user(request, db)
+    wallet = get_wallet(db, client.id)
+    amount_minor = validate_topup_amount(body.amount, wallet.currency)
+    provider = (body.provider or "").strip().lower()
+    if provider not in ("stripe", "razorpay", "paypal"):
+        raise HTTPException(status_code=400, detail="Choose Stripe, Razorpay or PayPal")
+
+    order = models.DBTopUpOrder(
+        client_id=client.id, provider=provider, amount_minor=amount_minor,
+        currency=wallet.currency, status="created",
+    )
+    db.add(order)
+    db.flush()
+
+    try:
+        if provider == "stripe":
+            result = _create_stripe_checkout(order, client, request)
+        elif provider == "razorpay":
+            result = _create_razorpay_order(order, client)
+        else:
+            result = _create_paypal_order(order, client, request)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        logger.exception("Top-up creation failed at %s", provider)
+        order.status = "failed"
+        order.failure_reason = str(exc)[:200]
+        db.commit()
+        raise HTTPException(status_code=502, detail=f"{provider.title()} could not start the payment. Please try again.")
+
+    order.status = "pending"
+    db.commit()
+    result.update({
+        "order_id": order.id,
+        "amount": to_major(amount_minor, wallet.currency),
+        "currency": wallet.currency,
+    })
+    return result
+
+
+def _create_stripe_checkout(order, client, request):
+    cfg = gateway_config()["stripe"]
+    if not cfg["secret"]:
+        raise provider_unavailable("Stripe", ["STRIPE_SECRET_KEY"])
+    base = str(request.base_url).rstrip("/")
+    resp = httpx.post(
+        "https://api.stripe.com/v1/checkout/sessions",
+        auth=(cfg["secret"], ""),
+        data={
+            "mode": "payment",
+            "success_url": f"{base}/app.html?topup=success",
+            "cancel_url": f"{base}/app.html?topup=cancelled",
+            "client_reference_id": str(order.id),
+            "metadata[order_id]": str(order.id),
+            "metadata[client_id]": str(client.id),
+            "line_items[0][quantity]": "1",
+            "line_items[0][price_data][currency]": order.currency.lower(),
+            "line_items[0][price_data][unit_amount]": str(order.amount_minor),
+            "line_items[0][price_data][product_data][name]": "Wallet top-up",
+        },
+        timeout=20,
+    )
+    if resp.status_code >= 400:
+        logger.error("Stripe session failed: %s", resp.text[:400])
+        raise HTTPException(status_code=502, detail="Stripe rejected the payment request.")
+    data = resp.json()
+    order.provider_order_id = data.get("id", "")
+    order.checkout_url = data.get("url", "")
+    return {"provider": "stripe", "checkout_url": data.get("url", ""), "session_id": data.get("id", "")}
+
+
+def _create_razorpay_order(order, client):
+    cfg = gateway_config()["razorpay"]
+    missing = [k for k, v in (("RAZORPAY_KEY_ID", cfg["key_id"]), ("RAZORPAY_KEY_SECRET", cfg["key_secret"])) if not v]
+    if missing:
+        raise provider_unavailable("Razorpay", missing)
+    resp = httpx.post(
+        "https://api.razorpay.com/v1/orders",
+        auth=(cfg["key_id"], cfg["key_secret"]),
+        json={
+            "amount": order.amount_minor,
+            "currency": order.currency.upper(),
+            "receipt": f"wallet-{order.id}",
+            "notes": {"order_id": str(order.id), "client_id": str(client.id)},
+        },
+        timeout=20,
+    )
+    if resp.status_code >= 400:
+        logger.error("Razorpay order failed: %s", resp.text[:400])
+        raise HTTPException(status_code=502, detail="Razorpay rejected the payment request.")
+    data = resp.json()
+    order.provider_order_id = data.get("id", "")
+    return {
+        "provider": "razorpay",
+        "razorpay_order_id": data.get("id", ""),
+        "key_id": cfg["key_id"],
+        "amount_minor": order.amount_minor,
+        "name": client.company_name or "Wallet top-up",
+        "prefill_email": client.email,
+    }
+
+
+def _paypal_base():
+    return ("https://api-m.paypal.com" if gateway_config()["paypal"]["mode"] == "live"
+            else "https://api-m.sandbox.paypal.com")
+
+
+def _paypal_token():
+    cfg = gateway_config()["paypal"]
+    resp = httpx.post(
+        f"{_paypal_base()}/v1/oauth2/token",
+        auth=(cfg["client_id"], cfg["secret"]),
+        data={"grant_type": "client_credentials"},
+        timeout=20,
+    )
+    if resp.status_code >= 400:
+        logger.error("PayPal token failed: %s", resp.text[:300])
+        raise HTTPException(status_code=502, detail="Could not authenticate with PayPal.")
+    return resp.json().get("access_token", "")
+
+
+def _create_paypal_order(order, client, request):
+    cfg = gateway_config()["paypal"]
+    missing = [k for k, v in (("PAYPAL_CLIENT_ID", cfg["client_id"]), ("PAYPAL_SECRET", cfg["secret"])) if not v]
+    if missing:
+        raise provider_unavailable("PayPal", missing)
+    token = _paypal_token()
+    base = str(request.base_url).rstrip("/")
+    resp = httpx.post(
+        f"{_paypal_base()}/v2/checkout/orders",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={
+            "intent": "CAPTURE",
+            "purchase_units": [{
+                "reference_id": str(order.id),
+                "custom_id": str(order.id),
+                "description": "Wallet top-up",
+                "amount": {
+                    "currency_code": order.currency.upper(),
+                    "value": f"{to_major(order.amount_minor, order.currency):.2f}",
+                },
+            }],
+            "application_context": {
+                "return_url": f"{base}/app.html?topup=success",
+                "cancel_url": f"{base}/app.html?topup=cancelled",
+            },
+        },
+        timeout=20,
+    )
+    if resp.status_code >= 400:
+        logger.error("PayPal order failed: %s", resp.text[:400])
+        raise HTTPException(status_code=502, detail="PayPal rejected the payment request.")
+    data = resp.json()
+    order.provider_order_id = data.get("id", "")
+    approve = next((l.get("href") for l in data.get("links", []) if l.get("rel") == "approve"), "")
+    order.checkout_url = approve
+    return {"provider": "paypal", "paypal_order_id": data.get("id", ""), "approve_url": approve}
+
+
+def credit_topup_once(db, order, payment_id=""):
+    """Credit a paid order exactly once.
+
+    Gateways retry webhooks and users refresh return pages, so this is the
+    single place that moves money and it is guarded by `credited`.
+    """
+    if order.credited:
+        return False
+    order.status = "paid"
+    order.provider_payment_id = payment_id or order.provider_payment_id
+    order.credited = True
+    order.credited_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    credit_wallet(
+        db, order.client_id, order.amount_minor,
+        f"Top-up via {order.provider.title()}",
+        reference=order.provider_payment_id or order.provider_order_id,
+        performed_by=order.provider,
+    )
+    return True
+
+
+# --- Provider callbacks -----------------------------------------------------
+# Only these add credit. Each verifies the message really came from the
+# provider before touching a balance.
+
+@app.post("/api/wallet/webhook/stripe")
+async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    cfg = gateway_config()["stripe"]
+    raw = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+
+    if not cfg["webhook_secret"]:
+        # Without the secret the message cannot be trusted, and an unverified
+        # webhook would let anyone credit their own wallet.
+        logger.error("Stripe webhook rejected: STRIPE_WEBHOOK_SECRET is not set")
+        raise HTTPException(status_code=503, detail="Stripe webhooks are not configured")
+
+    try:
+        parts = dict(p.split("=", 1) for p in signature.split(",") if "=" in p)
+        timestamp, sent_sig = parts.get("t", ""), parts.get("v1", "")
+        expected = hmac.new(
+            cfg["webhook_secret"].encode(),
+            f"{timestamp}.".encode() + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        if not sent_sig or not hmac.compare_digest(expected, sent_sig):
+            raise ValueError("signature mismatch")
+        # Reject anything older than five minutes, so a captured webhook
+        # cannot be replayed later.
+        if abs(time.time() - int(timestamp)) > 300:
+            raise ValueError("timestamp outside tolerance")
+    except Exception as exc:
+        logger.warning("Stripe webhook verification failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    event = json.loads(raw or b"{}")
+    if event.get("type") not in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        return {"received": True, "ignored": event.get("type")}
+
+    session = event.get("data", {}).get("object", {})
+    order_id = (session.get("metadata") or {}).get("order_id") or session.get("client_reference_id")
+    order = db.query(models.DBTopUpOrder).filter(models.DBTopUpOrder.id == int(order_id or 0)).first()
+    if not order:
+        logger.warning("Stripe webhook for unknown order %s", order_id)
+        return {"received": True, "ignored": "unknown order"}
+    if session.get("payment_status") != "paid":
+        return {"received": True, "ignored": "not paid"}
+
+    credited = credit_topup_once(db, order, session.get("payment_intent", ""))
+    db.commit()
+    return {"received": True, "credited": credited}
+
+
+@app.post("/api/wallet/webhook/razorpay")
+async def razorpay_webhook(request: Request, db: Session = Depends(get_db)):
+    cfg = gateway_config()["razorpay"]
+    raw = await request.body()
+    signature = request.headers.get("x-razorpay-signature", "")
+    if not cfg["webhook_secret"]:
+        logger.error("Razorpay webhook rejected: RAZORPAY_WEBHOOK_SECRET is not set")
+        raise HTTPException(status_code=503, detail="Razorpay webhooks are not configured")
+
+    expected = hmac.new(cfg["webhook_secret"].encode(), raw, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
+        logger.warning("Razorpay webhook signature mismatch")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    event = json.loads(raw or b"{}")
+    if event.get("event") not in ("payment.captured", "order.paid"):
+        return {"received": True, "ignored": event.get("event")}
+
+    payload = event.get("payload", {})
+    payment = (payload.get("payment") or {}).get("entity", {})
+    provider_order_id = payment.get("order_id") or (payload.get("order") or {}).get("entity", {}).get("id")
+    order = db.query(models.DBTopUpOrder).filter(
+        models.DBTopUpOrder.provider_order_id == (provider_order_id or "")
+    ).first()
+    if not order:
+        logger.warning("Razorpay webhook for unknown order %s", provider_order_id)
+        return {"received": True, "ignored": "unknown order"}
+
+    # Never credit more than the order was for, whatever the callback claims.
+    if payment.get("amount") and int(payment["amount"]) < order.amount_minor:
+        logger.error("Razorpay paid %s but order was %s", payment.get("amount"), order.amount_minor)
+        return {"received": True, "ignored": "amount mismatch"}
+
+    credited = credit_topup_once(db, order, payment.get("id", ""))
+    db.commit()
+    return {"received": True, "credited": credited}
+
+
+@app.post("/api/wallet/topup/{order_id}/capture-paypal")
+def capture_paypal(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """PayPal returns the buyer to us; the capture call to PayPal is what
+    proves payment, not the redirect."""
+    client = get_client_user(request, db)
+    order = db.query(models.DBTopUpOrder).filter(
+        models.DBTopUpOrder.id == order_id,
+        models.DBTopUpOrder.client_id == client.id,
+        models.DBTopUpOrder.provider == "paypal",
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Top-up not found")
+    if order.credited:
+        wallet = get_wallet(db, client.id)
+        return {"message": "Already credited", "balance": to_major(wallet.balance_minor, wallet.currency)}
+
+    token = _paypal_token()
+    resp = httpx.post(
+        f"{_paypal_base()}/v2/checkout/orders/{order.provider_order_id}/capture",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=25,
+    )
+    if resp.status_code >= 400:
+        logger.error("PayPal capture failed: %s", resp.text[:400])
+        order.failure_reason = "capture failed"
+        db.commit()
+        raise HTTPException(status_code=502, detail="PayPal could not complete the payment.")
+    data = resp.json()
+    if data.get("status") != "COMPLETED":
+        return {"message": f"Payment is {data.get('status', 'incomplete')}", "credited": False}
+
+    capture_id = ""
+    try:
+        capture_id = data["purchase_units"][0]["payments"]["captures"][0]["id"]
+    except (KeyError, IndexError):
+        pass
+    credit_topup_once(db, order, capture_id)
+    db.commit()
+    wallet = get_wallet(db, client.id)
+    return {
+        "message": "Wallet topped up",
+        "credited": True,
+        "balance": to_major(wallet.balance_minor, wallet.currency),
+    }
+
+
+@app.get("/api/wallet/topups")
+def list_topups(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    rows = db.query(models.DBTopUpOrder).filter(
+        models.DBTopUpOrder.client_id == client.id
+    ).order_by(models.DBTopUpOrder.id.desc()).limit(max(1, min(limit, 200))).all()
+    return [{
+        "id": o.id, "provider": o.provider,
+        "amount": to_major(o.amount_minor, o.currency), "currency": o.currency,
+        "status": o.status, "credited": bool(o.credited),
+        "checkout_url": o.checkout_url if o.status == "pending" else "",
+        "failure_reason": o.failure_reason, "created_at": o.created_at,
+    } for o in rows]
+
+
+@app.get("/api/superadmin/gateways")
+def superadmin_gateways(request: Request):
+    """Which providers this deployment can actually take money with, so the
+    operator can see what still needs keys."""
+    require_superadmin(request)
+    cfg = gateway_config()
+    enabled = enabled_providers()
+    return {
+        "platform_currency": PLATFORM_CURRENCY,
+        "providers": [
+            {"key": "stripe", "enabled": enabled["stripe"],
+             "webhook_ready": bool(cfg["stripe"]["webhook_secret"]),
+             "required_env": ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
+             "webhook_url": "/api/wallet/webhook/stripe"},
+            {"key": "razorpay", "enabled": enabled["razorpay"],
+             "webhook_ready": bool(cfg["razorpay"]["webhook_secret"]),
+             "required_env": ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"],
+             "webhook_url": "/api/wallet/webhook/razorpay"},
+            {"key": "paypal", "enabled": enabled["paypal"],
+             "webhook_ready": True,   # capture is verified server-side, no webhook needed
+             "required_env": ["PAYPAL_CLIENT_ID", "PAYPAL_SECRET", "PAYPAL_MODE"],
+             "webhook_url": ""},
+        ],
+    }
 
 # ============ ONBOARDING DOCUMENT REQUIREMENTS ============
 # HR decides what a new starter must provide; the employee uploads it from
@@ -7177,6 +8169,7 @@ from llm import llm_chat, llm_json
 @app.post("/api/ai/screen-resume")
 def screen_resume(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    require_credit(db, client.id, "ai_resume_screen")
     if not body or not body.get("job_title"):
         raise HTTPException(status_code=400, detail="job_title required")
     job_title = body["job_title"]
@@ -7204,6 +8197,7 @@ def screen_resume(request: Request, body: dict = None, db: Session = Depends(get
 @app.post("/api/ai/generate-onboarding")
 def generate_onboarding_checklist(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    require_credit(db, client.id, "ai_onboarding")
     if not body or not body.get("job_title"):
         raise HTTPException(status_code=400, detail="job_title required")
     job_title = body["job_title"]
@@ -7228,6 +8222,7 @@ def generate_onboarding_checklist(request: Request, body: dict = None, db: Sessi
 @app.post("/api/ai/personalize-email")
 def personalize_invoice_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    require_credit(db, client.id, "ai_email_draft")
     if not body or not body.get("client_name"):
         raise HTTPException(status_code=400, detail="client_name required")
     client_name = body["client_name"]
@@ -7256,6 +8251,7 @@ def personalize_invoice_email(request: Request, body: dict = None, db: Session =
 @app.post("/api/ai/generate-followup")
 def generate_followup_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    require_credit(db, client.id, "ai_email_draft")
     if not body or not body.get("client_name"):
         raise HTTPException(status_code=400, detail="client_name required")
     client_name = body["client_name"]
@@ -7364,6 +8360,7 @@ def detect_attendance_alerts(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/ai/summarize-attendance")
 def summarize_attendance(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
+    require_credit(db, client.id, "ai_attendance_summary")
     from datetime import timedelta
     thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     records = db.query(models.DBAttendance).filter(

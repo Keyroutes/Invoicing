@@ -1571,7 +1571,7 @@ async function sendEmail() {
             fetchInvoices();
             viewInvoice(number);
         } else {
-            showToast('Failed: ' + (data.detail || 'Unknown error'), 'error');
+            reportApiError(res, data, 'Could not send the email');
         }
     } catch (e) {
         showToast('Failed to send email: ' + e, 'error');
@@ -3345,7 +3345,7 @@ async function batchGeneratePayslips() {
             })
         });
         var data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Payroll run failed');
+        if (!res.ok) { reportApiError(res, data, 'Payroll run failed'); return; }
         var msg = data.created.length + ' payslip(s) created, net ' + getCurrencySymbol() + data.total_net.toFixed(2);
         if (data.skipped.length) msg += ' — ' + data.skipped.length + ' skipped (already paid for this period)';
         showToast(msg, data.created.length ? 'success' : 'warning');
@@ -4106,6 +4106,7 @@ showView = function(viewId) {
         var jobsTab = document.querySelector('#rec-tabs .tab');
         switchRecTab('jobs', jobsTab);
     }
+    if (viewId === 'wallet-view') loadWallet();
     if (viewId === 'bills-view') loadBills();
     if (viewId === 'contacts-view') loadContacts();
 };
@@ -4350,6 +4351,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // never renders an empty shell behind a redirect.
     if (!(await requireAuth())) return;
     checkAuthStatus();
+    handleTopUpReturn();
     loadSettings();
     fetchDashboardData();
     fetchInvoices();
@@ -4968,7 +4970,7 @@ async function hireCandidate() {
             })
         });
         var data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed');
+        if (!res.ok) { reportApiError(res, data, 'Failed'); return; }
         showToast(data.message, 'success');
         showRecSubmissionDetail(recCurrentSubId);
         // A hire creates an employee and an onboarding checklist.
@@ -7346,3 +7348,276 @@ async function syncEmployeeDocRequests() {
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.syncEmployeeDocRequests = syncEmployeeDocRequests;
+
+
+// Any metered call can come back 402. Route those to the top-up prompt rather
+// than showing a dead error the user cannot act on.
+function reportApiError(res, data, fallback) {
+    var detail = (data && data.detail) || fallback || 'Something went wrong';
+    if (res && res.status === 402) { handleInsufficientCredit(detail); return; }
+    showToast(detail, 'error');
+}
+window.reportApiError = reportApiError;
+
+// ==========================================================================
+// WALLET
+// Prepaid credit for metered actions. Balance, spending history, what things
+// cost, and top-up through whichever gateway the operator has configured.
+// ==========================================================================
+
+var _wallet = null;
+var _walletProviders = null;
+
+async function loadWallet() {
+    try {
+        var res = await fetch('/api/wallet');
+        if (!res.ok) return;
+        _wallet = await res.json();
+    } catch (e) { return; }
+
+    var sym = _wallet.symbol || '';
+    var tiles = [
+        ['Balance', sym + _wallet.balance.toFixed(2), _wallet.is_empty ? 'var(--danger-color)'
+            : (_wallet.is_low ? 'var(--warning-color)' : 'var(--success-color)')],
+        ['Spent all time', sym + _wallet.lifetime_spent.toFixed(2), ''],
+        ['Topped up all time', sym + _wallet.lifetime_topped_up.toFixed(2), ''],
+        ['Low balance at', sym + _wallet.low_balance.toFixed(2), '']
+    ];
+    var stats = document.getElementById('wallet-stats');
+    if (stats) {
+        stats.innerHTML = tiles.map(function (t) {
+            return '<div class="stat-card" style="cursor:default;">' +
+                '<span class="stat-label">' + t[0] + '</span>' +
+                '<span class="stat-value"' + (t[2] ? ' style="color:' + t[2] + ';"' : '') + '>' + esc(t[1]) + '</span></div>';
+        }).join('');
+    }
+
+    var banner = document.getElementById('wallet-low-banner');
+    if (banner) {
+        if (_wallet.is_empty || _wallet.is_low) {
+            banner.style.display = 'block';
+            banner.innerHTML = '<div style="padding:12px 16px;border-radius:8px;margin-bottom:24px;' +
+                'background:rgba(252,211,77,0.12);border:1px solid rgba(252,211,77,0.35);' +
+                'display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:0.87rem;">' +
+                '<strong style="color:var(--warning-color);">' +
+                (_wallet.is_empty ? 'Your wallet is empty.' : 'Your balance is running low.') + '</strong>' +
+                '<span style="color:var(--text-secondary);">Sending, payroll and AI features need credit.</span>' +
+                '<button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="openTopUpModal()">Top up</button></div>';
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+
+    var pricing = document.getElementById('wallet-pricing');
+    if (pricing) {
+        pricing.innerHTML = (_wallet.pricing || []).map(function (p) {
+            var free = p.free_allowance
+                ? '<span style="font-size:0.72rem;color:var(--success-color);"> ' +
+                  Math.max(0, p.free_allowance - p.used_this_month) + ' free left this month</span>' : '';
+            return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;' +
+                   'border-bottom:1px solid var(--border-color);font-size:0.85rem;">' +
+                '<span style="flex:1;">' + esc(p.label) + free + '</span>' +
+                '<strong>' + esc(_wallet.symbol) + p.unit_price.toFixed(2) + '</strong></div>';
+        }).join('') || '<p style="color:var(--text-secondary);font-size:0.85rem;">Nothing is metered yet.</p>';
+    }
+
+    loadWalletTransactions();
+    loadTopUpHistory();
+}
+window.loadWallet = loadWallet;
+
+async function loadWalletTransactions() {
+    var body = document.getElementById('wallet-tx-body');
+    if (!body) return;
+    var dir = (document.getElementById('wallet-tx-filter') || {}).value || '';
+    try {
+        var res = await fetch('/api/wallet/transactions?limit=100' + (dir ? '&direction=' + dir : ''));
+        var rows = res.ok ? await res.json() : [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-secondary);">No transactions yet.</td></tr>';
+            return;
+        }
+        var sym = (_wallet && _wallet.symbol) || '';
+        body.innerHTML = rows.map(function (t) {
+            var credit = t.direction === 'credit';
+            return '<tr><td>' + esc((t.created_at || '').slice(0, 16)) + '</td>' +
+                '<td>' + esc(t.description || t.action_key) +
+                    (t.reference ? '<br><span style="font-size:0.75rem;color:var(--text-secondary);">' + esc(t.reference) + '</span>' : '') +
+                    (t.quantity > 1 ? '<span style="font-size:0.75rem;color:var(--text-secondary);"> x' + t.quantity + '</span>' : '') + '</td>' +
+                '<td class="text-right" style="color:' + (credit ? 'var(--success-color)' : 'var(--danger-color)') + ';">' +
+                    (credit ? '+' : '-') + sym + t.amount.toFixed(2) + '</td>' +
+                '<td class="text-right">' + sym + t.balance_after.toFixed(2) + '</td></tr>';
+        }).join('');
+    } catch (e) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-secondary);">Could not load transactions.</td></tr>';
+    }
+}
+window.loadWalletTransactions = loadWalletTransactions;
+
+async function loadTopUpHistory() {
+    var host = document.getElementById('wallet-topups');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/wallet/topups?limit=10');
+        var rows = res.ok ? await res.json() : [];
+        if (!rows.length) {
+            host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">No top-ups yet.</p>';
+            return;
+        }
+        var colors = { paid: 'var(--success-color)', pending: 'var(--warning-color)',
+                       failed: 'var(--danger-color)', cancelled: 'var(--text-secondary)' };
+        host.innerHTML = rows.map(function (o) {
+            return '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;' +
+                   'border-bottom:1px solid var(--border-color);font-size:0.85rem;">' +
+                '<span style="flex:1;">' + esc((o.created_at || '').slice(0, 10)) +
+                    ' <span style="color:var(--text-secondary);text-transform:capitalize;">' + esc(o.provider) + '</span></span>' +
+                '<strong>' + esc(o.currency === 'GBP' ? '£' : '') + o.amount.toFixed(2) + '</strong>' +
+                '<span style="color:' + (colors[o.status] || '') + ';text-transform:capitalize;font-size:0.78rem;">' + esc(o.status) + '</span>' +
+                (o.checkout_url ? ' <a class="btn btn-outline btn-sm" href="' + esc(o.checkout_url) + '" target="_blank" rel="noopener">Resume</a>' : '') +
+            '</div>';
+        }).join('');
+    } catch (e) { host.innerHTML = ''; }
+}
+
+// --- Top up -----------------------------------------------------------------
+
+async function openTopUpModal() {
+    var modal = document.getElementById('topup-modal');
+    if (!modal) return;
+    try {
+        var res = await fetch('/api/wallet/providers');
+        _walletProviders = await res.json();
+    } catch (e) { return; }
+
+    var presets = document.getElementById('topup-presets');
+    if (presets) {
+        presets.innerHTML = (_walletProviders.suggested || []).map(function (a) {
+            return '<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'topup-amount\').value=' + a + '">' +
+                   esc(_walletProviders.symbol) + a + '</button>';
+        }).join('');
+    }
+
+    var host = document.getElementById('topup-providers');
+    if (host) {
+        host.innerHTML = (_walletProviders.providers || []).map(function (p, i) {
+            // A provider without keys is shown but disabled, so it is obvious
+            // why it cannot be used rather than failing on click.
+            return '<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;' +
+                   'border:1px solid var(--border-color);border-radius:8px;' +
+                   (p.enabled ? 'cursor:pointer;' : 'opacity:0.5;cursor:not-allowed;') + '">' +
+                '<input type="radio" name="topup-provider" value="' + esc(p.key) + '"' +
+                    (p.enabled ? '' : ' disabled') + (p.enabled && i === 0 ? ' checked' : '') + '>' +
+                '<span style="flex:1;">' + esc(p.label) + '</span>' +
+                (p.enabled ? '' : '<span style="font-size:0.72rem;color:var(--text-secondary);">not configured</span>') +
+            '</label>';
+        }).join('');
+    }
+
+    var note = document.getElementById('topup-note');
+    var go = document.getElementById('topup-go');
+    if (!_walletProviders.any_enabled) {
+        if (note) note.textContent = 'No payment provider is configured on this server yet. ' +
+            'Add the gateway keys, or ask an administrator to credit your wallet manually.';
+        if (go) { go.disabled = true; go.style.opacity = '0.5'; }
+    } else {
+        if (note) note.textContent = 'Minimum ' + _walletProviders.symbol + _walletProviders.min_amount +
+            '. Credit is added once the payment clears.';
+        if (go) { go.disabled = false; go.style.opacity = '1'; }
+    }
+    modal.style.display = 'flex';
+}
+window.openTopUpModal = openTopUpModal;
+
+function closeTopUpModal() {
+    var m = document.getElementById('topup-modal');
+    if (m) m.style.display = 'none';
+}
+window.closeTopUpModal = closeTopUpModal;
+
+async function startTopUp() {
+    var amount = parseFloat((document.getElementById('topup-amount') || {}).value);
+    if (!amount || amount <= 0) { showToast('Enter an amount', 'error'); return; }
+    var picked = document.querySelector('input[name="topup-provider"]:checked');
+    if (!picked) { showToast('Choose how to pay', 'error'); return; }
+
+    try {
+        var res = await fetch('/api/wallet/topup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: amount, provider: picked.value })
+        });
+        var data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Could not start the payment');
+
+        if (data.checkout_url || data.approve_url) {
+            // Stripe and PayPal take the user to their own hosted page.
+            window.location.href = data.checkout_url || data.approve_url;
+            return;
+        }
+        if (data.provider === 'razorpay') {
+            openRazorpayCheckout(data);
+            return;
+        }
+        showToast('Payment started', 'info');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+window.startTopUp = startTopUp;
+
+function openRazorpayCheckout(data) {
+    // Razorpay renders in a modal from their own script; without it there is
+    // nothing to show, so say so rather than failing silently.
+    if (typeof window.Razorpay !== 'function') {
+        showToast('Razorpay checkout script is not loaded on this page', 'error');
+        return;
+    }
+    var rzp = new window.Razorpay({
+        key: data.key_id,
+        amount: data.amount_minor,
+        currency: data.currency,
+        name: data.name || 'Wallet top-up',
+        order_id: data.razorpay_order_id,
+        prefill: { email: data.prefill_email || '' },
+        handler: function () {
+            // Credit comes from the verified webhook, never from this callback.
+            showToast('Payment received. Your balance will update shortly.', 'success');
+            setTimeout(loadWallet, 2500);
+        },
+        modal: { ondismiss: function () { showToast('Payment cancelled', 'info'); } }
+    });
+    rzp.open();
+}
+
+// PayPal returns the buyer here; the capture call is what proves payment.
+async function finishPayPalReturn() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('topup') !== 'success') return;
+    try {
+        var orders = await (await fetch('/api/wallet/topups?limit=5')).json();
+        var pending = orders.filter(function (o) { return o.provider === 'paypal' && o.status === 'pending'; })[0];
+        if (!pending) return;
+        var res = await fetch('/api/wallet/topup/' + pending.id + '/capture-paypal', { method: 'POST' });
+        var data = await res.json();
+        if (res.ok && data.credited) showToast('Wallet topped up', 'success');
+    } catch (e) { /* the webhook or a later retry will settle it */ }
+}
+
+function handleTopUpReturn() {
+    var params = new URLSearchParams(window.location.search);
+    var state = params.get('topup');
+    if (!state) return;
+    if (state === 'success') {
+        showToast('Payment complete. Updating your balance...', 'success');
+        finishPayPalReturn().then(function () { loadWallet(); });
+    } else if (state === 'cancelled') {
+        showToast('Payment cancelled', 'info');
+    }
+    // Clear the marker so a refresh does not repeat this.
+    window.history.replaceState({}, '', window.location.pathname);
+}
+window.handleTopUpReturn = handleTopUpReturn;
+
+// Turn a 402 anywhere in the app into an actionable prompt.
+function handleInsufficientCredit(detail) {
+    showToast(detail || 'Not enough wallet credit', 'error');
+    setTimeout(openTopUpModal, 600);
+}
+window.handleInsufficientCredit = handleInsufficientCredit;
