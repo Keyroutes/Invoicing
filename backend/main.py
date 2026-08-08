@@ -6724,6 +6724,8 @@ class DocumentRequirementIn(BaseModel):
     doc_type: Optional[str] = "other"
     is_mandatory: Optional[bool] = True
     due_days: Optional[int] = 7
+    requires_expiry: Optional[bool] = False
+    expiry_reminder_days: Optional[int] = 30
     applies_to: Optional[str] = "all"
     department_id: Optional[int] = None
     level: Optional[str] = ""
@@ -6736,6 +6738,10 @@ def requirement_to_dict(r):
         "id": r.id, "name": r.name, "description": r.description or "",
         "doc_type": r.doc_type, "is_mandatory": bool(r.is_mandatory),
         "due_days": r.due_days, "applies_to": r.applies_to,
+        "requires_expiry": bool(r.requires_expiry),
+        "expiry_reminder_days": r.expiry_reminder_days or 30,
+        "has_template": bool(r.template_file_data),
+        "template_file_name": r.template_file_name or "",
         "department_id": r.department_id,
         "department_name": r.department.name if r.department else "",
         "level": r.level or "", "is_active": bool(r.is_active),
@@ -6754,6 +6760,10 @@ def request_to_dict(req, include_file=False):
         "reviewed_by": req.reviewed_by or "", "review_note": req.review_note or "",
         "created_at": req.created_at,
     }
+    # The employee needs to know a blank form exists before they can fetch it.
+    rule = getattr(req, "requirement", None)
+    data["has_template"] = bool(rule is not None and rule.template_file_data)
+
     doc = req.document
     if doc:
         data["file_name"] = doc.file_name
@@ -6761,10 +6771,25 @@ def request_to_dict(req, include_file=False):
         data["file_size"] = doc.file_size or 0
         if include_file:
             data["file_data"] = doc.file_data
-    # Overdue is derived, never stored, so it cannot go stale.
+    # Overdue and expiry are derived, never stored, so they cannot go stale.
+    today = datetime.now().date()
     due = _parse_date(req.due_date)
     data["is_overdue"] = bool(
-        due and req.status in ("pending", "rejected") and due < datetime.now().date()
+        due and req.status in ("pending", "rejected") and due < today
+    )
+
+    data["requires_expiry"] = bool(getattr(req, "requires_expiry", False))
+    data["expires_on"] = getattr(req, "expires_on", "") or ""
+    expires = _parse_date(data["expires_on"])
+    data["is_expired"] = bool(expires and expires < today)
+    data["days_until_expiry"] = (expires - today).days if expires else None
+    reminder = 30
+    if req.requirement_id:
+        rule = getattr(req, "requirement", None)
+        if rule is not None:
+            reminder = rule.expiry_reminder_days or 30
+    data["expiring_soon"] = bool(
+        expires and not data["is_expired"] and (expires - today).days <= reminder
     )
     return data
 
@@ -6796,7 +6821,13 @@ def validate_requirement(body, db, client_id):
     level = validate_level(body.level)
     if applies == "level" and not level:
         raise HTTPException(status_code=400, detail="Choose a level for this rule")
-    return name, applies, due_days, level
+    try:
+        reminder = int(body.expiry_reminder_days if body.expiry_reminder_days is not None else 30)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Expiry reminder must be a whole number of days")
+    if reminder < 0 or reminder > 365:
+        raise HTTPException(status_code=400, detail="Expiry reminder must be between 0 and 365 days")
+    return name, applies, due_days, level, reminder
 
 
 def requirement_applies_to_employee(req, emp):
@@ -6832,6 +6863,7 @@ def assign_document_requests(db, client_id, emp, requirements=None):
             client_id=client_id, employee_id=emp.id, requirement_id=req.id,
             name=req.name, description=req.description or "", doc_type=req.doc_type,
             is_mandatory=bool(req.is_mandatory),
+            requires_expiry=bool(req.requires_expiry),
             due_date=(start + timedelta(days=req.due_days or 0)).strftime("%Y-%m-%d"),
         ))
     for row in created:
@@ -6877,7 +6909,7 @@ def list_document_requirements(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/onboarding/requirements")
 def create_document_requirement(request: Request, body: DocumentRequirementIn, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    name, applies, due_days, level = validate_requirement(body, db, client.id)
+    name, applies, due_days, level, reminder = validate_requirement(body, db, client.id)
     clash = db.query(models.DBDocumentRequirement).filter(
         models.DBDocumentRequirement.client_id == client.id,
         sqlfunc.lower(models.DBDocumentRequirement.name) == name.lower(),
@@ -6888,6 +6920,7 @@ def create_document_requirement(request: Request, body: DocumentRequirementIn, d
         client_id=client.id, name=name, description=body.description or "",
         doc_type=body.doc_type or "other", is_mandatory=bool(body.is_mandatory),
         due_days=due_days, applies_to=applies,
+        requires_expiry=bool(body.requires_expiry), expiry_reminder_days=reminder,
         department_id=body.department_id if applies == "department" else None,
         level=level if applies == "level" else "",
         is_active=bool(body.is_active), sort_order=int(body.sort_order or 0),
@@ -6908,7 +6941,7 @@ def update_document_requirement(req_id: int, request: Request, body: DocumentReq
     ).first()
     if not row:
         raise HTTPException(status_code=404, detail="Requirement not found")
-    name, applies, due_days, level = validate_requirement(body, db, client.id)
+    name, applies, due_days, level, reminder = validate_requirement(body, db, client.id)
     clash = db.query(models.DBDocumentRequirement).filter(
         models.DBDocumentRequirement.client_id == client.id,
         models.DBDocumentRequirement.id != req_id,
@@ -6921,6 +6954,8 @@ def update_document_requirement(req_id: int, request: Request, body: DocumentReq
     row.doc_type = body.doc_type or "other"
     row.is_mandatory = bool(body.is_mandatory)
     row.due_days = due_days
+    row.requires_expiry = bool(body.requires_expiry)
+    row.expiry_reminder_days = reminder
     row.applies_to = applies
     row.department_id = body.department_id if applies == "department" else None
     row.level = level if applies == "level" else ""
@@ -7066,6 +7101,109 @@ def review_document_request(req_id: int, request: Request, body: dict = None, db
     return request_to_dict(row)
 
 
+
+class RequirementTemplateIn(BaseModel):
+    file_name: str
+    file_type: Optional[str] = ""
+    file_data: str
+
+
+@app.post("/api/onboarding/requirements/{req_id}/template")
+def upload_requirement_template(req_id: int, body: RequirementTemplateIn, request: Request,
+                                db: Session = Depends(get_db)):
+    """Attach a blank form for the employee to download, fill in and return."""
+    client = get_client_user(request, db)
+    row = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.id == req_id,
+        models.DBDocumentRequirement.client_id == client.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    validate_candidate_document(body)
+    row.template_file_name = body.file_name
+    row.template_file_type = body.file_type or ""
+    row.template_file_data = body.file_data
+    db.commit()
+    return {"message": f"Template attached to {row.name}", "template_file_name": row.template_file_name}
+
+
+@app.delete("/api/onboarding/requirements/{req_id}/template")
+def delete_requirement_template(req_id: int, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    row = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.id == req_id,
+        models.DBDocumentRequirement.client_id == client.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    row.template_file_name = ""
+    row.template_file_type = ""
+    row.template_file_data = ""
+    db.commit()
+    return {"message": "Template removed"}
+
+
+@app.get("/api/onboarding/requirements/{req_id}/template")
+def download_requirement_template(req_id: int, request: Request, db: Session = Depends(get_db)):
+    """Readable by HR and by any employee who has been asked for it."""
+    client_id = None
+    if request.session.get("client_id"):
+        client_id = request.session["client_id"]
+    elif request.session.get("employee_id"):
+        client_id = request.session.get("employee_client_id")
+    if not client_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    row = db.query(models.DBDocumentRequirement).filter(
+        models.DBDocumentRequirement.id == req_id,
+        models.DBDocumentRequirement.client_id == client_id,
+    ).first()
+    if not row or not row.template_file_data:
+        raise HTTPException(status_code=404, detail="No template attached to this document")
+    return {
+        "file_name": row.template_file_name,
+        "file_type": row.template_file_type,
+        "file_data": row.template_file_data,
+    }
+
+
+@app.get("/api/onboarding/expiring-documents")
+def expiring_documents(request: Request, days: int = 60, db: Session = Depends(get_db)):
+    """Approved documents that have expired or are about to.
+
+    Right-to-work and DBS checks lapse quietly; this is what stops a company
+    finding out during an audit.
+    """
+    client = get_client_user(request, db)
+    days = max(1, min(days, 365))
+    horizon = (datetime.now().date() + timedelta(days=days))
+    today = datetime.now().date()
+
+    rows = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client.id,
+        models.DBDocumentRequest.status == "approved",
+        models.DBDocumentRequest.expires_on != "",
+    ).all()
+
+    emp_names = {
+        e.id: f"{e.first_name} {e.last_name}"
+        for e in db.query(models.DBEmployee).filter(models.DBEmployee.client_id == client.id).all()
+    }
+    out = []
+    for r in rows:
+        expires = _parse_date(r.expires_on)
+        if not expires or expires > horizon:
+            continue
+        data = request_to_dict(r)
+        data["employee_name"] = emp_names.get(r.employee_id, "")
+        out.append(data)
+    out.sort(key=lambda d: d["expires_on"])
+    return {
+        "expired": [d for d in out if d["is_expired"]],
+        "expiring": [d for d in out if not d["is_expired"]],
+        "window_days": days,
+    }
+
 # --- Employee portal: see and satisfy your own requirements ------------------
 
 @app.get("/api/employee/document-requests")
@@ -7092,6 +7230,7 @@ class EmployeeDocumentUpload(BaseModel):
     file_name: str
     file_type: Optional[str] = ""
     file_data: str
+    expires_on: Optional[str] = ""
 
 
 @app.post("/api/employee/document-requests/{req_id}/upload")
@@ -7112,6 +7251,26 @@ def employee_upload_document(req_id: int, body: EmployeeDocumentUpload, request:
         raise HTTPException(status_code=409, detail="This document has already been approved")
 
     size = validate_candidate_document(body)
+
+    # HR decides which documents expire; the employee supplies the date.
+    expires_on = (body.expires_on or "").strip()
+    if row.requires_expiry:
+        if not expires_on:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{row.name} needs an expiry date. Enter the date shown on the document.",
+            )
+        parsed = _parse_date(expires_on)
+        if not parsed:
+            raise HTTPException(status_code=400, detail="Expiry date must be in YYYY-MM-DD format")
+        if parsed <= datetime.now().date():
+            raise HTTPException(
+                status_code=400,
+                detail="That document has already expired. Please upload a current one.",
+            )
+    elif expires_on and not _parse_date(expires_on):
+        raise HTTPException(status_code=400, detail="Expiry date must be in YYYY-MM-DD format")
+
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
 
     doc = models.DBDocument(
@@ -7125,6 +7284,7 @@ def employee_upload_document(req_id: int, body: EmployeeDocumentUpload, request:
     db.flush()
 
     row.document_id = doc.id
+    row.expires_on = expires_on
     row.status = "submitted"
     row.submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row.reviewed_at = ""

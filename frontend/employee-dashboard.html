@@ -45,7 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=22">
+    <link rel="stylesheet" href="mobile.css?v=23">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -378,6 +378,25 @@
       <input type="file" id="reqFileInput" class="hidden"
              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt"
              onchange="handleRequirementFile(this)">
+
+      <!-- Asked for only when HR has said this document expires -->
+      <div id="expiryModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="closeExpiryModal()"></div>
+        <div class="relative max-w-sm mx-auto mt-32 bg-white rounded-2xl p-6 shadow-xl">
+          <h3 class="font-semibold text-gray-900 mb-1" id="expiryTitle">Expiry date</h3>
+          <p class="text-xs text-gray-500 mb-4" id="expiryHint">
+            Enter the expiry date printed on the document.
+          </p>
+          <input type="date" id="expiryInput"
+                 class="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mb-4">
+          <div class="flex gap-2">
+            <button onclick="closeExpiryModal()"
+                    class="flex-1 px-4 py-2.5 border border-gray-200 text-gray-700 text-sm font-medium rounded-xl">Cancel</button>
+            <button onclick="confirmExpiryAndUpload()"
+                    class="flex-1 px-4 py-2.5 bg-brand-500 text-white text-sm font-medium rounded-xl">Upload</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Tab: Onboarding -->
@@ -471,6 +490,7 @@
     // straight to the HR review queue.
     var _reqLimits = { max_mb: 5, allowed: [] };
     var _pendingReqId = null;
+    var _lastRequests = [];
 
     async function loadDocumentRequests() {
       var list = document.getElementById('reqList');
@@ -482,6 +502,7 @@
         var data = await res.json();
         _reqLimits = data.limits || _reqLimits;
         var rows = data.requests || [];
+        _lastRequests = rows;
 
         if (hint) {
           hint.textContent = rows.length
@@ -521,8 +542,13 @@
               '<div class="text-sm font-semibold text-gray-900">' + esc(r.name) +
                 (r.is_mandatory ? '<span class="text-red-500 ml-1">*</span>' : '') + '</div>' +
               (r.description ? '<div class="text-xs text-gray-400 mt-0.5">' + esc(r.description) + '</div>' : '') +
-              '<div class="text-xs mt-1 flex gap-3 flex-wrap">' + due +
-                (r.file_name ? '<span class="text-gray-400">' + esc(r.file_name) + '</span>' : '') + '</div>' +
+              '<div class="text-xs mt-1 flex gap-3 flex-wrap items-center">' + due +
+                (r.file_name ? '<span class="text-gray-400">' + esc(r.file_name) + '</span>' : '') +
+                expiryLabel(r) +
+                (r.has_template
+                  ? '<button onclick="downloadTemplate(' + r.requirement_id + ')" ' +
+                    'class="text-brand-600 underline">Download blank form</button>'
+                  : '') + '</div>' +
               (r.status === 'rejected' && r.review_note
                 ? '<div class="text-xs text-red-500 mt-1">HR: ' + esc(r.review_note) + '</div>' : '') +
             '</div>' +
@@ -538,11 +564,60 @@
       }
     }
 
+    var _pendingExpiry = '';
+    var _pendingFile = null;
+
+    function expiryLabel(r) {
+      if (!r.expires_on) {
+        return r.requires_expiry && r.status === 'pending'
+          ? '<span class="text-amber-600">expiry date needed</span>' : '';
+      }
+      var cls = r.is_expired ? 'text-red-500 font-medium'
+              : (r.expiring_soon ? 'text-amber-600' : 'text-gray-400');
+      return '<span class="' + cls + '">' +
+             (r.is_expired ? 'expired ' : 'expires ') + esc(r.expires_on) + '</span>';
+    }
+
     function pickDocumentFor(requestId) {
       _pendingReqId = requestId;
+      _pendingExpiry = '';
       var input = document.getElementById('reqFileInput');
       input.value = '';        // so re-picking the same file still fires change
       input.click();
+    }
+
+    async function downloadTemplate(requirementId) {
+      if (!requirementId) return;
+      try {
+        var res = await apiGet('/api/onboarding/requirements/' + requirementId + '/template');
+        var d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'No template available');
+        var bytes = atob(d.file_data);
+        var arr = new Uint8Array(bytes.length);
+        for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([arr], { type: d.file_type || 'application/octet-stream' }));
+        var a = document.createElement('a');
+        a.href = url; a.download = d.file_name || 'template'; a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) { alert(e.message); }
+    }
+
+    function closeExpiryModal() {
+      document.getElementById('expiryModal').classList.add('hidden');
+      _pendingFile = null;
+      _pendingReqId = null;
+    }
+
+    function confirmExpiryAndUpload() {
+      var value = document.getElementById('expiryInput').value;
+      if (!value) { alert('Enter the expiry date shown on the document.'); return; }
+      if (new Date(value) <= new Date()) {
+        alert('That date has already passed. Please upload a current document.');
+        return;
+      }
+      _pendingExpiry = value;
+      document.getElementById('expiryModal').classList.add('hidden');
+      uploadPendingFile();
     }
 
     async function handleRequirementFile(input) {
@@ -559,21 +634,42 @@
         return;
       }
 
+      _pendingFile = file;
+
+      // HR marks some documents as expiring; ask for the date before sending,
+      // so the upload is not rejected after the wait.
+      var req = (_lastRequests || []).filter(function (r) { return r.id === _pendingReqId; })[0];
+      if (req && req.requires_expiry) {
+        document.getElementById('expiryTitle').textContent = 'Expiry date for ' + req.name;
+        document.getElementById('expiryInput').value = '';
+        document.getElementById('expiryModal').classList.remove('hidden');
+        return;
+      }
+      uploadPendingFile();
+    }
+
+    function uploadPendingFile() {
+      var file = _pendingFile;
+      var reqId = _pendingReqId;
+      if (!file || !reqId) return;
+      _pendingFile = null;
+      _pendingReqId = null;
+
       var reader = new FileReader();
       reader.onload = async function (e) {
-        var reqId = _pendingReqId;
-        _pendingReqId = null;
         try {
           var res = await fetch('/api/employee/document-requests/' + reqId + '/upload', {
             method: 'POST', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               file_name: file.name, file_type: file.type,
-              file_data: e.target.result.split(',')[1]
+              file_data: e.target.result.split(',')[1],
+              expires_on: _pendingExpiry || ''
             })
           });
           var data = await res.json();
           if (!res.ok) throw new Error(data.detail || 'Upload failed');
+          _pendingExpiry = '';
           // Refresh both lists so the new file shows in each straight away.
           loadDocumentRequests();
           loadDocuments();

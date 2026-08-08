@@ -676,6 +676,17 @@ class DBDocumentRequirement(Base):
     doc_type = Column(String, default="other")
     is_mandatory = Column(Boolean, default=True)
     due_days = Column(Integer, default=7)          # days after start date
+
+    # Documents like a passport, visa or DBS check go out of date. HR decides
+    # which ones need an expiry, and the employee supplies the actual date.
+    requires_expiry = Column(Boolean, default=False)
+    expiry_reminder_days = Column(Integer, default=30)
+
+    # An optional blank form for the employee to download, complete and return.
+    template_file_name = Column(String, default="")
+    template_file_type = Column(String, default="")
+    template_file_data = Column(Text, default="")
+
     applies_to = Column(String, default="all")     # all | department | level
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     level = Column(String, default="")
@@ -702,6 +713,10 @@ class DBDocumentRequest(Base):
     is_mandatory = Column(Boolean, default=True)
     due_date = Column(String, default="")
 
+    # Supplied by the employee when the requirement asks for it.
+    requires_expiry = Column(Boolean, default=False)
+    expires_on = Column(String, default="", index=True)
+
     status = Column(String, default="pending", index=True)  # pending|submitted|approved|rejected
     submitted_at = Column(String, default="")
     reviewed_at = Column(String, default="")
@@ -712,6 +727,9 @@ class DBDocumentRequest(Base):
 
     employee = relationship("DBEmployee")
     document = relationship("DBDocument")
+    # Needed so a request can report its template and reminder window; without
+    # it the lookups silently returned None.
+    requirement = relationship("DBDocumentRequirement")
 
 
 class DBBill(Base):

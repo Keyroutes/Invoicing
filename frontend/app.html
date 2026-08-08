@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=22">
-    <link rel="stylesheet" href="mobile.css?v=22">
+    <link rel="stylesheet" href="styles.css?v=23">
+    <link rel="stylesheet" href="mobile.css?v=23">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -1275,6 +1275,15 @@
                     </div>
                     <div id="onboarding-hub-stats" class="grid-4 mb-24"></div>
 
+                    <!-- Documents that have lapsed or are about to -->
+                    <div class="glass-widget mb-24" id="expiring-docs-widget">
+                        <div class="widget-header">
+                            <h3>Expiring Documents</h3>
+                            <span style="font-size:0.75rem;color:var(--text-secondary);margin-left:auto;">next 60 days</span>
+                        </div>
+                        <div class="widget-content" id="expiring-docs-list"></div>
+                    </div>
+
                     <!-- Documents arriving from the employee portal -->
                     <div class="glass-widget mb-24" id="doc-queue-widget">
                         <div class="widget-header">
@@ -2083,7 +2092,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=22"></script>
+    <script src="app.js?v=23"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">
@@ -2268,9 +2277,35 @@
                         <div class="form-group" id="req-level-group" style="display:none;"><label>Level</label><select id="req-level" class="form-control"><option value="">Select...</option></select></div>
                     </div>
                     <div class="form-group"><label>Description</label><input type="text" id="req-description" class="form-control" placeholder="What exactly do you need?"></div>
-                    <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;">
-                        <input type="checkbox" id="req-mandatory" checked> Mandatory
-                    </label>
+                    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;">
+                            <input type="checkbox" id="req-mandatory" checked> Mandatory
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;">
+                            <input type="checkbox" id="req-expiry" onchange="onRequirementExpiryChange()">
+                            Has an expiry date
+                        </label>
+                        <div id="req-reminder-group" style="display:none;align-items:center;gap:6px;font-size:0.85rem;">
+                            <span style="color:var(--text-secondary);">Warn</span>
+                            <input type="number" id="req-reminder" class="form-control" value="30" min="0" max="365"
+                                   style="width:74px;padding:5px 8px;">
+                            <span style="color:var(--text-secondary);">days before</span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:0.85rem;">
+                        <span style="color:var(--text-secondary);">Blank form for the employee:</span>
+                        <span id="req-template-name" style="color:var(--primary-color);"></span>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="pickRequirementTemplate()">Attach file</button>
+                        <button type="button" class="btn btn-outline btn-sm" id="req-template-remove"
+                                style="display:none;color:var(--danger-color);border-color:var(--danger-color);"
+                                onclick="removeRequirementTemplate()">Remove</button>
+                        <input type="file" id="req-template-input" style="display:none;"
+                               accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.txt"
+                               onchange="uploadRequirementTemplate(this)">
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:6px;">
+                        Attach a template only after saving the document.
+                    </p>
                 </div>
             </div>
             <div class="modal-footer">

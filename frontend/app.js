@@ -4100,7 +4100,7 @@ showView = function(viewId) {
     if (viewId === 'leave-view') loadLeaveView();
     if (viewId === 'goals-view') loadGoalsView();
     if (viewId === 'departments-view') fetchDepartments();
-    if (viewId === 'onboarding-hub-view') { loadOnboardingHub(); loadDocumentQueue(); }
+    if (viewId === 'onboarding-hub-view') { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); }
     if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
@@ -6813,7 +6813,7 @@ var HR_VIEW_LOADERS = {
     'employees-view':      function () { fetchEmployees(currentEmpFilter); },
     'departments-view':    function () { fetchDepartments(); },
     'orgchart-view':       function () { loadOrgChart(); },
-    'onboarding-hub-view': function () { loadOnboardingHub(); loadDocumentQueue(); },
+    'onboarding-hub-view': function () { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); },
     'payroll-view':        function () { fetchPayslips(currentPsFilter); },
     'leave-view':          function () { loadLeaveView(); },
     'goals-view':          function () { loadGoalsView(); },
@@ -7213,6 +7213,8 @@ async function loadRequirements() {
                                 : '<span style="font-size:0.72rem;color:var(--text-secondary);"> optional</span>') +
                 '<div style="font-size:0.75rem;color:var(--text-secondary);">' +
                     esc(r.doc_type) + ' &middot; due ' + r.due_days + ' days after start &middot; ' + esc(scope) +
+                    (r.requires_expiry ? ' &middot; expires (warn ' + r.expiry_reminder_days + 'd)' : '') +
+                    (r.has_template ? ' &middot; template attached' : '') +
                     (r.is_active ? '' : ' &middot; inactive') + '</div>' +
             '</div>' +
             '<button class="btn btn-outline btn-sm" onclick="editRequirement(' + r.id + ')">Edit</button> ' +
@@ -7240,8 +7242,12 @@ function resetRequirementForm() {
     var type = document.getElementById('req-type'); if (type) type.value = 'identity';
     var applies = document.getElementById('req-applies'); if (applies) applies.value = 'all';
     var mand = document.getElementById('req-mandatory'); if (mand) mand.checked = true;
+    var exp = document.getElementById('req-expiry'); if (exp) exp.checked = false;
+    var rem = document.getElementById('req-reminder'); if (rem) rem.value = 30;
+    setRequirementTemplateLabel('');
     var btn = document.getElementById('req-save-btn'); if (btn) btn.textContent = 'Add Document';
     onRequirementScopeChange();
+    onRequirementExpiryChange();
 }
 
 function editRequirement(id) {
@@ -7257,8 +7263,12 @@ function editRequirement(id) {
     set('req-department', r.department_id || '');
     set('req-level', r.level || '');
     document.getElementById('req-mandatory').checked = !!r.is_mandatory;
+    document.getElementById('req-expiry').checked = !!r.requires_expiry;
+    document.getElementById('req-reminder').value = r.expiry_reminder_days || 30;
+    setRequirementTemplateLabel(r.template_file_name || '');
     document.getElementById('req-save-btn').textContent = 'Save Changes';
     onRequirementScopeChange();
+    onRequirementExpiryChange();
 }
 window.editRequirement = editRequirement;
 
@@ -7274,6 +7284,8 @@ async function saveRequirement() {
         department_id: val('req-department') ? parseInt(val('req-department')) : null,
         level: val('req-level'),
         is_mandatory: document.getElementById('req-mandatory').checked,
+        requires_expiry: document.getElementById('req-expiry').checked,
+        expiry_reminder_days: parseInt(val('req-reminder')) || 30,
         is_active: true
     };
     if (!payload.name) { showToast('Give the document a name', 'error'); return; }
@@ -7326,6 +7338,9 @@ function renderEmployeeDocRequests(emp) {
                 (r.is_mandatory ? '<span style="color:var(--danger-color);"> *</span>' : '') + '</span>' +
             (r.due_date ? '<span style="font-size:0.75rem;color:' +
                 (r.is_overdue ? 'var(--danger-color)' : 'var(--text-secondary)') + ';">due ' + esc(r.due_date) + '</span>' : '') +
+            (r.expires_on ? '<span style="font-size:0.75rem;color:' +
+                (r.is_expired ? 'var(--danger-color)' : (r.expiring_soon ? 'var(--warning-color)' : 'var(--text-secondary)')) +
+                ';">' + (r.is_expired ? 'expired ' : 'expires ') + esc(r.expires_on) + '</span>' : '') +
             '<span style="text-transform:capitalize;color:' + (colors[r.status] || '') + ';font-weight:600;">' +
                 esc(r.status) + '</span>' +
             (r.document_id ? ' <button class="btn btn-outline btn-sm" onclick="downloadRequestFile(' + r.id + ')">Get</button>' : '') +
@@ -7838,3 +7853,119 @@ async function aiDescribeLineItem(button) {
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.aiDescribeLineItem = aiDescribeLineItem;
+
+// --- Document expiry and templates -----------------------------------------
+// HR decides which documents carry an expiry date and can attach a blank form
+// for the employee to fill in. The employee supplies the actual date.
+
+function onRequirementExpiryChange() {
+    var on = (document.getElementById('req-expiry') || {}).checked;
+    var group = document.getElementById('req-reminder-group');
+    if (group) group.style.display = on ? 'flex' : 'none';
+}
+window.onRequirementExpiryChange = onRequirementExpiryChange;
+
+function pickRequirementTemplate() {
+    if (!document.getElementById('req-id').value) {
+        showToast('Save the document first, then attach a template', 'info');
+        return;
+    }
+    document.getElementById('req-template-input').click();
+}
+window.pickRequirementTemplate = pickRequirementTemplate;
+
+async function uploadRequirementTemplate(input) {
+    var file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    var id = document.getElementById('req-id').value;
+    if (!id) return;
+    if (file.size > 5 * 1024 * 1024) { showToast('Template must be under 5MB', 'error'); return; }
+
+    var reader = new FileReader();
+    reader.onload = async function (e) {
+        try {
+            var res = await fetch('/api/onboarding/requirements/' + id + '/template', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_name: file.name, file_type: file.type,
+                    file_data: e.target.result.split(',')[1]
+                })
+            });
+            var d = await res.json();
+            if (!res.ok) throw new Error(d.detail || 'Failed');
+            showToast(d.message, 'success');
+            setRequirementTemplateLabel(d.template_file_name);
+            loadRequirements();
+        } catch (err) { showToast(err.message, 'error'); }
+    };
+    reader.readAsDataURL(file);
+}
+window.uploadRequirementTemplate = uploadRequirementTemplate;
+
+async function removeRequirementTemplate() {
+    var id = document.getElementById('req-id').value;
+    if (!id) return;
+    try {
+        var res = await fetch('/api/onboarding/requirements/' + id + '/template', { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed');
+        setRequirementTemplateLabel('');
+        showToast('Template removed', 'success');
+        loadRequirements();
+    } catch (e) { showToast('Failed to remove template', 'error'); }
+}
+window.removeRequirementTemplate = removeRequirementTemplate;
+
+function setRequirementTemplateLabel(name) {
+    var label = document.getElementById('req-template-name');
+    var remove = document.getElementById('req-template-remove');
+    if (label) label.textContent = name || 'none attached';
+    if (remove) remove.style.display = name ? 'inline-flex' : 'none';
+}
+
+async function downloadRequirementTemplate(reqId) {
+    try {
+        var res = await fetch('/api/onboarding/requirements/' + reqId + '/template');
+        var d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'No template');
+        var bytes = atob(d.file_data);
+        var arr = new Uint8Array(bytes.length);
+        for (var i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        var url = URL.createObjectURL(new Blob([arr], { type: d.file_type || 'application/octet-stream' }));
+        var a = document.createElement('a');
+        a.href = url; a.download = d.file_name || 'template'; a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+window.downloadRequirementTemplate = downloadRequirementTemplate;
+
+// Right-to-work and DBS checks lapse quietly; this is the screen that catches it.
+async function loadExpiringDocuments() {
+    var host = document.getElementById('expiring-docs-list');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/onboarding/expiring-documents?days=60');
+        var d = res.ok ? await res.json() : { expired: [], expiring: [] };
+        var rows = (d.expired || []).concat(d.expiring || []);
+        if (!rows.length) {
+            host.innerHTML = '<p style="color:var(--text-secondary);font-size:0.85rem;">Nothing expiring in the next ' +
+                (d.window_days || 60) + ' days.</p>';
+            return;
+        }
+        host.innerHTML = rows.map(function (r) {
+            var expired = r.is_expired;
+            var when = expired
+                ? 'expired ' + esc(r.expires_on)
+                : 'expires ' + esc(r.expires_on) + ' (' + r.days_until_expiry + ' days)';
+            return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 0;' +
+                   'border-bottom:1px solid var(--border-color);font-size:0.85rem;">' +
+                '<span style="flex:1;min-width:150px;"><strong>' + employeeLink(r.employee_id, r.employee_name) +
+                    '</strong> <span style="color:var(--text-secondary);">' + esc(r.name) + '</span></span>' +
+                '<span style="color:' + (expired ? 'var(--danger-color)' : 'var(--warning-color)') +
+                    ';font-weight:600;">' + when + '</span>' +
+                (r.document_id ? ' <button class="btn btn-outline btn-sm" onclick="downloadRequestFile(' + r.id + ')">Get</button>' : '') +
+            '</div>';
+        }).join('');
+    } catch (e) { host.innerHTML = ''; }
+}
+window.loadExpiringDocuments = loadExpiringDocuments;

@@ -762,6 +762,20 @@ def ensure_columns():
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_employee ON document_requests (employee_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_status ON document_requests (status)"))
                 conn.execute(text("ALTER TABLE employee_documents ADD COLUMN IF NOT EXISTS file_size INTEGER DEFAULT 0"))
+                for col in [
+                    "requires_expiry BOOLEAN DEFAULT FALSE",
+                    "expiry_reminder_days INTEGER DEFAULT 30",
+                    "template_file_name VARCHAR DEFAULT ''",
+                    "template_file_type VARCHAR DEFAULT ''",
+                    "template_file_data TEXT DEFAULT ''",
+                ]:
+                    conn.execute(text(f"ALTER TABLE document_requirements ADD COLUMN IF NOT EXISTS {col}"))
+                for col in [
+                    "requires_expiry BOOLEAN DEFAULT FALSE",
+                    "expires_on VARCHAR DEFAULT ''",
+                ]:
+                    conn.execute(text(f"ALTER TABLE document_requests ADD COLUMN IF NOT EXISTS {col}"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_doc_requests_expires ON document_requests (expires_on)"))
                 conn.commit()
             except Exception:
                 pass
