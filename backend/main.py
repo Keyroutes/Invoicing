@@ -5873,6 +5873,44 @@ def wallet_state(db, client, include_rules=True):
     return data
 
 
+
+def ensure_can_afford(db, client_id, action_key, quantity=1):
+    """Check the wallet covers an action without debiting it.
+
+    Used before work that can fail (an LLM call, an external API). Charging up
+    front would bill the tenant for a failure; charging without checking first
+    would let a tenant with no credit consume the upstream call anyway.
+    """
+    rule, chargeable, cost = quote_action(db, client_id, action_key, quantity)
+    if cost <= 0:
+        return 0
+    wallet = get_wallet(db, client_id)
+    if wallet.balance_minor < cost:
+        raise insufficient_credit_response(
+            InsufficientCredit(cost, wallet.balance_minor, wallet.currency,
+                               rule.label if rule else action_key)
+        )
+    return cost
+
+
+def charge_after_success(db, client_id, action_key, quantity=1, reference="", performed_by=""):
+    """Debit and commit once the work has actually produced something.
+
+    The AI endpoints previously charged before calling the model and never
+    committed, so the debit was rolled back at the end of the request and the
+    action was billed to nobody.
+    """
+    try:
+        charge_wallet(db, client_id, action_key, quantity, reference, performed_by)
+        db.commit()
+    except InsufficientCredit:
+        # Affordability was checked before the work; a shortfall here means the
+        # balance moved underneath us. The work is already done, so log it
+        # rather than failing the response.
+        db.rollback()
+        logger.warning("Could not bill %s for %s: balance changed mid-request", client_id, action_key)
+
+
 # --- Tenant-facing wallet ---------------------------------------------------
 
 @app.get("/api/wallet")
@@ -5977,6 +6015,45 @@ class PricingRuleIn(BaseModel):
     free_allowance: Optional[int] = 0
     is_active: Optional[bool] = True
     sort_order: Optional[int] = 0
+
+
+@app.get("/api/superadmin/ai-status")
+def ai_status(request: Request):
+    """Whether the AI features can actually run, without exposing the key.
+
+    All five AI endpoints degrade to a canned response when the key is absent,
+    which is safe but indistinguishable from a broken model - this says which.
+    """
+    require_superadmin(request)
+    import llm
+    key = llm.GROQ_API_KEY or ""
+    configured = bool(key)
+    looks_valid = key.startswith("gsk_") and len(key) > 20
+
+    reachable, detail = False, "Not configured"
+    if configured:
+        try:
+            probe = llm.llm_chat([{"role": "user", "content": "ping"}], max_tokens=5)
+            reachable = probe is not None
+            detail = "Model responded" if reachable else "Key set but the API call failed - check the key and quota"
+        except Exception as exc:
+            detail = f"Call failed: {exc}"[:160]
+
+    return {
+        "provider": "groq",
+        "model": llm.MODEL,
+        "configured": configured,
+        "key_format_ok": looks_valid,
+        "reachable": reachable,
+        "detail": detail if configured else "GROQ_API_KEY is not set. AI features return a fallback response.",
+        "env_var": "GROQ_API_KEY",
+        "key_hint": "Groq keys begin with gsk_ and are issued at console.groq.com/keys",
+        "features": [
+            "AI resume screening", "AI onboarding checklist",
+            "AI invoice email drafting", "AI payment follow-up",
+            "AI attendance summary",
+        ],
+    }
 
 
 @app.get("/api/superadmin/pricing")
@@ -8169,7 +8246,7 @@ from llm import llm_chat, llm_json
 @app.post("/api/ai/screen-resume")
 def screen_resume(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    require_credit(db, client.id, "ai_resume_screen")
+    ensure_can_afford(db, client.id, "ai_resume_screen")
     if not body or not body.get("job_title"):
         raise HTTPException(status_code=400, detail="job_title required")
     job_title = body["job_title"]
@@ -8185,6 +8262,7 @@ def screen_resume(request: Request, body: dict = None, db: Session = Depends(get
     result = llm_json(messages)
     if not result:
         return {"score": 0, "summary": "AI service unavailable.", "strengths": [], "weaknesses": [], "recommendation": "Unable to screen at this time."}
+    charge_after_success(db, client.id, "ai_resume_screen", 1, candidate_name)
     return {
         "score": result.get("score", 0),
         "summary": result.get("summary", ""),
@@ -8197,7 +8275,7 @@ def screen_resume(request: Request, body: dict = None, db: Session = Depends(get
 @app.post("/api/ai/generate-onboarding")
 def generate_onboarding_checklist(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    require_credit(db, client.id, "ai_onboarding")
+    ensure_can_afford(db, client.id, "ai_onboarding")
     if not body or not body.get("job_title"):
         raise HTTPException(status_code=400, detail="job_title required")
     job_title = body["job_title"]
@@ -8216,13 +8294,14 @@ def generate_onboarding_checklist(request: Request, body: dict = None, db: Sessi
             {"title": "IT equipment setup", "category": "IT", "description": "Laptop, email, system access", "due_days": 1},
             {"title": "Company policy acknowledgment", "category": "Compliance", "description": "Read and acknowledge policies", "due_days": 7},
         ]}
+    charge_after_success(db, client.id, "ai_onboarding", 1, job_title)
     return {"items": result.get("items", [])}
 
 
 @app.post("/api/ai/personalize-email")
 def personalize_invoice_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    require_credit(db, client.id, "ai_email_draft")
+    ensure_can_afford(db, client.id, "ai_email_draft")
     if not body or not body.get("client_name"):
         raise HTTPException(status_code=400, detail="client_name required")
     client_name = body["client_name"]
@@ -8245,13 +8324,14 @@ def personalize_invoice_email(request: Request, body: dict = None, db: Session =
             subject = line.split(":", 1)[1].strip()
             result = result.replace(line, "").strip()
             break
+    charge_after_success(db, client.id, "ai_email_draft", 1, invoice_number)
     return {"subject": subject, "body": result}
 
 
 @app.post("/api/ai/generate-followup")
 def generate_followup_email(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    require_credit(db, client.id, "ai_email_draft")
+    ensure_can_afford(db, client.id, "ai_email_draft")
     if not body or not body.get("client_name"):
         raise HTTPException(status_code=400, detail="client_name required")
     client_name = body["client_name"]
@@ -8267,6 +8347,7 @@ def generate_followup_email(request: Request, body: dict = None, db: Session = D
     if not result:
         return {"subject": f"Payment Reminder - {invoice_number}", "body": f"Dear {client_name},\n\nThis is a friendly reminder that invoice {invoice_number} for £{total} is now {days_overdue} days overdue.\n\nPlease arrange payment at your earliest convenience.\n\nKind regards,\n{client.company_name or 'Accounts Team'}"}
     subject = f"Payment Reminder - {invoice_number}" if invoice_number else "Payment Reminder"
+    charge_after_success(db, client.id, "ai_email_draft", 1, invoice_number)
     return {"subject": subject, "body": result}
 
 
@@ -8360,7 +8441,7 @@ def detect_attendance_alerts(request: Request, db: Session = Depends(get_db)):
 @app.post("/api/ai/summarize-attendance")
 def summarize_attendance(request: Request, body: dict = None, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    require_credit(db, client.id, "ai_attendance_summary")
+    ensure_can_afford(db, client.id, "ai_attendance_summary")
     from datetime import timedelta
     thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
     records = db.query(models.DBAttendance).filter(
@@ -8383,6 +8464,7 @@ def summarize_attendance(request: Request, body: dict = None, db: Session = Depe
     result = llm_chat(messages)
     if not result:
         result = f"• {present_days} present days recorded across {total_employees} employees.\n• Average daily hours: {round(avg_hours, 1)}h.\n• Remote: {remote_count}, Office: {office_count}."
+    charge_after_success(db, client.id, "ai_attendance_summary")
     return {"summary": result, "stats": {"total_employees": total_employees, "total_records": total_records, "present_days": present_days, "avg_hours": round(avg_hours, 1), "remote": remote_count, "office": office_count}}
 
 
