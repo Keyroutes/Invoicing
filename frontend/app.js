@@ -5069,6 +5069,28 @@ async function loadLeaveView() {
         renderLeaveView();
     } catch(e) { console.error('Leave view load failed:', e); }
 }
+// Builds one row of the leave table.
+function leaveRowHtml(l) {
+    var statusClass = l.status === 'approved' ? 'status-active'
+                    : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
+    var actions = l.status === 'pending'
+        ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" ' +
+          'onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button>' +
+          '<button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" ' +
+          'onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
+        : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + esc(l.approved_by || '') + '</span>';
+    var type = String(l.leave_type || '');
+    return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td>' +
+        '<td>' + esc(type.charAt(0).toUpperCase() + type.slice(1)) + '</td>' +
+        '<td>' + esc(l.start_date) + '</td>' +
+        '<td>' + esc(l.end_date) + '</td>' +
+        '<td><strong>' + esc(l.days) + '</strong></td>' +
+        '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" ' +
+            'title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td>' +
+        '<td><span class="status-pill ' + statusClass + '">' + esc(l.status) + '</span></td>' +
+        '<td class="text-right">' + actions + '</td></tr>';
+}
+
 function renderLeaveView() {
     var data = window._allLeaveViewData || [];
     
@@ -7877,27 +7899,3 @@ async function loadExpiringDocuments() {
     } catch (e) { host.innerHTML = ''; }
 }
 window.loadExpiringDocuments = loadExpiringDocuments;
-
-// One row builder for both leave tables. They were duplicated, and a change
-// to the wrong copy is easy to miss.
-function leaveRowHtml(l) {
-    var statusClass = l.status === 'approved' ? 'status-active'
-                    : l.status === 'rejected' ? 'status-terminated' : 'status-onboarding';
-    var actions = l.status === 'pending'
-        ? '<button class="btn btn-sm" style="background:var(--success-color);color:#fff;margin-right:4px;" ' +
-          'onclick="actionLeave(' + l.id + ',\'approve\',\'' + esc(l.employee_name) + '\')">Approve</button>' +
-          '<button class="btn btn-sm" style="background:var(--danger-color);color:#fff;" ' +
-          'onclick="actionLeave(' + l.id + ',\'reject\',\'' + esc(l.employee_name) + '\')">Reject</button>'
-        : '<span style="color:var(--text-secondary);font-size:0.82rem;">' + esc(l.approved_by || '') + '</span>';
-    var type = String(l.leave_type || '');
-    return '<tr><td><strong>' + employeeLink(l.employee_id, l.employee_name) + '</strong></td>' +
-        '<td>' + esc(type.charAt(0).toUpperCase() + type.slice(1)) + '</td>' +
-        '<td>' + esc(l.start_date) + '</td>' +
-        '<td>' + esc(l.end_date) + '</td>' +
-        '<td><strong>' + esc(l.days) + '</strong></td>' +
-        '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" ' +
-            'title="' + esc(l.reason || '') + '">' + esc(l.reason || '-') + '</td>' +
-        '<td><span class="status-pill ' + statusClass + '">' + esc(l.status) + '</span></td>' +
-        '<td class="text-right">' + actions + '</td></tr>';
-}
-window.leaveRowHtml = leaveRowHtml;

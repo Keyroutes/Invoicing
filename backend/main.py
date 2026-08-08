@@ -6040,6 +6040,24 @@ def require_superadmin(request):
         raise HTTPException(status_code=401, detail="Not authorized")
 
 
+@app.get("/api/superadmin/migration-warnings")
+def superadmin_migration_warnings(request: Request):
+    """The schema steps that failed at boot.
+
+    /api/health reports only a count, because the messages carry table and
+    column names and it is a public endpoint. The operator needs the actual
+    errors to tell an expected failure (dropping an index that was already
+    dropped) from a migration that genuinely did not run.
+    """
+    require_superadmin(request)
+    try:
+        from database import migration_report
+        problems = migration_report()
+    except Exception:
+        problems = []
+    return {"count": len(problems), "warnings": problems}
+
+
 class PricingRuleIn(BaseModel):
     action_key: Optional[str] = ""
     label: Optional[str] = ""
