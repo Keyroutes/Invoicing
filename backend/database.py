@@ -970,5 +970,13 @@ def ensure_columns():
             except Exception:
                 MIGRATION_ERRORS.append(f"migration step 34: {sys.exc_info()[1]}")
 
+            # Working days, and whether signing in starts a shift
+            try:
+                conn.execute(text("ALTER TABLE attendance_settings ADD COLUMN IF NOT EXISTS working_days VARCHAR DEFAULT '1,2,3,4,5'"))
+                conn.execute(text("ALTER TABLE attendance_settings ADD COLUMN IF NOT EXISTS auto_clock_in BOOLEAN DEFAULT TRUE"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 35: {sys.exc_info()[1]}")
+
     except Exception as e:
         print(f"Column check skipped: {e}")

@@ -421,6 +421,12 @@ class DBAttendanceSettings(Base):
     max_overtime_hours = Column(Float, default=4.0)
     allow_remote = Column(Boolean, default=True)
     require_location = Column(Boolean, default=True)
+    # ISO weekday numbers, Monday = 1 through Sunday = 7.
+    working_days = Column(String, default="1,2,3,4,5")
+    # Whether signing in to the portal counts as starting a shift. Off means
+    # people clock in deliberately, so opening the portal on a day off - to
+    # read a payslip or upload a document - does not record attendance.
+    auto_clock_in = Column(Boolean, default=True)
     created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 

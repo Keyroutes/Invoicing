@@ -3218,6 +3218,58 @@ def get_hr_levels(request: Request, db: Session = Depends(get_db)):
     return {"levels": EMPLOYEE_LEVELS, "roles": EMPLOYEE_ROLES}
 
 
+DEFAULT_WORKING_DAYS = "1,2,3,4,5"          # Monday to Friday
+
+
+def parse_working_days(raw):
+    """ISO weekday numbers: Monday is 1, Sunday is 7.
+
+    Anything unparseable falls back to a normal working week rather than an
+    empty set, because an empty set would mean nobody is ever working and every
+    day would silently look like a day off.
+    """
+    days = set()
+    for part in str(raw or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            n = int(part)
+        except ValueError:
+            continue
+        if 1 <= n <= 7:
+            days.add(n)
+    return days or {1, 2, 3, 4, 5}
+
+
+def clean_working_days(raw):
+    """Normalise for storage, keeping the days in order."""
+    if isinstance(raw, (list, tuple, set)):
+        raw = ",".join(str(x) for x in raw)
+    return ",".join(str(d) for d in sorted(parse_working_days(raw)))
+
+
+def attendance_settings_for(db, client_id):
+    return db.query(models.DBAttendanceSettings).filter(
+        models.DBAttendanceSettings.client_id == client_id
+    ).first()
+
+
+def is_working_day(settings, on_date=None):
+    on_date = on_date or datetime.now().date()
+    raw = getattr(settings, "working_days", None) if settings else None
+    return on_date.isoweekday() in parse_working_days(raw or DEFAULT_WORKING_DAYS)
+
+
+def should_auto_clock_in(settings, on_date=None):
+    """Signing in only starts a shift on a working day, and only if the tenant
+    wants sign-in to count at all. Someone opening the portal on a Sunday to
+    check a document is not at work."""
+    if settings is not None and not bool(getattr(settings, "auto_clock_in", True)):
+        return False
+    return is_working_day(settings, on_date)
+
+
 def validate_level(level):
     level = (level or "").strip().upper()
     if level and level not in LEVEL_CODES:
@@ -4986,8 +5038,15 @@ def update_attendance_settings(request: Request, body: dict = None, db: Session 
         db.add(settings)
     if body:
         for key, val in body.items():
-            if hasattr(settings, key) and key not in ("id", "client_id", "created_at"):
-                setattr(settings, key, val)
+            if not hasattr(settings, key) or key in ("id", "client_id", "created_at"):
+                continue
+            if key == "working_days":
+                # Normalised, so a stray value cannot leave a tenant with no
+                # working days at all.
+                val = clean_working_days(val)
+            elif key == "auto_clock_in":
+                val = bool(val)
+            setattr(settings, key, val)
     db.commit()
     return {"message": "Settings saved"}
 
@@ -5001,6 +5060,7 @@ def get_attendance_settings(request: Request, db: Session = Depends(get_db)):
             "geofence_radius": 200.0, "work_start": "09:00", "work_end": "17:30",
             "grace_minutes": 15.0, "auto_clockout_hours": 10.0, "max_overtime_hours": 4.0,
             "allow_remote": True, "require_location": True,
+            "working_days": DEFAULT_WORKING_DAYS, "auto_clock_in": True,
         }
     return {
         "office_name": settings.office_name, "office_lat": settings.office_lat,
@@ -5010,6 +5070,8 @@ def get_attendance_settings(request: Request, db: Session = Depends(get_db)):
         "auto_clockout_hours": settings.auto_clockout_hours,
         "max_overtime_hours": settings.max_overtime_hours,
         "allow_remote": settings.allow_remote, "require_location": settings.require_location,
+        "working_days": clean_working_days(settings.working_days),
+        "auto_clock_in": bool(settings.auto_clock_in),
     }
 
 @app.put("/api/employees/{emp_id}/set-password")
@@ -5055,11 +5117,23 @@ def employee_login(request: Request, body: dict = None, db: Session = Depends(ge
         models.DBAttendance.date == today,
         models.DBAttendance.client_id == emp.client_id,
     ).first()
+    who = {"id": emp.id, "name": f"{emp.first_name} {emp.last_name}", "email": emp.email}
     if existing and existing.clock_in:
-        return {"message": "Already clocked in today", "employee": {"id": emp.id, "name": f"{emp.first_name} {emp.last_name}", "email": emp.email}, "clock_in": existing.clock_in}
+        return {"message": "Already clocked in today", "employee": who, "clock_in": existing.clock_in}
+
+    settings = attendance_settings_for(db, emp.client_id)
+    working_day = is_working_day(settings)
+    if not should_auto_clock_in(settings):
+        # Opening the portal on a day off - to read a payslip or upload a
+        # document - is not a shift. The Clock In button is still there for
+        # anyone who really is working.
+        return {
+            "message": "Signed in", "employee": who, "clock_in": "",
+            "auto_clock_in": False, "is_working_day": working_day,
+        }
+
     check_type = "remote"
     if lat and lng:
-        settings = db.query(models.DBAttendanceSettings).filter(models.DBAttendanceSettings.client_id == emp.client_id).first()
         if settings and settings.office_lat and settings.office_lng:
             from math import radians, cos, sin, asin, sqrt
             dlat = radians(lat - settings.office_lat)
@@ -5080,8 +5154,9 @@ def employee_login(request: Request, body: dict = None, db: Session = Depends(ge
     db.commit()
     return {
         "message": "Clocked in automatically",
-        "employee": {"id": emp.id, "name": f"{emp.first_name} {emp.last_name}", "email": emp.email},
+        "employee": who,
         "clock_in": now_str, "check_type": check_type,
+        "auto_clock_in": True, "is_working_day": working_day,
     }
 
 @app.post("/api/employee/auth/logout")
@@ -5363,8 +5438,10 @@ def employee_today_attendance(request: Request, db: Session = Depends(get_db)):
         models.DBAttendance.date == today,
         models.DBAttendance.client_id == client_id,
     ).first()
+    # The portal says why the Clock In button is waiting rather than filled in.
+    working_day = is_working_day(attendance_settings_for(db, client_id))
     if not att:
-        return {"clocked_in": False}
+        return {"clocked_in": False, "is_working_day": working_day}
     now_str = datetime.now().strftime("%H:%M:%S")
     elapsed = 0
     if att.clock_in and not att.clock_out:

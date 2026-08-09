@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=27">
-    <link rel="stylesheet" href="mobile.css?v=27">
+    <link rel="stylesheet" href="styles.css?v=28">
+    <link rel="stylesheet" href="mobile.css?v=28">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -1876,6 +1876,27 @@
                                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" id="set-require-loc" checked> Require Location</label>
                                     </div>
                                 </div>
+                                <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-color);">
+                                    <label style="display:block;margin-bottom:8px;">Working Days</label>
+                                    <div id="set-working-days" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;">
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="1" checked> Mon</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="2" checked> Tue</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="3" checked> Wed</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="4" checked> Thu</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="5" checked> Fri</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="6"> Sat</label>
+                                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" class="work-day" value="7"> Sun</label>
+                                    </div>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                        <input type="checkbox" id="set-auto-clock-in" checked> Signing in to the portal starts a shift
+                                    </label>
+                                    <p style="color:var(--text-secondary);font-size:0.85rem;margin-top:6px;">
+                                        Leave this off and staff clock in themselves. Either way, signing in on a
+                                        non-working day never records attendance &mdash; so someone opening the portal
+                                        on a Sunday to read a payslip or upload a document is not marked present.
+                                        They can still clock in by hand if they really are working.
+                                    </p>
+                                </div>
                                 <button class="btn btn-primary" onclick="saveAttendanceSettings()" style="margin-top:16px;">Save Settings</button>
                             </div>
                         </div>
@@ -2333,7 +2354,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=27"></script>
+    <script src="app.js?v=28"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">

@@ -4287,8 +4287,25 @@ async function loadAttendanceSettings() {
         document.getElementById('set-max-ot').value = data.max_overtime_hours || 4;
         document.getElementById('set-allow-remote').checked = data.allow_remote !== false;
         document.getElementById('set-require-loc').checked = data.require_location !== false;
+        var days = String(data.working_days || '1,2,3,4,5').split(',');
+        document.querySelectorAll('#set-working-days .work-day').forEach(function (box) {
+            box.checked = days.indexOf(box.value) !== -1;
+        });
+        var auto = document.getElementById('set-auto-clock-in');
+        if (auto) auto.checked = data.auto_clock_in !== false;
     } catch (e) { console.error('Attendance settings load failed:', e); }
 }
+
+// Ticked days, as the ISO numbers the server stores. An empty selection would
+// mean nobody ever works, so it falls back to a normal week.
+function collectWorkingDays() {
+    var picked = [];
+    document.querySelectorAll('#set-working-days .work-day').forEach(function (box) {
+        if (box.checked) picked.push(box.value);
+    });
+    return picked.length ? picked.join(',') : '1,2,3,4,5';
+}
+window.collectWorkingDays = collectWorkingDays;
 
 async function saveAttendanceSettings() {
     try {
@@ -4304,6 +4321,9 @@ async function saveAttendanceSettings() {
             max_overtime_hours: parseFloat(document.getElementById('set-max-ot').value) || 4,
             allow_remote: document.getElementById('set-allow-remote').checked,
             require_location: document.getElementById('set-require-loc').checked,
+            working_days: collectWorkingDays(),
+            auto_clock_in: document.getElementById('set-auto-clock-in')
+                ? document.getElementById('set-auto-clock-in').checked : true,
         };
         var res = await fetch('/api/attendance/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (res.ok) showToast('Settings saved successfully', 'success');

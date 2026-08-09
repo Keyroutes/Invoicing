@@ -45,7 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=27">
+    <link rel="stylesheet" href="mobile.css?v=28">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -173,6 +173,9 @@
               </div>
             </div>
             <div class="flex flex-col gap-3">
+              <p id="nonWorkingDayNote" class="hidden text-xs text-amber-600 text-center">
+                Today is not a working day, so you have not been clocked in. Use Clock In only if you are working.
+              </p>
               <div id="clockBtns" class="flex gap-2 flex-wrap justify-center">
                 <button id="clockInBtn" onclick="clockIn()" class="px-6 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-xl transition-all duration-200 transform hover:scale-105 active:scale-95 shadow-lg shadow-emerald-500/30 flex items-center gap-2">
                   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
@@ -750,9 +753,13 @@
       }, 1000);
     }
 
+    var isWorkingDay = true;
+
     function updateClockUI() {
       var btns = document.getElementById('clockBtns');
       var done = document.getElementById('clockDoneMsg');
+      var note = document.getElementById('nonWorkingDayNote');
+      if (note) note.classList.toggle('hidden', isWorkingDay || isClockedIn || todayCompleted);
       if (todayCompleted) { btns.classList.add('hidden'); done.classList.remove('hidden'); }
       else {
         btns.classList.remove('hidden'); done.classList.add('hidden');
@@ -838,6 +845,7 @@
         if (!res.ok) return;
         var data = await res.json();
         isClockedIn = data.clocked_in; todayCompleted = data.status === 'completed'; isOnBreak = data.is_on_break;
+        isWorkingDay = data.is_working_day !== false;
         if (data.break_start && data.is_on_break) { breakStartTime = new Date(); var p = data.break_start.split(':'); breakStartTime.setHours(parseInt(p[0]),parseInt(p[1]),parseInt(p[2]||0)); startBreakTimer(); }
         updateClockUI(); updateElapsed(data.elapsed_hours || 0);
         document.getElementById('todayBreak').textContent = data.break_minutes > 0 ? Math.round(data.break_minutes) + 'm' : '0m';
