@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=24">
-    <link rel="stylesheet" href="mobile.css?v=24">
+    <link rel="stylesheet" href="styles.css?v=25">
+    <link rel="stylesheet" href="mobile.css?v=25">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -43,6 +43,7 @@
                     <a href="#" class="nav-item" id="nav-dashboard" onclick="event.preventDefault();showView('dashboard-view')" data-portal="invoicing" style="display: none;">Dashboard</a>
                     <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')" data-portal="invoicing" style="display: none;">Invoices</a>
                     <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')" data-portal="invoicing" style="display: none;">Bills</a>
+                    <a href="#" class="nav-item" id="nav-quotes" onclick="event.preventDefault();showView('quotes-view')" data-portal="invoicing" style="display: none;">Quotes</a>
                     <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')" data-portal="invoicing" style="display: none;">Reports</a>
                     <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')" data-portal="invoicing" style="display: none;">Contacts</a>
                     <a href="#" class="nav-item active" id="nav-people" onclick="event.preventDefault();showView('employees-view')" data-portal="hr">Employees</a>
@@ -224,6 +225,236 @@
                                 </thead>
                                 <tbody id="invoices-table-body"></tbody>
                             </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== QUOTES ========== -->
+                <div id="quotes-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div>
+                            <h1>Quotes</h1>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-primary" onclick="prepareNewQuote()">New Quote</button>
+                        </div>
+                    </div>
+                    <div class="invoices-tabs" id="quote-tabs">
+                        <button class="tab active" onclick="filterQuotes('all', this)">All</button>
+                        <button class="tab" onclick="filterQuotes('draft', this)">Draft</button>
+                        <button class="tab" onclick="filterQuotes('sent', this)">Sent</button>
+                        <button class="tab" onclick="filterQuotes('accepted', this)">Accepted</button>
+                        <button class="tab" onclick="filterQuotes('declined', this)">Declined</button>
+                        <button class="tab" onclick="filterQuotes('expired', this)">Expired</button>
+                        <button class="tab" onclick="filterQuotes('invoiced', this)">Invoiced</button>
+                    </div>
+                    <div class="widget">
+                        <div class="table-actions">
+                            <span id="quote-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
+                            <div style="display:flex;gap:8px;">
+                                <input type="text" id="quote-search" placeholder="Search quotes..." class="search-input" onkeyup="searchQuotes()">
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Number</th>
+                                        <th>Ref</th>
+                                        <th>To</th>
+                                        <th>Subject</th>
+                                        <th>Date</th>
+                                        <th>Valid Until</th>
+                                        <th class="text-right">Total</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="quotes-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== CREATE QUOTE ========== -->
+                <div id="create-quote-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('quotes-view')">Quotes</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
+                            <h1>New quote</h1>
+                            <span class="status-pill status-draft">Draft</span>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="submitQuote('Draft')">Save as draft</button>
+                            <button class="btn btn-primary" onclick="submitQuote('Sent')">Save &amp; Send</button>
+                        </div>
+                    </div>
+                    <div class="glass-widget">
+                        <div class="widget-content" style="padding:32px;">
+                            <form id="quote-form" onsubmit="return false;">
+                                <div class="invoice-top-grid grid-3" style="margin-bottom:32px;">
+                                    <div class="form-group">
+                                        <label>Customer Name *</label>
+                                        <input type="text" id="quote-contact" class="form-control" required placeholder="Who is this quote for?" autocomplete="off">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Email</label>
+                                        <input type="email" id="quote-email" class="form-control" placeholder="client@example.com">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Phone</label>
+                                        <input type="tel" id="quote-phone" class="form-control" placeholder="+15551234567">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Issue Date</label>
+                                        <input type="date" id="quote-issue-date" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Valid Until</label>
+                                        <input type="date" id="quote-expiry-date" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Quote Number</label>
+                                        <input type="text" id="quote-number" class="form-control" placeholder="QU-0001">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Reference</label>
+                                        <input type="text" id="quote-ref" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Subject</label>
+                                        <input type="text" id="quote-title" class="form-control" placeholder="Brand refresh">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Amounts are</label>
+                                        <select class="form-control" id="quote-tax-type" onchange="calculateTotals('quote')">
+                                            <option value="exclusive">Tax exclusive</option>
+                                            <option value="inclusive">Tax inclusive</option>
+                                            <option value="none">No tax</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Currency</label>
+                                        <input type="text" id="quote-currency" class="form-control" placeholder="GBP">
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-bottom:24px;">
+                                    <label>Summary <span style="color:var(--text-secondary);font-weight:400;">(shown at the top of the email)</span></label>
+                                    <textarea id="quote-summary" class="form-control" rows="2" placeholder="Thanks for your enquiry - here is what we propose."></textarea>
+                                </div>
+                                <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
+                                    <table class="line-items-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:900px;">
+                                        <thead style="background-color:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-color);">
+                                            <tr>
+                                                <th style="padding:12px 8px;min-width:40px;"></th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:150px;">Name</th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:200px;">Description</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:80px;">Qty</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:100px;">Price</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:80px;">Disc %</th>
+                                                <th style="padding:12px 8px;text-align:left;min-width:140px;">Account</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:100px;">Tax</th>
+                                                <th style="padding:12px 8px;text-align:right;min-width:120px;">Amount</th>
+                                                <th style="padding:12px 8px;min-width:40px;"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="quote-line-items-body"></tbody>
+                                    </table>
+                                    <div style="padding:12px 16px;background-color:rgba(255,255,255,0.02);border-top:1px solid var(--border-color);">
+                                        <button type="button" class="btn btn-outline" style="font-size:0.85rem;" onclick="addLineItemRow('quote')">+ Add row</button>
+                                    </div>
+                                </div>
+                                <div class="form-group" style="margin-bottom:24px;">
+                                    <label>Terms</label>
+                                    <textarea id="quote-terms" class="form-control" rows="3" placeholder="Payment terms, what is included, how long the price holds."></textarea>
+                                </div>
+                                <div style="display:flex;justify-content:flex-end;">
+                                    <div style="width:350px;font-size:0.95rem;">
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span id="quote-summary-subtotal">0.00</span></div>
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);margin-bottom:8px;"><span>Total VAT</span><span id="quote-summary-vat">0.00</span></div>
+                                        <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.1rem;"><span>Total</span><span id="quote-summary-total">0.00</span></div>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== VIEW QUOTE ========== -->
+                <div id="view-quote-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span style="color:var(--text-secondary);font-size:0.9rem;cursor:pointer;" onclick="showView('quotes-view')">Quotes</span>
+                            <span style="color:var(--text-secondary);font-size:0.9rem;">/</span>
+                            <h1 id="view-quote-title">Quote</h1>
+                            <span class="status-pill" id="view-quote-status">-</span>
+                        </div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="downloadQuotePDF()">Print PDF</button>
+                            <button class="btn btn-outline" onclick="sendQuoteEmail()">Send Email</button>
+                            <span id="quote-decide-actions" style="display:inline-flex;gap:8px;">
+                                <button class="btn btn-outline" onclick="setQuoteStatus('Accepted')" style="color:var(--success-color);border-color:var(--success-color);">Mark Accepted</button>
+                                <button class="btn btn-outline" onclick="setQuoteStatus('Declined')" style="color:var(--danger-color);border-color:var(--danger-color);">Mark Declined</button>
+                            </span>
+                            <button class="btn btn-primary" id="quote-convert-btn" onclick="convertQuoteToInvoice()">Convert to Invoice</button>
+                            <button class="btn btn-outline" onclick="deleteQuote()" style="color:var(--danger-color);border-color:var(--danger-color);">Delete</button>
+                        </div>
+                    </div>
+                    <div class="glass-widget">
+                        <div class="widget-content" style="padding:32px;">
+                            <div id="view-quote-invoice-link" style="display:none;margin-bottom:20px;padding:12px 16px;border-radius:var(--radius-md);background:rgba(255,255,255,0.03);border:1px solid var(--border-color);"></div>
+                            <div class="invoice-top-grid grid-3" style="margin-bottom:28px;">
+                                <div>
+                                    <label style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">Customer</label>
+                                    <div style="margin-top:4px;font-size:1.1rem;font-weight:600;" id="view-quote-contact">-</div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-quote-email-display">-</div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-quote-phone-display">-</div>
+                                </div>
+                                <div>
+                                    <label style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">Quote</label>
+                                    <div style="margin-top:4px;font-weight:600;" id="view-quote-number-val">-</div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;">Ref: <span id="view-quote-ref">-</span></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;">Issued: <span id="view-quote-issue-date">-</span></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;">Valid until: <span id="view-quote-due-date">-</span></div>
+                                </div>
+                                <div>
+                                    <label style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">From</label>
+                                    <div style="margin-top:4px;font-weight:600;" id="view-quote-company-name"></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;white-space:pre-line;" id="view-quote-company-address"></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-quote-company-email"></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-quote-company-phone"></div>
+                                    <div style="margin-top:4px;color:var(--text-secondary);font-size:0.9rem;" id="view-quote-company-abn"></div>
+                                </div>
+                            </div>
+                            <div style="margin-bottom:20px;">
+                                <div style="font-size:1.05rem;font-weight:600;" id="view-quote-subject"></div>
+                                <div style="margin-top:6px;color:var(--text-secondary);white-space:pre-wrap;" id="view-quote-summary-text"></div>
+                            </div>
+                            <div class="line-items-container" style="border:1px solid var(--border-color);border-radius:var(--radius-md);overflow-x:auto;margin-bottom:24px;">
+                                <table class="line-items-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:600px;">
+                                    <thead style="background-color:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-color);">
+                                        <tr>
+                                            <th style="padding:12px 16px;text-align:left;min-width:120px;">Name</th>
+                                            <th style="padding:12px 16px;text-align:left;min-width:200px;">Description</th>
+                                            <th style="padding:12px 16px;text-align:right;min-width:60px;">Qty</th>
+                                            <th style="padding:12px 16px;text-align:right;min-width:80px;">Price</th>
+                                            <th style="padding:12px 16px;text-align:right;min-width:60px;">Disc</th>
+                                            <th style="padding:12px 16px;min-width:80px;">Tax</th>
+                                            <th style="padding:12px 16px;text-align:right;min-width:90px;">Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="view-quote-line-items-body"></tbody>
+                                </table>
+                            </div>
+                            <div style="color:var(--text-secondary);white-space:pre-wrap;margin-bottom:20px;" id="view-quote-terms-text"></div>
+                            <div style="display:flex;justify-content:flex-end;">
+                                <div style="width:320px;font-size:0.95rem;">
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;"><span>Subtotal</span><span><span id="view-quote-due-currency"></span><span id="view-quote-summary-subtotal">0.00</span></span></div>
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-color);margin-bottom:8px;"><span>Total VAT</span><span id="view-quote-summary-vat">0.00</span></div>
+                                    <div style="display:flex;justify-content:space-between;padding:8px 0;font-weight:700;font-size:1.15rem;"><span>Total</span><span id="view-quote-summary-total">0.00</span></div>
+                                </div>
+                            </div>
+                            <span id="view-quote-bank-content" style="display:none;"></span>
                         </div>
                     </div>
                 </div>
@@ -2072,7 +2303,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=24"></script>
+    <script src="app.js?v=25"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">

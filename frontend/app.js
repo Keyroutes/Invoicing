@@ -280,7 +280,7 @@ window.toggleMobileMenu = toggleMobileMenu;
 
 // --- View Switcher ---
 function showView(viewId) {
-    if (viewId !== 'view-invoice-view') _viewCurrency = '';
+    if (viewId !== 'view-invoice-view' && viewId !== 'view-quote-view') _viewCurrency = '';
     document.querySelectorAll('.view-section').forEach(function(el) {
         el.classList.remove('active');
         el.style.display = 'none';
@@ -302,6 +302,9 @@ function showView(viewId) {
         'invoices-view': 'nav-invoices',
         'create-invoice-view': 'nav-invoices',
         'view-invoice-view': 'nav-invoices',
+        'quotes-view': 'nav-quotes',
+        'create-quote-view': 'nav-quotes',
+        'view-quote-view': 'nav-quotes',
         'bills-view': 'nav-bills',
         'reports-view': 'nav-reports',
         'contacts-view': 'nav-contacts',
@@ -321,6 +324,7 @@ function showView(viewId) {
     var navId = navMap[viewId];
     if (navId) { var navEl = document.getElementById(navId); if (navEl) navEl.classList.add('active'); }
     if (viewId === 'invoices-view' && typeof fetchInvoices === 'function') fetchInvoices();
+    if (viewId === 'quotes-view' && typeof fetchQuotes === 'function') fetchQuotes();
     if (viewId === 'create-invoice-view' && typeof fetchNextInvoiceNumber === 'function') fetchNextInvoiceNumber();
     if (viewId === 'create-invoice-view' && typeof setupContactAutocomplete === 'function') setupContactAutocomplete();
     if (viewId === 'settings-view' && typeof loadGmailStatus === 'function') loadGmailStatus();
@@ -1077,7 +1081,27 @@ function pdfSym(sym) {
 }
 window.pdfSym = pdfSym;
 
-function generateInvoicePDF(isDummy) {
+// A quote and an invoice are the same document with different words on it, so
+// they share one generator. `p`/`s`/`body` are the element id prefixes each
+// view uses; a quote has no payment advice slip to tear off.
+var PDF_DOC_TYPES = {
+    invoice: {
+        p: 'view-inv-', s: 'view-summary-', body: 'view-line-items-body',
+        heading: 'TAX INVOICE', dateLabel: 'Invoice Date',
+        numberLabel: 'Invoice Number', totalLabel: 'Amount Due',
+        dateOutLabel: 'Due Date', bank: true, paymentAdvice: true,
+    },
+    quote: {
+        p: 'view-quote-', s: 'view-quote-summary-', body: 'view-quote-line-items-body',
+        heading: 'QUOTE', dateLabel: 'Quote Date',
+        numberLabel: 'Quote Number', totalLabel: 'Quote Total',
+        // The quote's expiry occupies the slot an invoice uses for its due date.
+        dateOutLabel: 'Valid Until', bank: false, paymentAdvice: false,
+    },
+};
+
+function generateInvoicePDF(isDummy, kind) {
+    var cfg = PDF_DOC_TYPES[kind] || PDF_DOC_TYPES.invoice;
     var _jsPDF = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     if (!_jsPDF) { throw new Error('jsPDF is not loaded'); }
     var doc = new _jsPDF('p', 'pt', 'a4');
@@ -1142,25 +1166,25 @@ function generateInvoicePDF(isDummy) {
     doc.setFillColor(255,255,255); doc.rect(0,0,w,h,'F');
 
     // ── Data Extraction ──────────────────────────────────────────
-    var contact    = isDummy ? 'Mr Frederick William Harris\n54 Cheshire Field Close\nWest Heath, Birmingham, B31 3TR' : (document.getElementById('view-inv-contact') ? document.getElementById('view-inv-contact').textContent : '');
-    var custEmail  = isDummy ? 'demo@example.com' : (document.getElementById('view-inv-email-display') ? document.getElementById('view-inv-email-display').textContent : '');
-    var custPhone  = isDummy ? '+44 121 000 0000' : (document.getElementById('view-inv-phone-display') ? document.getElementById('view-inv-phone-display').textContent : '');
-    var issueDate  = isDummy ? '26 May 2026' : (document.getElementById('view-inv-issue-date') ? document.getElementById('view-inv-issue-date').textContent : '');
-    var dueDate    = isDummy ? '2 Jun 2026'  : (document.getElementById('view-inv-due-date') ? document.getElementById('view-inv-due-date').textContent : '');
-    var numberText = isDummy ? 'INV-0273' : (document.getElementById('view-inv-number-val') ? document.getElementById('view-inv-number-val').textContent : '');
-    var bankContent= isDummy ? 'Account No: 00096345, sort code: 77-07-08' : (document.getElementById('view-inv-bank-content') ? document.getElementById('view-inv-bank-content').textContent : '');
-    var refText    = isDummy ? '' : (document.getElementById('view-inv-ref') ? document.getElementById('view-inv-ref').textContent : '');
+    var contact    = isDummy ? 'Mr Frederick William Harris\n54 Cheshire Field Close\nWest Heath, Birmingham, B31 3TR' : (document.getElementById(cfg.p + 'contact') ? document.getElementById(cfg.p + 'contact').textContent : '');
+    var custEmail  = isDummy ? 'demo@example.com' : (document.getElementById(cfg.p + 'email-display') ? document.getElementById(cfg.p + 'email-display').textContent : '');
+    var custPhone  = isDummy ? '+44 121 000 0000' : (document.getElementById(cfg.p + 'phone-display') ? document.getElementById(cfg.p + 'phone-display').textContent : '');
+    var issueDate  = isDummy ? '26 May 2026' : (document.getElementById(cfg.p + 'issue-date') ? document.getElementById(cfg.p + 'issue-date').textContent : '');
+    var dueDate    = isDummy ? '2 Jun 2026'  : (document.getElementById(cfg.p + 'due-date') ? document.getElementById(cfg.p + 'due-date').textContent : '');
+    var numberText = isDummy ? 'INV-0273' : (document.getElementById(cfg.p + 'number-val') ? document.getElementById(cfg.p + 'number-val').textContent : '');
+    var bankContent= isDummy ? 'Account No: 00096345, sort code: 77-07-08' : (document.getElementById(cfg.p + 'bank-content') ? document.getElementById(cfg.p + 'bank-content').textContent : '');
+    var refText    = isDummy ? '' : (document.getElementById(cfg.p + 'ref') ? document.getElementById(cfg.p + 'ref').textContent : '');
     if (refText === '-') refText = '';
-    var rawSym     = isDummy ? '\u00A3' : (document.getElementById('view-inv-due-currency') ? document.getElementById('view-inv-due-currency').textContent : '\u00A3');
+    var rawSym     = isDummy ? '\u00A3' : (document.getElementById(cfg.p + 'due-currency') ? document.getElementById(cfg.p + 'due-currency').textContent : '\u00A3');
     var cs         = pdfSym(rawSym);
-    var subtotal   = isDummy ? '168.00' : (document.getElementById('view-summary-subtotal') ? document.getElementById('view-summary-subtotal').textContent : '0.00');
-    var vatAmt     = isDummy ? '0.00' : (document.getElementById('view-summary-vat') ? document.getElementById('view-summary-vat').textContent : '0.00');
-    var total      = isDummy ? '168.00' : (document.getElementById('view-summary-total') ? document.getElementById('view-summary-total').textContent : '0.00');
-    var company    = isDummy ? 'Be care LTD T/S British Elderly Care' : (document.getElementById('view-inv-company-name') ? document.getElementById('view-inv-company-name').textContent : '');
-    var compAddr   = isDummy ? '53 Newbridge Cres\nWolverhampton, West Midlands\nWV6 6LH, UNITED KINGDOM' : (document.getElementById('view-inv-company-address') ? document.getElementById('view-inv-company-address').textContent : '');
-    var compEmail  = isDummy ? '' : (document.getElementById('view-inv-company-email') ? document.getElementById('view-inv-company-email').textContent.replace('Email: ','') : '');
-    var compPhone  = isDummy ? 'Tel: 01902521476' : (document.getElementById('view-inv-company-phone') ? document.getElementById('view-inv-company-phone').textContent.replace('Phone: ','') : '');
-    var compAbn    = isDummy ? '' : (document.getElementById('view-inv-company-abn') ? document.getElementById('view-inv-company-abn').textContent.replace('ABN: ','') : '');
+    var subtotal   = isDummy ? '168.00' : (document.getElementById(cfg.s + 'subtotal') ? document.getElementById(cfg.s + 'subtotal').textContent : '0.00');
+    var vatAmt     = isDummy ? '0.00' : (document.getElementById(cfg.s + 'vat') ? document.getElementById(cfg.s + 'vat').textContent : '0.00');
+    var total      = isDummy ? '168.00' : (document.getElementById(cfg.s + 'total') ? document.getElementById(cfg.s + 'total').textContent : '0.00');
+    var company    = isDummy ? 'Be care LTD T/S British Elderly Care' : (document.getElementById(cfg.p + 'company-name') ? document.getElementById(cfg.p + 'company-name').textContent : '');
+    var compAddr   = isDummy ? '53 Newbridge Cres\nWolverhampton, West Midlands\nWV6 6LH, UNITED KINGDOM' : (document.getElementById(cfg.p + 'company-address') ? document.getElementById(cfg.p + 'company-address').textContent : '');
+    var compEmail  = isDummy ? '' : (document.getElementById(cfg.p + 'company-email') ? document.getElementById(cfg.p + 'company-email').textContent.replace('Email: ','') : '');
+    var compPhone  = isDummy ? 'Tel: 01902521476' : (document.getElementById(cfg.p + 'company-phone') ? document.getElementById(cfg.p + 'company-phone').textContent.replace('Phone: ','') : '');
+    var compAbn    = isDummy ? '' : (document.getElementById(cfg.p + 'company-abn') ? document.getElementById(cfg.p + 'company-abn').textContent.replace('ABN: ','') : '');
     var savedLogo      = localStorage.getItem('company_logo') || '';
     var savedSignature = localStorage.getItem('company_signature') || '';
     var savedTerms     = localStorage.getItem('company_terms') || '';
@@ -1212,18 +1236,18 @@ function generateInvoicePDF(isDummy) {
 
     // ── Left column: TAX INVOICE heading ──
     doc.setFontSize(26); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
-    doc.text('TAX INVOICE', ml, y + 18);
+    doc.text(cfg.heading, ml, y + 18);
 
     // ── Centre column: Invoice meta ──
     var centreX = w / 2 - 40;
     var metaY = y;
     doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
-    doc.text('Invoice Date', centreX, metaY + 8);
+    doc.text(cfg.dateLabel, centreX, metaY + 8);
     doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
     doc.text(issueDate || '-', centreX, metaY + 19);
     metaY += 28;
     doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
-    doc.text('Invoice Number', centreX, metaY + 8);
+    doc.text(cfg.numberLabel, centreX, metaY + 8);
     doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(0,0,0);
     doc.text(numberText || '-', centreX, metaY + 19);
     if (refText) {
@@ -1339,7 +1363,7 @@ function generateInvoicePDF(isDummy) {
             name:'Client Service', desc:'Monthly retainer for premium client services including support and maintenance.', qty:'8.00', price:'21.00', disc:'0', tax:'0', amount:'168.00'
         }];
     } else {
-        document.querySelectorAll('#view-line-items-body tr').forEach(function(tr) {
+        document.querySelectorAll('#' + cfg.body + ' tr').forEach(function(tr) {
             var cells = tr.querySelectorAll('td');
             if (cells.length >= 7) {
                 rows.push({
@@ -1428,7 +1452,7 @@ function generateInvoicePDF(isDummy) {
     }
 
     // Bank / account details note (below rows, before totals line)
-    if (bankContent && isVisible('bank_details')) {
+    if (cfg.bank && bankContent && isVisible('bank_details')) {
         y += 4;
         doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(50,50,50);
         var bkLines = doc.splitTextToSize('Account Details for payment: ' + bankContent.replace(/\n/g, ', '), mr - ml - 10);
@@ -1469,7 +1493,7 @@ function generateInvoicePDF(isDummy) {
     if (dueDate) {
         checkPageBreak(30);
         doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
-        doc.text('Due Date: ' + dueDate, ml, y + 12);
+        doc.text(cfg.dateOutLabel + ': ' + dueDate, ml, y + 12);
         y += 18;
     }
 
@@ -1497,7 +1521,7 @@ function generateInvoicePDF(isDummy) {
     // ════════════════════════════════════════════════════════
     //  PAYMENT ADVICE  (dashed cut-here section)
     // ════════════════════════════════════════════════════════
-    if (!isVisible('payment_stub')) { drawFooter(); return doc; }
+    if (!cfg.paymentAdvice || !isVisible('payment_stub')) { drawFooter(); return doc; }
     checkPageBreak(90);
     doc.setDrawColor(0,0,0); doc.setLineWidth(0.5);
     doc.setLineDashPattern([4, 3], 0);
@@ -1516,7 +1540,7 @@ function generateInvoicePDF(isDummy) {
     var paRight = w / 2 + 10;
     doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
     doc.text('Customer',       ml,      y + 11);
-    doc.text('Invoice Number', paRight, y + 11);
+    doc.text(cfg.numberLabel, paRight, y + 11);
     y += 13;
     doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
     var paAddrLines = doc.splitTextToSize(contact || '-', paRight - ml - 20);
@@ -1526,8 +1550,8 @@ function generateInvoicePDF(isDummy) {
     y += paAddrH + 8;
 
     doc.setFontSize(8); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
-    doc.text('Amount Due',  ml,      y + 11);
-    doc.text('Due Date',    paRight, y + 11);
+    doc.text(cfg.totalLabel,  ml,      y + 11);
+    doc.text(cfg.dateOutLabel,    paRight, y + 11);
     y += 13;
     doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(0,0,0);
     doc.text(cs + total,    ml,      y + 11);
@@ -1538,6 +1562,13 @@ function generateInvoicePDF(isDummy) {
     drawFooter();
     return doc;
 }
+
+// Quotes reuse the invoice layout; only the wording and the missing payment
+// slip differ.
+function generateQuotePDF() {
+    return generateInvoicePDF(false, 'quote');
+}
+window.generateQuotePDF = generateQuotePDF;
 
 // --- Send Email ---
 async function sendEmail() {
@@ -1689,10 +1720,35 @@ function lineTotals(qty, price, disc, taxLabel, taxType) {
 }
 window.lineTotals = lineTotals;
 
-function calculateTotals() {
+// Which elements the line-item editor drives. Two forms use it - invoices and
+// quotes - and totals must never mix rows from both.
+var DOC_FORM_SCOPES = {
+    invoice: {
+        body: 'line-items-body', taxType: 'tax-type', currency: 'inv-currency',
+        subtotal: 'summary-subtotal', vat: 'summary-vat', total: 'summary-total',
+    },
+    quote: {
+        body: 'quote-line-items-body', taxType: 'quote-tax-type', currency: 'quote-currency',
+        subtotal: 'quote-summary-subtotal', vat: 'quote-summary-vat', total: 'quote-summary-total',
+    },
+};
+
+function docFormScope(name) {
+    return DOC_FORM_SCOPES[name] || DOC_FORM_SCOPES.invoice;
+}
+
+// The rows of one form only.
+function scopedLineRows(name) {
+    var host = document.getElementById(docFormScope(name).body);
+    return host ? Array.prototype.slice.call(host.querySelectorAll('.line-item-row')) : [];
+}
+window.scopedLineRows = scopedLineRows;
+
+function calculateTotals(scope) {
+    var cfg = docFormScope(scope);
     var subtotal = 0, totalVat = 0;
-    var taxType = (document.getElementById('tax-type') || {}).value || 'exclusive';
-    document.querySelectorAll('.line-item-row').forEach(function(row) {
+    var taxType = (document.getElementById(cfg.taxType) || {}).value || 'exclusive';
+    scopedLineRows(scope).forEach(function(row) {
         var qty = row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0;
         var price = row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0;
         var disc = row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0;
@@ -1705,18 +1761,19 @@ function calculateTotals() {
         subtotal += t.net;
         totalVat += t.vat;
     });
-    var subEl = document.getElementById('summary-subtotal');
-    var vatEl = document.getElementById('summary-vat');
-    var totalEl = document.getElementById('summary-total');
-    var curCode = document.getElementById('inv-currency') ? (document.getElementById('inv-currency').value || _appCurrency) : _appCurrency;
+    var subEl = document.getElementById(cfg.subtotal);
+    var vatEl = document.getElementById(cfg.vat);
+    var totalEl = document.getElementById(cfg.total);
+    var curEl = document.getElementById(cfg.currency);
+    var curCode = curEl ? (curEl.value || _appCurrency) : _appCurrency;
     if (subEl) subEl.textContent = subtotal.toFixed(2);
     if (vatEl) vatEl.textContent = totalVat.toFixed(2);
     if (totalEl) totalEl.textContent = (subtotal + totalVat).toFixed(2) + ' ' + curCode;
 }
 window.calculateTotals = calculateTotals;
 
-function addLineItemRow() {
-    var tbody = document.getElementById('line-items-body');
+function addLineItemRow(scope) {
+    var tbody = document.getElementById(docFormScope(scope).body);
     if (!tbody) return;
     var html = '<tr class="line-item-row" style="border-bottom:1px solid var(--border-color);background:var(--surface-color);">' +
         '<td style="padding:8px;text-align:center;color:var(--text-secondary);cursor:grab;">' +
@@ -1786,7 +1843,7 @@ function previewInvoice() {
     tbody.innerHTML = '';
     var taxType = (document.getElementById('tax-type') || {}).value || 'exclusive';
 
-    document.querySelectorAll('.line-item-row').forEach(function(row) {
+    scopedLineRows('invoice').forEach(function(row) {
         var name = row.querySelector('.item-name') ? row.querySelector('.item-name').value : '';
         var desc = row.querySelector('.item-desc') ? row.querySelector('.item-desc').value : '';
         var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
@@ -1817,7 +1874,7 @@ async function submitComplexInvoice(status) {
     if (!contact) { showToast('Customer name is required', 'error'); return; }
 
     var line_items = [];
-    document.querySelectorAll('.line-item-row').forEach(function(row) {
+    scopedLineRows('invoice').forEach(function(row) {
         var name = row.querySelector('.item-name') ? row.querySelector('.item-name').value : '';
         var desc = row.querySelector('.item-desc') ? row.querySelector('.item-desc').value : '';
         var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
@@ -4354,26 +4411,25 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (document.getElementById('inv-currency-display')) setupCurrencyPicker('invCurrency', 'inv-currency-display', 'inv-currency', 'inv-currency-list', 'inv-currency-search', 'inv-currency-items');
     if (document.getElementById('setting-currency-display')) setupCurrencyPicker('settingsCurrency', 'setting-currency-display', 'setting-currency', 'setting-currency-list', 'setting-currency-search', 'setting-currency-items');
     fetch('/api/settings').then(function(r){return r.json()}).then(function(d){if(d.currency){_appCurrency=d.currency;var el=document.getElementById('setting-currency');if(el)el.value=d.currency;if(_curPickers['settingsCurrency'])setCurrencyPickerDisplay('settingsCurrency',d.currency);}}).catch(function(){});
-    if (document.querySelectorAll('.line-item-row').length === 0 && document.getElementById('line-items-body')) {
-        addLineItemRow();
-    }
-    var lineItemsBody = document.getElementById('line-items-body');
-    if (lineItemsBody) {
-        lineItemsBody.addEventListener('input', function(e) {
+    Object.keys(DOC_FORM_SCOPES).forEach(function(scope) {
+        var body = document.getElementById(DOC_FORM_SCOPES[scope].body);
+        if (!body) return;
+        if (scopedLineRows(scope).length === 0) addLineItemRow(scope);
+        body.addEventListener('input', function(e) {
             if (e.target.classList.contains('item-qty') || e.target.classList.contains('item-price') || e.target.classList.contains('item-disc')) {
-                calculateTotals();
+                calculateTotals(scope);
             }
         });
-        lineItemsBody.addEventListener('click', function(e) {
+        body.addEventListener('click', function(e) {
             if (e.target.closest('.delete-row')) {
-                var row = e.target.closest('.line-item-row');
-                if (document.querySelectorAll('.line-item-row').length > 1) {
-                    row.remove();
-                    calculateTotals();
+                // Always leave one row; an empty editor has no way back.
+                if (scopedLineRows(scope).length > 1) {
+                    e.target.closest('.line-item-row').remove();
+                    calculateTotals(scope);
                 }
             }
         });
-    }
+    });
     // Set default dates
     var today = new Date().toISOString().split('T')[0];
     var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];    
@@ -7899,3 +7955,356 @@ async function loadExpiringDocuments() {
     } catch (e) { host.innerHTML = ''; }
 }
 window.loadExpiringDocuments = loadExpiringDocuments;
+
+// ==================== QUOTES ====================
+// A quote is an invoice that has not been agreed yet. It reuses the line-item
+// editor and the PDF generator; only the wording and the lifecycle differ.
+
+var allQuotes = [];
+var currentQuoteFilter = 'all';
+var currentQuote = null;
+
+function quoteStatusClass(status) {
+    var s = (status || '').toLowerCase();
+    if (s === 'accepted') return 'status-active';
+    if (s === 'invoiced') return 'status-paid';
+    if (s === 'declined' || s === 'expired') return 'status-terminated';
+    if (s === 'sent') return 'status-onboarding';
+    return 'status-draft';
+}
+
+async function fetchQuotes() {
+    try {
+        var res = await fetch('/api/quotes', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        allQuotes = await res.json();
+        renderQuotes();
+    } catch (e) { console.error('fetchQuotes error:', e); }
+}
+window.fetchQuotes = fetchQuotes;
+
+function filterQuotes(filter, btn) {
+    currentQuoteFilter = filter;
+    document.querySelectorAll('#quote-tabs .tab').forEach(function (t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    renderQuotes();
+}
+window.filterQuotes = filterQuotes;
+
+function searchQuotes() { renderQuotes(); }
+window.searchQuotes = searchQuotes;
+
+function renderQuotes() {
+    var tbody = document.getElementById('quotes-table-body');
+    if (!tbody) return;
+
+    var term = (document.getElementById('quote-search') || {}).value || '';
+    term = term.trim().toLowerCase();
+
+    var rows = allQuotes.filter(function (q) {
+        var matchesFilter = currentQuoteFilter === 'all'
+            || (q.status || '').toLowerCase() === currentQuoteFilter;
+        if (!matchesFilter) return false;
+        if (!term) return true;
+        return [q.number, q.to, q.ref, q.title].some(function (v) {
+            return (v || '').toLowerCase().indexOf(term) !== -1;
+        });
+    });
+
+    var count = document.getElementById('quote-count');
+    if (count) count.textContent = rows.length + (rows.length === 1 ? ' item' : ' items');
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">No quotes found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows.map(function (q) {
+        return '<tr style="cursor:pointer;" onclick="viewQuote(\'' + encodeURIComponent(q.number) + '\')">' +
+            '<td><strong>' + esc(q.number) + '</strong></td>' +
+            '<td>' + esc(q.ref || '-') + '</td>' +
+            '<td>' + esc(q.to || '-') + '</td>' +
+            '<td>' + esc(q.title || '-') + '</td>' +
+            '<td>' + esc(q.date || '-') + '</td>' +
+            '<td>' + esc(q.expiry_date || '-') + '</td>' +
+            '<td class="text-right"><strong>' + formatCurrency(q.total, q.currency) + '</strong></td>' +
+            '<td><span class="status-pill ' + quoteStatusClass(q.status) + '">' + esc(q.status) + '</span></td>' +
+            '</tr>';
+    }).join('');
+}
+window.renderQuotes = renderQuotes;
+
+// --- Creating -----------------------------------------------------------
+
+async function prepareNewQuote() {
+    var form = document.getElementById('quote-form');
+    if (form) form.reset();
+    var body = document.getElementById('quote-line-items-body');
+    if (body) { body.innerHTML = ''; addLineItemRow('quote'); }
+
+    var today = new Date().toISOString().split('T')[0];
+    var expiry = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    var issueEl = document.getElementById('quote-issue-date');
+    var expiryEl = document.getElementById('quote-expiry-date');
+    if (issueEl) issueEl.value = today;
+    if (expiryEl) expiryEl.value = expiry;
+
+    try {
+        var res = await fetch('/api/next-quote-number', { credentials: 'same-origin' });
+        if (res.ok) {
+            var data = await res.json();
+            var numEl = document.getElementById('quote-number');
+            if (numEl) numEl.placeholder = data.next_number || 'QU-0001';
+        }
+    } catch (e) { /* the server assigns one anyway */ }
+
+    calculateTotals('quote');
+    showView('create-quote-view');
+}
+window.prepareNewQuote = prepareNewQuote;
+
+function collectQuotePayload(status) {
+    var contact = (document.getElementById('quote-contact') || {}).value || '';
+    if (!contact.trim()) { showToast('Customer name is required', 'error'); return null; }
+
+    var line_items = [];
+    scopedLineRows('quote').forEach(function (row) {
+        var name = row.querySelector('.item-name') ? row.querySelector('.item-name').value : '';
+        var desc = row.querySelector('.item-desc') ? row.querySelector('.item-desc').value : '';
+        var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
+        var price = parseFloat(row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0) || 0;
+        var disc = parseFloat(row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0) || 0;
+        var account = row.querySelector('.item-account') ? row.querySelector('.item-account').value : '200 - Sales';
+        var tax_rate = row.querySelector('.item-tax-rate') ? row.querySelector('.item-tax-rate').value : 'No Tax';
+        if (name || desc || qty > 0 || price > 0) {
+            line_items.push({ name: name, description: desc, qty: qty, price: price, disc: disc, account: account, tax_rate: tax_rate });
+        }
+    });
+    if (line_items.length === 0) { showToast('Add at least one line item', 'error'); return null; }
+
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    return {
+        contact: contact,
+        email: val('quote-email'),
+        phone_number: val('quote-phone'),
+        issue_date: val('quote-issue-date'),
+        expiry_date: val('quote-expiry-date'),
+        quote_number: val('quote-number'),
+        reference: val('quote-ref'),
+        title: val('quote-title'),
+        summary: val('quote-summary'),
+        terms: val('quote-terms'),
+        line_items: line_items,
+        tax_type: val('quote-tax-type') || 'exclusive',
+        status: status,
+        currency: val('quote-currency') || (_appCurrency || 'GBP'),
+    };
+}
+
+async function submitQuote(status) {
+    var payload = collectQuotePayload(status || 'Draft');
+    if (!payload) return;
+    try {
+        var res = await fetch('/api/quotes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', body: JSON.stringify(payload),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not save the quote'); return; }
+
+        await fetchQuotes();
+        if (status === 'Sent' && payload.email) {
+            showToast('Quote created. Sending...', 'info');
+            await viewQuote(data.number);
+            await sendQuoteEmail();
+        } else if (status === 'Sent') {
+            showToast('Quote created. Add an email address to send it.', 'warning');
+            showView('quotes-view');
+        } else {
+            showToast('Quote saved as draft', 'success');
+            showView('quotes-view');
+        }
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.submitQuote = submitQuote;
+
+// --- Viewing ------------------------------------------------------------
+
+async function viewQuote(number) {
+    number = decodeURIComponent(number);
+    try {
+        var res = await fetch('/api/quotes/' + encodeURIComponent(number), { credentials: 'same-origin' });
+        if (!res.ok) { showToast('Quote not found', 'error'); return; }
+        var q = await res.json();
+        currentQuote = q;
+        _viewCurrency = q.currency || _appCurrency;
+
+        function put(id, text) { var el = document.getElementById(id); if (el) el.textContent = text; }
+        put('view-quote-title', 'Quote ' + q.number);
+        put('view-quote-number-val', q.number);
+        put('view-quote-contact', q.to || '-');
+        put('view-quote-email-display', q.email || '');
+        put('view-quote-phone-display', q.phone_number || '');
+        put('view-quote-issue-date', q.date || '-');
+        // The generator reads the expiry from the slot an invoice uses for its
+        // due date; see PDF_DOC_TYPES.
+        put('view-quote-due-date', q.expiry_date || '-');
+        put('view-quote-ref', q.ref || '-');
+        put('view-quote-subject', q.title || '');
+        put('view-quote-summary-text', q.summary || '');
+        put('view-quote-terms-text', q.terms || '');
+        put('view-quote-company-name', (q.company && q.company.name) || '');
+        put('view-quote-company-address', (q.company && q.company.address) || '');
+        put('view-quote-company-email', (q.company && q.company.email) || '');
+        put('view-quote-company-phone', (q.company && q.company.phone_number) || '');
+        put('view-quote-company-abn', (q.company && q.company.abn) || '');
+        put('view-quote-summary-subtotal', Number(q.subtotal || 0).toFixed(2));
+        put('view-quote-summary-vat', Number(q.tax_total || 0).toFixed(2));
+        put('view-quote-summary-total', Number(q.total || 0).toFixed(2));
+        put('view-quote-due-currency', currencySymbolFor(q.currency));
+
+        var statusEl = document.getElementById('view-quote-status');
+        if (statusEl) {
+            statusEl.textContent = q.status;
+            statusEl.className = 'status-pill ' + quoteStatusClass(q.status);
+        }
+
+        var linked = document.getElementById('view-quote-invoice-link');
+        if (linked) {
+            if (q.invoice_number) {
+                linked.style.display = 'block';
+                linked.innerHTML = 'Invoiced as <a href="#" onclick="event.preventDefault();showView(\'invoices-view\');viewInvoice(\'' +
+                    encodeURIComponent(q.invoice_number) + '\')"><strong>' + esc(q.invoice_number) + '</strong></a>';
+            } else {
+                linked.style.display = 'none';
+            }
+        }
+
+        var tbody = document.getElementById('view-quote-line-items-body');
+        if (tbody) {
+            tbody.innerHTML = (q.line_items || []).map(function (li) {
+                return '<tr>' +
+                    '<td style="padding:12px 16px;word-wrap:break-word;max-width:200px;vertical-align:top;">' + esc(li.name || '') + '</td>' +
+                    '<td style="padding:12px 16px;word-wrap:break-word;max-width:280px;vertical-align:top;">' + esc(li.description || '') + '</td>' +
+                    '<td style="padding:12px 16px;text-align:right;vertical-align:top;">' + esc(li.qty) + '</td>' +
+                    '<td style="padding:12px 16px;text-align:right;vertical-align:top;">' + Number(li.price || 0).toFixed(2) + '</td>' +
+                    '<td style="padding:12px 16px;text-align:right;vertical-align:top;">' + (li.disc || 0) + '%</td>' +
+                    '<td style="padding:12px 16px;vertical-align:top;">' + esc(li.tax_rate || 'No Tax') + '</td>' +
+                    '<td style="padding:12px 16px;text-align:right;font-weight:600;vertical-align:top;">' + Number(li.amount || 0).toFixed(2) + '</td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // What you can still do depends on where the quote has got to.
+        var canConvert = q.status !== 'Invoiced' && q.status !== 'Declined';
+        var convertBtn = document.getElementById('quote-convert-btn');
+        if (convertBtn) convertBtn.style.display = canConvert ? '' : 'none';
+        var decideWrap = document.getElementById('quote-decide-actions');
+        if (decideWrap) decideWrap.style.display = (q.status === 'Invoiced') ? 'none' : '';
+
+        showView('view-quote-view');
+    } catch (e) { showToast('Failed to load quote: ' + e.message, 'error'); }
+}
+window.viewQuote = viewQuote;
+
+function currencySymbolFor(code) {
+    var map = { GBP: '£', USD: '$', EUR: '€', INR: '₹', AUD: '$', CAD: '$', NZD: '$' };
+    return map[(code || '').toUpperCase()] || '';
+}
+
+// --- Actions ------------------------------------------------------------
+
+function downloadQuotePDF() {
+    if (!currentQuote) { showToast('No quote loaded', 'error'); return; }
+    try {
+        var doc = generateQuotePDF();
+        doc.save(currentQuote.number + '.pdf');
+    } catch (e) { showToast('PDF generation failed: ' + e.message, 'error'); }
+}
+window.downloadQuotePDF = downloadQuotePDF;
+
+async function sendQuoteEmail() {
+    if (!currentQuote) { showToast('No quote loaded', 'error'); return; }
+    if (!currentQuote.email) { showToast('This quote has no email address', 'error'); return; }
+
+    var pdfB64 = '';
+    try {
+        var doc = generateQuotePDF();
+        pdfB64 = (doc.output('datauristring').split('base64,')[1]) || '';
+    } catch (e) {
+        showToast('PDF generation failed: ' + e.message, 'error');
+        return;
+    }
+
+    try {
+        showToast('Sending quote...', 'info');
+        var res = await fetch('/api/quotes/' + encodeURIComponent(currentQuote.number) + '/send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                logo_data: localStorage.getItem('company_logo') || '',
+                pdf_data: pdfB64,
+            }),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (res.ok) {
+            showToast('Quote sent with the PDF attached', 'success');
+            await fetchQuotes();
+            await viewQuote(currentQuote.number);
+        } else {
+            reportApiError(res, data, 'Could not send the quote');
+        }
+    } catch (e) { showToast('Failed to send: ' + e.message, 'error'); }
+}
+window.sendQuoteEmail = sendQuoteEmail;
+
+async function setQuoteStatus(status) {
+    if (!currentQuote) return;
+    try {
+        var res = await fetch('/api/quotes/' + encodeURIComponent(currentQuote.number) + '/status', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', body: JSON.stringify({ status: status }),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not update the quote'); return; }
+        showToast('Quote marked ' + status.toLowerCase(), 'success');
+        await fetchQuotes();
+        await viewQuote(currentQuote.number);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.setQuoteStatus = setQuoteStatus;
+
+async function convertQuoteToInvoice() {
+    if (!currentQuote) return;
+    if (!confirm('Create an invoice from quote ' + currentQuote.number + '?')) return;
+    try {
+        var res = await fetch('/api/quotes/' + encodeURIComponent(currentQuote.number) + '/convert', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', body: JSON.stringify({}),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not convert the quote'); return; }
+        showToast('Invoice ' + data.invoice_number + ' created', 'success');
+        await fetchQuotes();
+        if (typeof fetchInvoices === 'function') await fetchInvoices();
+        await viewInvoice(data.invoice_number);
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.convertQuoteToInvoice = convertQuoteToInvoice;
+
+async function deleteQuote() {
+    if (!currentQuote) return;
+    if (!confirm('Delete quote ' + currentQuote.number + '? This cannot be undone.')) return;
+    try {
+        var res = await fetch('/api/quotes/' + encodeURIComponent(currentQuote.number), {
+            method: 'DELETE', credentials: 'same-origin',
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not delete the quote'); return; }
+        showToast('Quote deleted', 'success');
+        currentQuote = null;
+        await fetchQuotes();
+        showView('quotes-view');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.deleteQuote = deleteQuote;

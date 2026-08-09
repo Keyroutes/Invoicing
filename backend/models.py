@@ -114,6 +114,60 @@ class DBLineItem(Base):
     invoice = relationship("DBInvoice", back_populates="line_items")
 
 
+class DBQuote(Base):
+    """A priced proposal, before any money is owed.
+
+    Deliberately a separate table from invoices rather than a status on one:
+    a quote has an expiry instead of a due date, is never part-paid, and must
+    keep its own numbering sequence so QU-0007 does not consume INV-0007.
+    """
+    __tablename__ = "quotes"
+    __table_args__ = (
+        UniqueConstraint('client_id', 'number', name='uq_client_quote_number'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    number = Column(String, index=True)
+    ref = Column(String, default="")
+    to_contact = Column(String)
+    email = Column(String, default="")
+    phone_number = Column(String, default="")
+    issue_date = Column(String)
+    expiry_date = Column(String)
+    total = Column(Float, default=0.0)
+    # Draft, Sent, Accepted, Declined, Expired, Invoiced
+    status = Column(String, default="Draft", index=True)
+    sent = Column(String, default="")
+    tax_type = Column(String, default="exclusive")
+    currency = Column(String, default="")
+    title = Column(String, default="")
+    summary = Column(String, default="")
+    terms = Column(String, default="")
+    # Set once the quote has been turned into an invoice, so it cannot be
+    # converted twice.
+    invoice_number = Column(String, default="")
+    decided_at = Column(String, default="")
+
+    line_items = relationship("DBQuoteLineItem", back_populates="quote")
+
+
+class DBQuoteLineItem(Base):
+    __tablename__ = "quote_line_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    quote_id = Column(Integer, ForeignKey("quotes.id"), index=True)
+    name = Column(String, default="")
+    description = Column(String)
+    qty = Column(Float)
+    price = Column(Float)
+    disc = Column(Float, default=0.0)
+    account = Column(String, default="200 - Sales")
+    tax_rate = Column(String, default="20% (VAT on Income)")
+
+    quote = relationship("DBQuote", back_populates="line_items")
+
+
 class DBSettings(Base):
     __tablename__ = "settings"
 

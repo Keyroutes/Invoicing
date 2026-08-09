@@ -2427,6 +2427,567 @@ def my_login_history(request: Request, limit: int = 50, db: Session = Depends(ge
     } for l in logs]
 
 # ============================================================================
+# QUOTES - priced proposals that can become invoices
+# ============================================================================
+
+class QuoteCreate(BaseModel):
+    contact: str
+    email: Optional[str] = ""
+    phone_number: Optional[str] = ""
+    issue_date: str
+    expiry_date: str
+    quote_number: Optional[str] = ""
+    reference: Optional[str] = ""
+    line_items: List[LineItem]
+    tax_type: Optional[str] = "exclusive"
+    status: Optional[str] = "Draft"
+    currency: Optional[str] = ""
+    title: Optional[str] = ""
+    summary: Optional[str] = ""
+    terms: Optional[str] = ""
+
+
+class SendQuoteEmail(BaseModel):
+    logo_data: Optional[str] = ""
+    pdf_data: Optional[str] = ""
+
+
+class QuoteDecision(BaseModel):
+    status: str
+
+
+class QuoteConvert(BaseModel):
+    issue_date: Optional[str] = ""
+    due_date: Optional[str] = ""
+
+
+QUOTE_STATUSES = ("Draft", "Sent", "Accepted", "Declined", "Expired", "Invoiced")
+
+
+def validate_quote_dates(issue_date, expiry_date):
+    issue = _parse_date(issue_date)
+    expiry = _parse_date(expiry_date)
+    if issue_date and not issue:
+        raise HTTPException(status_code=400, detail="Issue date must be in YYYY-MM-DD format")
+    if expiry_date and not expiry:
+        raise HTTPException(status_code=400, detail="Expiry date must be in YYYY-MM-DD format")
+    if issue and expiry and expiry < issue:
+        raise HTTPException(status_code=400, detail="Expiry date cannot be before the issue date")
+
+
+def quote_is_expired(q, today=None):
+    """A quote past its expiry that nobody has answered is dead.
+
+    Derived rather than stored: a background job to flip the column would be
+    one more thing to run, and the answer is a date comparison.
+    """
+    if q.status not in ("Sent", "Draft"):
+        return False
+    expiry = _parse_date(q.expiry_date)
+    if not expiry:
+        return False
+    return expiry < (today or datetime.now().date())
+
+
+def quote_display_status(q, today=None):
+    return "Expired" if quote_is_expired(q, today) else q.status
+
+
+def quote_to_dict(q, client, db, detail=False):
+    subtotal, tax_total, grand_total = compute_invoice_totals(q.line_items, q.tax_type)
+    data = {
+        "id": q.id,
+        "number": q.number,
+        "ref": q.ref or "",
+        "to": q.to_contact,
+        "email": q.email or "",
+        "phone_number": q.phone_number or "",
+        "date": q.issue_date,
+        "expiry_date": q.expiry_date,
+        "title": q.title or "",
+        "summary": q.summary or "",
+        "terms": q.terms or "",
+        "subtotal": subtotal,
+        "tax_total": tax_total,
+        "total": grand_total,
+        "status": quote_display_status(q),
+        "stored_status": q.status,
+        "is_expired": quote_is_expired(q),
+        "sent": q.sent or "",
+        "tax_type": q.tax_type,
+        "currency": q.currency or (client.currency if client else ""),
+        "invoice_number": q.invoice_number or "",
+        "decided_at": q.decided_at or "",
+    }
+    if not detail:
+        return data
+
+    settings_rows = db.query(models.DBSettings).filter(
+        models.DBSettings.client_id == q.client_id).all() if q.client_id else []
+    settings_map = {s.key: s.value for s in settings_rows}
+    data["company"] = {
+        "name": settings_map.get("company_name", "") or (client.company_name if client else ""),
+        "email": settings_map.get("email", "") or (client.email if client else ""),
+        "phone_number": settings_map.get("phone_number", "") or (client.phone_number if client else ""),
+        "address": settings_map.get("company_address", "") or (client.address if client else ""),
+        "website": settings_map.get("company_website", "") or (client.website if client else ""),
+        "abn": settings_map.get("company_abn", "") or (client.abn if client else ""),
+        "logo_url": client.logo_url if client else "",
+    }
+    data["line_items"] = [{
+        "name": li.name or "",
+        "description": li.description,
+        "qty": li.qty,
+        "price": li.price,
+        "disc": li.disc,
+        "account": li.account,
+        "tax_rate": li.tax_rate,
+        "tax_percent": round(parse_tax_rate(li.tax_rate) * 100, 4),
+        "amount": money(line_net_amount(li.qty, li.price, li.disc)),
+    } for li in q.line_items]
+    return data
+
+
+def get_quote_or_404(db, client, number):
+    q = db.query(models.DBQuote).filter(
+        models.DBQuote.number == number, models.DBQuote.client_id == client.id
+    ).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return q
+
+
+@app.get("/api/next-quote-number")
+def get_next_quote_number(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    return {"next_number": next_sequence_number(db, models.DBQuote, client.id, "QU-")}
+
+
+@app.get("/api/quotes")
+def get_quotes(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    quotes = db.query(models.DBQuote).filter(
+        models.DBQuote.client_id == client.id
+    ).order_by(models.DBQuote.id.desc()).all()
+    return [quote_to_dict(q, client, db) for q in quotes]
+
+
+@app.get("/api/quotes/{number}")
+def get_quote(number: str, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    return quote_to_dict(get_quote_or_404(db, client, number), client, db, detail=True)
+
+
+@app.post("/api/quotes")
+def create_quote(quote: QuoteCreate, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+
+    validate_line_items(quote.line_items)
+    validate_quote_dates(quote.issue_date, quote.expiry_date)
+
+    subtotal, tax, total = compute_invoice_totals(quote.line_items, quote.tax_type)
+
+    if quote.contact and quote.contact.strip():
+        existing = db.query(models.DBContact).filter(
+            models.DBContact.name == quote.contact, models.DBContact.client_id == client.id
+        ).first()
+        if existing:
+            if quote.email and not existing.email:
+                existing.email = quote.email
+            if quote.phone_number and not existing.phone_number:
+                existing.phone_number = quote.phone_number
+        else:
+            db.add(models.DBContact(
+                name=quote.contact, email=quote.email or "",
+                phone_number=quote.phone_number or "", client_id=client.id))
+
+    if quote.quote_number and quote.quote_number.strip():
+        number = quote.quote_number.strip()
+    else:
+        number = next_sequence_number(db, models.DBQuote, client.id, "QU-")
+
+    clash = db.query(models.DBQuote).filter(
+        models.DBQuote.client_id == client.id, models.DBQuote.number == number
+    ).first()
+    if clash:
+        raise HTTPException(status_code=409, detail=f"Quote number {number} already exists")
+
+    status = quote.status if quote.status in QUOTE_STATUSES else "Draft"
+    db_quote = models.DBQuote(
+        client_id=client.id,
+        number=number,
+        ref=quote.reference or "",
+        to_contact=quote.contact,
+        email=quote.email or "",
+        phone_number=quote.phone_number or "",
+        issue_date=quote.issue_date,
+        expiry_date=quote.expiry_date,
+        total=round(total, 2),
+        status=status,
+        sent="",
+        tax_type=quote.tax_type,
+        currency=(quote.currency or "").upper() or (client.currency or ""),
+        title=quote.title or "",
+        summary=quote.summary or "",
+        terms=quote.terms or "",
+    )
+    db.add(db_quote)
+    db.flush()
+
+    for item in quote.line_items:
+        db.add(models.DBQuoteLineItem(
+            quote_id=db_quote.id,
+            name=item.name or "",
+            description=item.description,
+            qty=item.qty,
+            price=item.price,
+            disc=item.disc or 0.0,
+            account=item.account,
+            tax_rate=item.tax_rate,
+        ))
+
+    db.commit()
+    db.refresh(db_quote)
+    log_audit(db, client.id, "quote_created", "quote", db_quote.id, number,
+              f"Total: {total:.2f}", request)
+    db.commit()
+    return quote_to_dict(db_quote, client, db, detail=True)
+
+
+@app.put("/api/quotes/{number}")
+def update_quote(number: str, quote: QuoteCreate, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    q = get_quote_or_404(db, client, number)
+    if q.status == "Invoiced":
+        raise HTTPException(status_code=400,
+                            detail=f"Quote {number} has already been invoiced as {q.invoice_number}")
+
+    validate_line_items(quote.line_items)
+    validate_quote_dates(quote.issue_date, quote.expiry_date)
+    subtotal, tax, total = compute_invoice_totals(quote.line_items, quote.tax_type)
+
+    q.ref = quote.reference or ""
+    q.to_contact = quote.contact
+    q.email = quote.email or ""
+    q.phone_number = quote.phone_number or ""
+    q.issue_date = quote.issue_date
+    q.expiry_date = quote.expiry_date
+    q.tax_type = quote.tax_type
+    q.currency = (quote.currency or "").upper() or q.currency
+    q.title = quote.title or ""
+    q.summary = quote.summary or ""
+    q.terms = quote.terms or ""
+    q.total = round(total, 2)
+    if quote.status in QUOTE_STATUSES:
+        q.status = quote.status
+
+    db.query(models.DBQuoteLineItem).filter(models.DBQuoteLineItem.quote_id == q.id).delete()
+    for item in quote.line_items:
+        db.add(models.DBQuoteLineItem(
+            quote_id=q.id,
+            name=item.name or "",
+            description=item.description,
+            qty=item.qty,
+            price=item.price,
+            disc=item.disc or 0.0,
+            account=item.account,
+            tax_rate=item.tax_rate,
+        ))
+
+    log_audit(db, client.id, "quote_updated", "quote", q.id, q.number,
+              f"Total: {total:.2f}", request)
+    db.commit()
+    db.refresh(q)
+    return quote_to_dict(q, client, db, detail=True)
+
+
+@app.delete("/api/quotes/{number}")
+def delete_quote(number: str, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    q = get_quote_or_404(db, client, number)
+    if q.status == "Invoiced":
+        raise HTTPException(status_code=400,
+                            detail=f"Quote {number} has been invoiced as {q.invoice_number} and cannot be deleted")
+    db.query(models.DBQuoteLineItem).filter(models.DBQuoteLineItem.quote_id == q.id).delete()
+    log_audit(db, client.id, "quote_deleted", "quote", q.id, q.number,
+              f"Contact: {q.to_contact}", request)
+    db.delete(q)
+    db.commit()
+    return {"message": "Quote deleted successfully"}
+
+
+@app.post("/api/quotes/{number}/status")
+def set_quote_status(number: str, body: QuoteDecision, request: Request, db: Session = Depends(get_db)):
+    """Record the customer's answer."""
+    client = get_client_user(request, db)
+    q = get_quote_or_404(db, client, number)
+    wanted = (body.status or "").strip().title()
+    if wanted not in ("Accepted", "Declined", "Sent", "Draft"):
+        raise HTTPException(status_code=400,
+                            detail="Status must be one of: Draft, Sent, Accepted, Declined")
+    if q.status == "Invoiced":
+        raise HTTPException(status_code=400,
+                            detail=f"Quote {number} has already been invoiced as {q.invoice_number}")
+    q.status = wanted
+    q.decided_at = (datetime.now().strftime("%Y-%m-%d")
+                    if wanted in ("Accepted", "Declined") else "")
+    log_audit(db, client.id, "quote_status_changed", "quote", q.id, q.number, wanted, request)
+    db.commit()
+    db.refresh(q)
+    return quote_to_dict(q, client, db, detail=True)
+
+
+@app.post("/api/quotes/{number}/convert")
+def convert_quote_to_invoice(number: str, request: Request,
+                             body: Optional[QuoteConvert] = None,
+                             db: Session = Depends(get_db)):
+    """Turn an accepted quote into an invoice, carrying the lines across.
+
+    The quote is kept and marked Invoiced rather than replaced - it is the
+    record of what was agreed, and the link runs both ways.
+    """
+    client = get_client_user(request, db)
+    q = get_quote_or_404(db, client, number)
+    if body is None:
+        body = QuoteConvert()
+    if q.status == "Invoiced":
+        raise HTTPException(status_code=409,
+                            detail=f"Quote {number} was already invoiced as {q.invoice_number}")
+    if q.status == "Declined":
+        raise HTTPException(status_code=400, detail="A declined quote cannot be invoiced")
+    if not q.line_items:
+        raise HTTPException(status_code=400, detail="Quote has no line items")
+
+    issue_date = body.issue_date or datetime.now().strftime("%Y-%m-%d")
+    if body.due_date:
+        due_date = body.due_date
+    else:
+        base = _parse_date(issue_date) or datetime.now().date()
+        due_date = (base + timedelta(days=14)).strftime("%Y-%m-%d")
+    validate_invoice_dates(issue_date, due_date)
+
+    subtotal, tax, total = compute_invoice_totals(q.line_items, q.tax_type)
+    inv_number = next_sequence_number(db, models.DBInvoice, client.id, "INV-")
+
+    invoice = models.DBInvoice(
+        client_id=client.id,
+        number=inv_number,
+        ref=q.ref or q.number,
+        to_contact=q.to_contact,
+        email=q.email or "",
+        phone_number=q.phone_number or "",
+        issue_date=issue_date,
+        due_date=due_date,
+        paid=0.00,
+        due=round(total, 2),
+        status="Draft",
+        sent="",
+        tax_type=q.tax_type,
+        currency=q.currency or (client.currency or ""),
+        bank_details="",
+    )
+    db.add(invoice)
+    db.flush()
+
+    for li in q.line_items:
+        db.add(models.DBLineItem(
+            invoice_id=invoice.id,
+            name=li.name or "",
+            description=li.description,
+            qty=li.qty,
+            price=li.price,
+            disc=li.disc or 0.0,
+            account=li.account,
+            tax_rate=li.tax_rate,
+        ))
+
+    q.status = "Invoiced"
+    q.invoice_number = inv_number
+    log_audit(db, client.id, "quote_converted", "quote", q.id, q.number,
+              f"Invoice {inv_number}", request)
+    db.commit()
+    return {"message": "Quote converted to invoice",
+            "invoice_number": inv_number, "quote_number": q.number}
+
+
+@app.post("/api/quotes/{number}/send")
+def send_quote_email(number: str, background_tasks: BackgroundTasks, request: Request,
+                     payload: Optional[SendQuoteEmail] = None, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    if payload is None:
+        payload = SendQuoteEmail()
+    q = get_quote_or_404(db, client, number)
+    if not q.email:
+        raise HTTPException(status_code=400, detail="Quote has no email address associated with it")
+    if not validate_email_address(q.email):
+        raise HTTPException(status_code=400, detail=f"Invalid email address: {q.email}")
+
+    from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+    if not from_email:
+        raise HTTPException(status_code=400, detail="No sender email configured.")
+
+    settings_rows = db.query(models.DBSettings).filter(
+        models.DBSettings.client_id == q.client_id).all()
+    settings_map = {s.key: s.value for s in settings_rows}
+    q_client = db.query(models.DBClient).filter(
+        models.DBClient.id == q.client_id).first() if q.client_id else None
+    company_name = (settings_map.get("company_name", "")
+                    or (q_client.company_name if q_client else "") or "Accounting Platform")
+    company_email = settings_map.get("email", "") or (q_client.email if q_client else "")
+    company_phone = settings_map.get("phone_number", "") or (q_client.phone_number if q_client else "")
+    company_address = settings_map.get("company_address", "") or (q_client.address if q_client else "")
+
+    cur = (q.currency or settings_map.get("currency")
+           or (q_client.currency if q_client else "") or "GBP").upper()
+    cur_symbol = currency_symbol(cur)
+
+    logo_data = payload.logo_data or ""
+    if not logo_data and q_client and q_client.logo_url:
+        logo_data = q_client.logo_url
+    logo_html = (f'<div style="margin-bottom:24px;"><img src="{esc(logo_data)}" '
+                 f'style="max-height:48px;max-width:200px;"></div>') if logo_data else ""
+
+    subtotal, tax_total, total = compute_invoice_totals(q.line_items, q.tax_type)
+
+    rows = ""
+    for li in q.line_items:
+        amount = line_net_amount(li.qty, li.price, li.disc)
+        disc_val = li.disc or 0
+        rows += f"""
+            <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9;">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="font-size:15px;font-weight:700;color:#1e293b;">{esc(li.name) or 'Item'}</div>
+                <div style="font-size:16px;font-weight:800;color:#0f172a;">{cur_symbol}{amount:.2f}</div>
+              </div>
+              {f'<div style="font-size:13px;color:#64748b;margin-bottom:8px;word-wrap:break-word;">{esc(li.description)}</div>' if li.description else ''}
+              <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:12px;color:#94a3b8;">Qty: <strong style="color:#475569;">{li.qty:g}</strong></span>
+                <span style="font-size:12px;color:#94a3b8;">Price: <strong style="color:#475569;">{cur_symbol}{li.price:.2f}</strong></span>
+                {f'<span style="font-size:12px;color:#94a3b8;">Discount: {disc_val:g}%</span>' if disc_val > 0 else ''}
+              </div>
+            </div>"""
+
+    subject = f"Quote {q.number} from {company_name}"
+
+    body = f"""Hello {q.to_contact},
+
+Please find our quote {q.number} from {company_name} below.
+
+Quote Number: {q.number}
+Issue Date: {q.issue_date}
+Valid Until: {q.expiry_date}
+"""
+    if q.title:
+        body += f"For: {q.title}\n"
+    body += "\nItems:\n"
+    for li in q.line_items:
+        item_label = f"{li.name} - {li.description}" if li.name else li.description
+        disc_text = f" (Disc: {li.disc}%)" if li.disc else ""
+        body += f"  - {item_label} x{li.qty:g} @ {cur_symbol}{li.price:.2f}{disc_text}\n"
+    body += f"""
+Total: {cur_symbol}{total:.2f}
+
+This quote is valid until {q.expiry_date}. Reply to this email to accept it or
+ask us anything about it.
+
+Best regards,
+{company_name}
+{company_address or ''}
+{company_email or ''}
+{company_phone or ''}
+
+Powered by Aniprotech"""
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+      <body style="font-family: Arial, Helvetica, sans-serif; color:#1e293b; line-height:1.6; margin:0; padding:0; background-color:#f1f5f9;">
+        <div style="max-width:600px; margin:0 auto; padding:40px 20px;">
+          <div style="background:#ffffff; border-radius:12px; overflow:hidden;">
+            <div style="background-color:#0f172a; padding:40px; text-align:center;">
+              {logo_html}
+              <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Quote</div>
+              <div style="font-size:30px;font-weight:800;color:#ffffff;margin-top:6px;">{esc(q.number)}</div>
+              {f'<div style="font-size:15px;color:#cbd5e1;margin-top:8px;">{esc(q.title)}</div>' if q.title else ''}
+            </div>
+            <div style="padding:32px 28px;">
+              <p style="margin:0 0 18px;font-size:15px;">Hello {esc(q.to_contact)},</p>
+              <p style="margin:0 0 24px;font-size:15px;color:#475569;">
+                {esc(q.summary) if q.summary else f'Thank you for your interest. Here is our quote from {esc(company_name)}.'}
+              </p>
+
+              <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:150px;background:#f8fafc;border-radius:10px;padding:14px 16px;">
+                  <div style="font-size:11px;text-transform:uppercase;color:#94a3b8;font-weight:700;">Issued</div>
+                  <div style="font-size:15px;font-weight:700;color:#0f172a;">{esc(q.issue_date)}</div>
+                </div>
+                <div style="flex:1;min-width:150px;background:#fff7ed;border-radius:10px;padding:14px 16px;">
+                  <div style="font-size:11px;text-transform:uppercase;color:#c2823a;font-weight:700;">Valid until</div>
+                  <div style="font-size:15px;font-weight:700;color:#9a3412;">{esc(q.expiry_date)}</div>
+                </div>
+              </div>
+
+              <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin-bottom:24px;">
+                <div style="background-color:#f8fafc;padding:10px 20px;border-bottom:2px solid #e2e8f0;display:flex;justify-content:space-between;">
+                  <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Item</span>
+                  <span style="font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;">Amount</span>
+                </div>
+                {rows}
+              </div>
+
+              <div style="background:#0f172a;border-radius:10px;padding:20px 24px;margin-bottom:24px;">
+                <div style="display:flex;justify-content:space-between;color:#94a3b8;font-size:13px;margin-bottom:6px;">
+                  <span>Subtotal</span><span>{cur_symbol}{subtotal:.2f}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;color:#94a3b8;font-size:13px;margin-bottom:10px;">
+                  <span>Tax</span><span>{cur_symbol}{tax_total:.2f}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;color:#ffffff;font-size:20px;font-weight:800;border-top:1px solid #334155;padding-top:12px;">
+                  <span>Total</span><span>{cur_symbol}{total:.2f}</span>
+                </div>
+              </div>
+
+              {f'<div style="border-left:3px solid #e2e8f0;padding:4px 0 4px 14px;color:#64748b;font-size:13px;margin-bottom:24px;white-space:pre-wrap;">{esc(q.terms)}</div>' if q.terms else ''}
+
+              <p style="margin:0;font-size:14px;color:#475569;">
+                Happy with this? Just reply to this email to accept, and we will raise the invoice.
+              </p>
+            </div>
+            <div style="background:#f8fafc;padding:22px 28px;text-align:center;border-top:1px solid #e2e8f0;">
+              <div style="font-size:14px;font-weight:700;color:#0f172a;">{esc(company_name)}</div>
+              <div style="font-size:12px;color:#64748b;margin-top:4px;">
+                {esc(company_address or '')}{' &middot; ' if company_address and company_email else ''}{esc(company_email or '')}{' &middot; ' if company_phone else ''}{esc(company_phone or '')}
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:12px;">Powered by Aniprotech</div>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+
+    pdf_b64 = payload.pdf_data if payload.pdf_data else None
+    pdf_filename = f"{q.number}.pdf" if pdf_b64 else "quote.pdf"
+
+    # Charged before the send is queued, so a refused charge cannot still
+    # deliver the email.
+    require_credit(db, client.id, "quote_send", 1, q.number)
+
+    background_tasks.add_task(send_email_background, q.email, subject, body,
+                              f"{company_name} <{from_email}>", html_body, pdf_b64,
+                              pdf_filename, logo_data, client_id=client.id)
+
+    # Re-sending must not walk an answered quote back to merely Sent.
+    if q.status in ("Draft", "Sent"):
+        q.status = "Sent"
+    q.sent = datetime.now().strftime("%Y-%m-%d")
+    log_audit(db, client.id, "quote_sent", "quote", q.id, q.number, f"Sent to {q.email}", request)
+    db.commit()
+    return {"message": "Email sending initiated via Gmail API",
+            "status": q.status, "sent_date": q.sent}
+
+
+# ============================================================================
 # HR MODULE - Departments, Employees, Payroll, Onboarding
 # ============================================================================
 
@@ -5701,6 +6262,8 @@ DEFAULT_PRICING = [
      "Charged when an invoice is emailed to a customer."),
     ("invoice_whatsapp",  "Send invoice on WhatsApp", "invoicing", 15, 0,
      "Charged per WhatsApp message delivered."),
+    ("quote_send",        "Send quote by email",     "invoicing", 5,  50,
+     "Charged when a quote is emailed to a customer."),
     ("payslip_send",      "Send payslip by email",   "hr",        5,  50,
      "Charged when a payslip is emailed to an employee."),
     ("payroll_run",       "Payroll run (per payslip)", "hr",      10, 10,

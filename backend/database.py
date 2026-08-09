@@ -906,5 +906,52 @@ def ensure_columns():
             except Exception:
                 MIGRATION_ERRORS.append(f"migration step 32: {sys.exc_info()[1]}")
 
+            # Quotes: priced proposals, numbered separately from invoices
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS quotes (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        number VARCHAR,
+                        ref VARCHAR DEFAULT '',
+                        to_contact VARCHAR,
+                        email VARCHAR DEFAULT '',
+                        phone_number VARCHAR DEFAULT '',
+                        issue_date VARCHAR,
+                        expiry_date VARCHAR,
+                        total FLOAT DEFAULT 0.0,
+                        status VARCHAR DEFAULT 'Draft',
+                        sent VARCHAR DEFAULT '',
+                        tax_type VARCHAR DEFAULT 'exclusive',
+                        currency VARCHAR DEFAULT '',
+                        title VARCHAR DEFAULT '',
+                        summary VARCHAR DEFAULT '',
+                        terms VARCHAR DEFAULT '',
+                        invoice_number VARCHAR DEFAULT '',
+                        decided_at VARCHAR DEFAULT '',
+                        CONSTRAINT uq_client_quote_number UNIQUE (client_id, number)
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS quote_line_items (
+                        id SERIAL PRIMARY KEY,
+                        quote_id INTEGER REFERENCES quotes(id),
+                        name VARCHAR DEFAULT '',
+                        description VARCHAR,
+                        qty FLOAT,
+                        price FLOAT,
+                        disc FLOAT DEFAULT 0.0,
+                        account VARCHAR DEFAULT '200 - Sales',
+                        tax_rate VARCHAR DEFAULT '20% (VAT on Income)'
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quotes_client_id ON quotes (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quotes_number ON quotes (number)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quotes_status ON quotes (status)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quote_line_items_quote_id ON quote_line_items (quote_id)"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 33: {sys.exc_info()[1]}")
+
     except Exception as e:
         print(f"Column check skipped: {e}")
