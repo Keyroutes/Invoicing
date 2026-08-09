@@ -7582,6 +7582,53 @@ def requirement_applies_to_employee(req, emp):
     return True
 
 
+def sync_requirement_to_requests(db, client_id, req):
+    """Push a requirement change out to the people already holding it.
+
+    Requests are copies, taken at the moment they were assigned, so an edit in
+    HR's settings otherwise never reached anyone already on the system. That is
+    how "this document now needs an expiry date" could be switched on and no
+    employee was ever asked for one.
+
+    Only outstanding requests are touched. Anything already submitted keeps the
+    terms it was handed in under - restating those would reopen settled work and
+    could mark an approved document as missing a date nobody was asked for.
+    """
+    outstanding = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.client_id == client_id,
+        models.DBDocumentRequest.requirement_id == req.id,
+        models.DBDocumentRequest.status.in_(("pending", "rejected")),
+    ).all()
+    if not outstanding:
+        return 0
+
+    employees = {
+        e.id: e for e in db.query(models.DBEmployee).filter(
+            models.DBEmployee.id.in_([r.employee_id for r in outstanding])
+        ).all()
+    }
+
+    touched = 0
+    for row in outstanding:
+        emp = employees.get(row.employee_id)
+        # Narrowing a requirement to a department or level should stop asking
+        # the people it no longer covers.
+        if emp is not None and not requirement_applies_to_employee(req, emp):
+            db.delete(row)
+            touched += 1
+            continue
+        row.name = req.name
+        row.description = req.description or ""
+        row.doc_type = req.doc_type
+        row.is_mandatory = bool(req.is_mandatory)
+        row.requires_expiry = bool(req.requires_expiry)
+        if emp is not None:
+            start = _parse_date(emp.start_date) or datetime.now().date()
+            row.due_date = (start + timedelta(days=req.due_days or 0)).strftime("%Y-%m-%d")
+        touched += 1
+    return touched
+
+
 def assign_document_requests(db, client_id, emp, requirements=None):
     """Create the outstanding requests for one employee, skipping any they
     already have so this is safe to re-run after a department or level change."""
@@ -7703,6 +7750,16 @@ def update_document_requirement(req_id: int, request: Request, body: DocumentReq
     row.level = level if applies == "level" else ""
     row.is_active = bool(body.is_active)
     row.sort_order = int(body.sort_order or 0)
+    db.flush()
+    # Otherwise the change only applies to people hired after it.
+    sync_requirement_to_requests(db, client.id, row)
+    # Widening the rule should also reach anyone it now covers for the first time.
+    if row.is_active:
+        for emp in db.query(models.DBEmployee).filter(
+            models.DBEmployee.client_id == client.id,
+            models.DBEmployee.status != "offboarded",
+        ).all():
+            assign_document_requests(db, client.id, emp, requirements=[row])
     db.commit()
     return requirement_to_dict(row)
 
@@ -8010,8 +8067,11 @@ def employee_upload_document(req_id: int, body: EmployeeDocumentUpload, request:
                 status_code=400,
                 detail="That document has already expired. Please upload a current one.",
             )
-    elif expires_on and not _parse_date(expires_on):
-        raise HTTPException(status_code=400, detail="Expiry date must be in YYYY-MM-DD format")
+    else:
+        # HR did not ask for a date on this one, so nothing the client sends is
+        # kept. Storing it anyway would let a stale value from another upload
+        # put a document into the expiring-soon queue nobody set a date for.
+        expires_on = ""
 
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == emp_id).first()
 

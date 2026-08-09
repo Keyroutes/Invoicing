@@ -45,7 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=26">
+    <link rel="stylesheet" href="mobile.css?v=27">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -606,6 +606,7 @@
       document.getElementById('expiryModal').classList.add('hidden');
       _pendingFile = null;
       _pendingReqId = null;
+      _pendingExpiry = '';
     }
 
     function confirmExpiryAndUpload() {
@@ -635,6 +636,7 @@
       }
 
       _pendingFile = file;
+      _pendingExpiry = '';
 
       // HR marks some documents as expiring; ask for the date before sending,
       // so the upload is not rejected after the wait.
@@ -651,9 +653,11 @@
     function uploadPendingFile() {
       var file = _pendingFile;
       var reqId = _pendingReqId;
+      var expiresOn = _pendingExpiry || '';
       if (!file || !reqId) return;
       _pendingFile = null;
       _pendingReqId = null;
+      _pendingExpiry = '';
 
       var reader = new FileReader();
       reader.onload = async function (e) {
@@ -664,12 +668,11 @@
             body: JSON.stringify({
               file_name: file.name, file_type: file.type,
               file_data: e.target.result.split(',')[1],
-              expires_on: _pendingExpiry || ''
+              expires_on: expiresOn
             })
           });
           var data = await res.json();
           if (!res.ok) throw new Error(data.detail || 'Upload failed');
-          _pendingExpiry = '';
           // Refresh both lists so the new file shows in each straight away.
           loadDocumentRequests();
           loadDocuments();
