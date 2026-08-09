@@ -114,6 +114,23 @@ class DBLineItem(Base):
     invoice = relationship("DBInvoice", back_populates="line_items")
 
 
+class DBTaxRate(Base):
+    """A tax rate the tenant can pick when writing a line.
+
+    This is only the picker. Documents store the rendered label ("20% VAT") on
+    the line itself, so editing or deleting a rate here never restates an
+    invoice that has already gone out.
+    """
+    __tablename__ = "tax_rates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    percent = Column(Float, default=0.0)
+    sort_order = Column(Integer, default=0)
+    is_default = Column(Boolean, default=False)
+
+
 class DBQuote(Base):
     """A priced proposal, before any money is owed.
 

@@ -2427,6 +2427,143 @@ def my_login_history(request: Request, limit: int = 50, db: Session = Depends(ge
     } for l in logs]
 
 # ============================================================================
+# TAX RATES - the list a tenant picks from when writing a line
+# ============================================================================
+
+# What every new tenant starts with. Chosen to render exactly the labels the
+# app used before rates became editable, so nothing shifts under existing work.
+DEFAULT_TAX_RATES = [
+    ("VAT", 20.0, True),
+    ("VAT", 5.0, False),
+    ("Zero Rated", 0.0, False),
+    ("No Tax", 0.0, False),
+]
+
+
+def tax_rate_label(name, percent):
+    """The string stored on a line item.
+
+    The percentage is always in the label, because parse_tax_rate reads the
+    rate back out of it. A label of just "Consulting levy" would parse as the
+    default 20%, silently taxing a line nobody meant to tax. The one exception
+    is the plain no-tax entries, whose wording parse_tax_rate already knows and
+    which would otherwise read as the odd "0% No Tax".
+    """
+    name = (name or "").strip()
+    if not name:
+        return f"{percent:g}%"
+    if percent == 0 and name.lower() in ("no tax", "none", "exempt"):
+        return name
+    return f"{percent:g}% {name}"
+
+
+def validate_tax_rate(name, percent):
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Every tax rate needs a name")
+    if len(name) > 60:
+        raise HTTPException(status_code=400, detail="Tax rate names must be 60 characters or fewer")
+    try:
+        pct = float(percent)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"'{name}' needs a numeric percentage")
+    # Same bound as payroll: a rate above 100 produces a negative total.
+    if pct < 0 or pct > 100:
+        raise HTTPException(status_code=400,
+                            detail=f"'{name}' must be between 0 and 100 percent")
+    return name, round(pct, 4)
+
+
+def seed_default_tax_rates(db, client_id):
+    """Give a tenant the standard list the first time they look."""
+    existing = db.query(models.DBTaxRate).filter(
+        models.DBTaxRate.client_id == client_id).count()
+    if existing:
+        return
+    for order, (name, percent, is_default) in enumerate(DEFAULT_TAX_RATES):
+        db.add(models.DBTaxRate(client_id=client_id, name=name, percent=percent,
+                                sort_order=order, is_default=is_default))
+    db.commit()
+
+
+def tax_rate_to_dict(t):
+    return {
+        "id": t.id,
+        "name": t.name,
+        "percent": t.percent or 0.0,
+        "label": tax_rate_label(t.name, t.percent or 0.0),
+        "is_default": bool(t.is_default),
+        "sort_order": t.sort_order or 0,
+    }
+
+
+class TaxRateIn(BaseModel):
+    name: str
+    percent: float = 0.0
+    is_default: Optional[bool] = False
+
+
+class TaxRatesIn(BaseModel):
+    tax_rates: List[TaxRateIn]
+
+
+@app.get("/api/tax-rates")
+def list_tax_rates(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    seed_default_tax_rates(db, client.id)
+    rows = db.query(models.DBTaxRate).filter(
+        models.DBTaxRate.client_id == client.id
+    ).order_by(models.DBTaxRate.sort_order.asc(), models.DBTaxRate.id.asc()).all()
+    return [tax_rate_to_dict(t) for t in rows]
+
+
+@app.put("/api/tax-rates")
+def replace_tax_rates(body: TaxRatesIn, request: Request, db: Session = Depends(get_db)):
+    """Save the whole list at once, which is how the settings screen edits it.
+
+    Validated in full before anything is written, so a bad row cannot leave the
+    tenant with half a list.
+    """
+    client = get_client_user(request, db)
+    if not body.tax_rates:
+        raise HTTPException(status_code=400, detail="Keep at least one tax rate")
+    if len(body.tax_rates) > 40:
+        raise HTTPException(status_code=400, detail="That is more tax rates than the picker can hold (40 max)")
+
+    cleaned = []
+    seen = set()
+    for row in body.tax_rates:
+        name, pct = validate_tax_rate(row.name, row.percent)
+        label = tax_rate_label(name, pct)
+        key = label.lower()
+        if key in seen:
+            raise HTTPException(status_code=400,
+                                detail=f"'{label}' is in the list twice")
+        seen.add(key)
+        cleaned.append((name, pct, bool(row.is_default)))
+
+    # Exactly one default, so the line editor always has something to preselect.
+    if not any(d for _, _, d in cleaned):
+        cleaned[0] = (cleaned[0][0], cleaned[0][1], True)
+    else:
+        first_default = next(i for i, (_, _, d) in enumerate(cleaned) if d)
+        cleaned = [(n, p, i == first_default) for i, (n, p, _) in enumerate(cleaned)]
+
+    db.query(models.DBTaxRate).filter(models.DBTaxRate.client_id == client.id).delete()
+    for order, (name, pct, is_default) in enumerate(cleaned):
+        db.add(models.DBTaxRate(client_id=client.id, name=name, percent=pct,
+                                sort_order=order, is_default=is_default))
+    log_audit(db, client.id, "tax_rates_updated", "settings", None, "Tax rates",
+              f"{len(cleaned)} rates", request)
+    db.commit()
+
+    rows = db.query(models.DBTaxRate).filter(
+        models.DBTaxRate.client_id == client.id
+    ).order_by(models.DBTaxRate.sort_order.asc()).all()
+    return [tax_rate_to_dict(t) for t in rows]
+
+
+# ============================================================================
 # QUOTES - priced proposals that can become invoices
 # ============================================================================
 

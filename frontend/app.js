@@ -329,6 +329,7 @@ function showView(viewId) {
     if (viewId === 'create-invoice-view' && typeof setupContactAutocomplete === 'function') setupContactAutocomplete();
     if (viewId === 'settings-view' && typeof loadGmailStatus === 'function') loadGmailStatus();
     if (viewId === 'settings-view' && typeof loadSettings === 'function') loadSettings();
+    if (viewId === 'settings-view' && typeof loadTaxRates === 'function') loadTaxRates();
     if (viewId === 'settings-view' && typeof loadAuditLogs === 'function') loadAuditLogs();
     if (viewId === 'reports-view' && typeof loadReports === 'function') loadReports();
     // Close mobile menu
@@ -1084,6 +1085,22 @@ window.pdfSym = pdfSym;
 // A quote and an invoice are the same document with different words on it, so
 // they share one generator. `p`/`s`/`body` are the element id prefixes each
 // view uses; a quote has no payment advice slip to tear off.
+// The heading for the tax line on a PDF. Taken from the labels actually used
+// on the document, so it follows whatever the tenant named their taxes; falls
+// back to a neutral word when the lines disagree.
+function documentTaxLabel(cfg) {
+    var names = [];
+    document.querySelectorAll('#' + cfg.body + ' tr').forEach(function (tr) {
+        var cells = tr.querySelectorAll('td');
+        if (cells.length < 6) return;
+        var label = (cells[5].textContent || '').trim();
+        // "18% GST" -> "GST"; a label with no percentage is a no-tax entry.
+        var m = label.match(/^\s*[\d.]+%\s*(.+)$/);
+        if (m && names.indexOf(m[1]) === -1) names.push(m[1]);
+    });
+    return names.length === 1 ? names[0] : 'Tax';
+}
+
 var PDF_DOC_TYPES = {
     invoice: {
         p: 'view-inv-', s: 'view-summary-', body: 'view-line-items-body',
@@ -1481,7 +1498,9 @@ function generateInvoicePDF(isDummy, kind) {
     }
 
     tRow('Subtotal', subtotal);
-    tRow('VAT / Tax', vatAmt);
+    // Name the tax after what this document actually charges. A tenant using
+    // GST should not read "VAT" on their own invoice.
+    tRow(documentTaxLabel(cfg), vatAmt);
     lh(tLabelX - 60, tValX, y - 2, 0.5);
     y += 4;
     tRow('TOTAL  ' + currLabel, total, true);
@@ -1796,10 +1815,7 @@ function addLineItemRow(scope) {
         '<option>800 - Product Sales</option>' + 
         '</select></td>' +
         '<td style="padding:0;"><select class="table-input item-tax-rate" style="width:100%;">' + 
-        '<option>20% VAT</option>' + 
-        '<option>5% VAT</option>' + 
-        '<option>0% Zero Rated</option>' + 
-        '<option>No Tax</option>' + 
+        taxOptionsHtml() +
         '</select></td>' +
         '<td style="display:none;" class="item-tax-amount">0.00</td>' +
         '<td style="padding:12px 8px;text-align:right;font-weight:500;" class="item-amount">0.00</td>' +
@@ -4411,6 +4427,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (document.getElementById('inv-currency-display')) setupCurrencyPicker('invCurrency', 'inv-currency-display', 'inv-currency', 'inv-currency-list', 'inv-currency-search', 'inv-currency-items');
     if (document.getElementById('setting-currency-display')) setupCurrencyPicker('settingsCurrency', 'setting-currency-display', 'setting-currency', 'setting-currency-list', 'setting-currency-search', 'setting-currency-items');
     fetch('/api/settings').then(function(r){return r.json()}).then(function(d){if(d.currency){_appCurrency=d.currency;var el=document.getElementById('setting-currency');if(el)el.value=d.currency;if(_curPickers['settingsCurrency'])setCurrencyPickerDisplay('settingsCurrency',d.currency);}}).catch(function(){});
+    // The first row is built before this resolves, so loadTaxRates() refreshes
+    // the pickers once the tenant's own list arrives.
+    if (typeof loadTaxRates === 'function') loadTaxRates();
+
     Object.keys(DOC_FORM_SCOPES).forEach(function(scope) {
         var body = document.getElementById(DOC_FORM_SCOPES[scope].body);
         if (!body) return;
@@ -8308,3 +8328,157 @@ async function deleteQuote() {
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.deleteQuote = deleteQuote;
+
+// ==================== TAX RATES ====================
+// The tenant's own list of tax options. Line items store the rendered label,
+// so this list only ever affects what you can pick next - never what has
+// already been issued.
+
+var _taxRates = [];
+
+function taxRateLabel(name, percent) {
+    name = (name || '').trim();
+    var pct = Number(percent) || 0;
+    if (!name) return pct + '%';
+    // Mirrors tax_rate_label() on the server.
+    if (pct === 0 && ['no tax', 'none', 'exempt'].indexOf(name.toLowerCase()) !== -1) return name;
+    return pct + '% ' + name;
+}
+
+async function loadTaxRates() {
+    try {
+        var res = await fetch('/api/tax-rates', { credentials: 'same-origin' });
+        if (!res.ok) return _taxRates;
+        _taxRates = await res.json();
+    } catch (e) { /* fall back to whatever we already had */ }
+    renderTaxRateRows();
+    refreshTaxRateSelects();
+    return _taxRates;
+}
+window.loadTaxRates = loadTaxRates;
+
+// The <option> list every line-item row uses. `selected` keeps a row's current
+// choice even if it is a label no longer in the list, which is what an older
+// document carries.
+function taxOptionsHtml(selected) {
+    var list = _taxRates.length ? _taxRates : [
+        { label: '20% VAT', is_default: true }, { label: '5% VAT' },
+        { label: '0% Zero Rated' }, { label: 'No Tax' }
+    ];
+    var labels = list.map(function (t) { return t.label; });
+    if (selected && labels.indexOf(selected) === -1) labels.unshift(selected);
+
+    var preferred = selected;
+    if (!preferred) {
+        var def = list.filter(function (t) { return t.is_default; })[0];
+        preferred = def ? def.label : labels[0];
+    }
+    return labels.map(function (l) {
+        return '<option' + (l === preferred ? ' selected' : '') + '>' + esc(l) + '</option>';
+    }).join('');
+}
+window.taxOptionsHtml = taxOptionsHtml;
+
+// Existing rows follow the list when it changes, unless the row is carrying a
+// label the list no longer has.
+function refreshTaxRateSelects() {
+    var available = _taxRates.map(function (t) { return t.label; });
+    document.querySelectorAll('select.item-tax-rate').forEach(function (sel) {
+        // A rate the tenant has just deleted must not stay selected on a line
+        // they are still writing - that would invoice at a rate they removed.
+        // Rows fall back to the new default instead.
+        var current = available.indexOf(sel.value) === -1 ? '' : sel.value;
+        sel.innerHTML = taxOptionsHtml(current);
+        if (current) sel.value = current;
+    });
+    if (typeof calculateTotals === 'function') {
+        Object.keys(DOC_FORM_SCOPES).forEach(function (scope) { calculateTotals(scope); });
+    }
+}
+
+function renderTaxRateRows() {
+    var tbody = document.getElementById('tax-rates-body');
+    if (!tbody) return;
+    if (!_taxRates.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-secondary);">No tax rates yet.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = _taxRates.map(function (t, i) {
+        return '<tr class="tax-rate-row">' +
+            '<td><input type="text" class="form-control tax-rate-name" value="' + esc(t.name) + '" maxlength="60" oninput="updateTaxRatePreview(this)"></td>' +
+            '<td><input type="number" class="form-control tax-rate-percent" value="' + esc(t.percent) + '" min="0" max="100" step="0.01" oninput="updateTaxRatePreview(this)"></td>' +
+            '<td class="tax-rate-preview" style="color:var(--text-secondary);">' + esc(t.label) + '</td>' +
+            '<td style="text-align:center;"><input type="radio" name="tax-rate-default" class="tax-rate-default"' + (t.is_default ? ' checked' : '') + '></td>' +
+            '<td style="text-align:center;"><button type="button" class="btn-icon" onclick="removeTaxRateRow(this)" style="color:var(--danger-color);background:none;border:none;cursor:pointer;">&#10005;</button></td>' +
+            '</tr>';
+    }).join('');
+}
+
+function updateTaxRatePreview(el) {
+    var row = el.closest('.tax-rate-row');
+    if (!row) return;
+    var name = row.querySelector('.tax-rate-name').value;
+    var pct = row.querySelector('.tax-rate-percent').value;
+    var cell = row.querySelector('.tax-rate-preview');
+    if (cell) cell.textContent = taxRateLabel(name, pct);
+}
+window.updateTaxRatePreview = updateTaxRatePreview;
+
+function addTaxRateRow() {
+    var tbody = document.getElementById('tax-rates-body');
+    if (!tbody) return;
+    if (!document.querySelectorAll('.tax-rate-row').length) tbody.innerHTML = '';
+    tbody.insertAdjacentHTML('beforeend',
+        '<tr class="tax-rate-row">' +
+        '<td><input type="text" class="form-control tax-rate-name" placeholder="e.g. GST" maxlength="60" oninput="updateTaxRatePreview(this)"></td>' +
+        '<td><input type="number" class="form-control tax-rate-percent" value="0" min="0" max="100" step="0.01" oninput="updateTaxRatePreview(this)"></td>' +
+        '<td class="tax-rate-preview" style="color:var(--text-secondary);">-</td>' +
+        '<td style="text-align:center;"><input type="radio" name="tax-rate-default" class="tax-rate-default"></td>' +
+        '<td style="text-align:center;"><button type="button" class="btn-icon" onclick="removeTaxRateRow(this)" style="color:var(--danger-color);background:none;border:none;cursor:pointer;">&#10005;</button></td>' +
+        '</tr>');
+}
+window.addTaxRateRow = addTaxRateRow;
+
+function removeTaxRateRow(btn) {
+    if (document.querySelectorAll('.tax-rate-row').length <= 1) {
+        showToast('Keep at least one tax rate', 'error');
+        return;
+    }
+    var row = btn.closest('.tax-rate-row');
+    if (row) row.remove();
+}
+window.removeTaxRateRow = removeTaxRateRow;
+
+async function saveTaxRates() {
+    var rows = [];
+    var bad = null;
+    document.querySelectorAll('.tax-rate-row').forEach(function (row) {
+        var name = (row.querySelector('.tax-rate-name').value || '').trim();
+        var pctRaw = row.querySelector('.tax-rate-percent').value;
+        var pct = parseFloat(pctRaw);
+        if (!name && !pctRaw) return;             // a blank row the user abandoned
+        if (!name) { bad = bad || 'Every tax rate needs a name'; return; }
+        if (isNaN(pct) || pct < 0 || pct > 100) {
+            bad = bad || ('"' + name + '" must be between 0 and 100 percent');
+            return;
+        }
+        rows.push({ name: name, percent: pct, is_default: row.querySelector('.tax-rate-default').checked });
+    });
+
+    if (bad) { showToast(bad, 'error'); return; }
+    if (!rows.length) { showToast('Keep at least one tax rate', 'error'); return; }
+
+    try {
+        var res = await fetch('/api/tax-rates', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin', body: JSON.stringify({ tax_rates: rows }),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not save the tax rates'); return; }
+        _taxRates = data;
+        renderTaxRateRows();
+        refreshTaxRateSelects();
+        showToast('Tax rates saved', 'success');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.saveTaxRates = saveTaxRates;

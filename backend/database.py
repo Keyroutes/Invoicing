@@ -953,5 +953,22 @@ def ensure_columns():
             except Exception:
                 MIGRATION_ERRORS.append(f"migration step 33: {sys.exc_info()[1]}")
 
+            # Tenant-defined tax rates
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS tax_rates (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        name VARCHAR NOT NULL,
+                        percent FLOAT DEFAULT 0.0,
+                        sort_order INTEGER DEFAULT 0,
+                        is_default BOOLEAN DEFAULT FALSE
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tax_rates_client_id ON tax_rates (client_id)"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 34: {sys.exc_info()[1]}")
+
     except Exception as e:
         print(f"Column check skipped: {e}")
