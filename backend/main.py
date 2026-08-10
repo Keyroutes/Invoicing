@@ -1,3 +1,5 @@
+import asyncio
+import calendar
 import hashlib
 import hmac
 import secrets
@@ -18,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os
 import base64
 import logging
@@ -334,7 +336,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
     ensure_super_admin()
-    yield
+
+    task = None
+    if os.getenv("SCHEDULER_ENABLED", "1") == "1":
+        task = asyncio.create_task(scheduler_loop())
+        logger.info("Scheduler started, tick every %ss", SCHEDULER_TICK_SECONDS)
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
 
 app = FastAPI(title="Accounting Platform API", lifespan=lifespan)
 
@@ -2422,6 +2433,488 @@ def my_login_history(request: Request, limit: int = 50, db: Session = Depends(ge
         "ip_address": l.ip_address, "device_info": l.device_info,
         "status": l.status, "created_at": l.created_at,
     } for l in logs]
+
+# ============================================================================
+# SCHEDULER - the small amount of work that has to happen without a user
+# ============================================================================
+
+# How often the loop wakes. Jobs decide for themselves whether they are due,
+# so this only sets how soon after becoming due something runs.
+SCHEDULER_TICK_SECONDS = int(os.getenv("SCHEDULER_TICK_SECONDS", "900"))
+
+# Registered as (name, period_key_fn, run_fn). period_key_fn turns "now" into a
+# string identifying this run, which is what stops a job running twice.
+SCHEDULED_JOBS = []
+
+
+def daily_key(now=None):
+    return (now or datetime.now()).strftime("%Y-%m-%d")
+
+
+def scheduled_job(name, period_key_fn=daily_key):
+    def register(fn):
+        SCHEDULED_JOBS.append((name, period_key_fn, fn))
+        return fn
+    return register
+
+
+def claim_job_run(db, job_name, period_key):
+    """Take this period, or find that another worker already has it.
+
+    The unique index does the arbitrating, so this is safe with any number of
+    workers and needs no separate lock service.
+    """
+    row = models.DBJobRun(job_name=job_name, period_key=period_key, status="running")
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return None
+    return row
+
+
+def run_due_jobs(now=None, only=None):
+    """Run whatever is due. Safe to call as often as you like.
+
+    Returns what happened, which is what the tests and the operator endpoint
+    both read.
+    """
+    now = now or datetime.now()
+    results = []
+    for name, period_key_fn, fn in SCHEDULED_JOBS:
+        if only and name != only:
+            continue
+        period_key = period_key_fn(now)
+        with SessionLocal() as db:
+            claim = claim_job_run(db, name, period_key)
+            if claim is None:
+                results.append({"job": name, "period": period_key, "status": "already_done"})
+                continue
+            try:
+                detail = fn(db, now) or ""
+                claim.status = "done"
+                claim.detail = str(detail)[:500]
+            except Exception as exc:
+                # A job that throws must not take the loop down with it, and
+                # must not silently look like it succeeded.
+                logger.exception("Scheduled job %s failed", name)
+                claim.status = "failed"
+                claim.detail = str(exc)[:500]
+            claim.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            db.commit()
+            results.append({"job": name, "period": period_key,
+                            "status": claim.status, "detail": claim.detail})
+    return results
+
+
+async def scheduler_loop():
+    while True:
+        try:
+            await asyncio.to_thread(run_due_jobs)
+        except Exception:
+            logger.exception("Scheduler tick failed")
+        await asyncio.sleep(SCHEDULER_TICK_SECONDS)
+
+
+@app.post("/api/superadmin/run-jobs")
+def superadmin_run_jobs(request: Request, job: str = ""):
+    """Run the scheduled work now, for an operator who does not want to wait
+    for the next tick. Still claims the period, so this cannot double-send."""
+    require_superadmin(request)
+    return {"results": run_due_jobs(only=job or None)}
+
+
+@app.get("/api/superadmin/job-runs")
+def superadmin_job_runs(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    require_superadmin(request)
+    rows = db.query(models.DBJobRun).order_by(
+        models.DBJobRun.id.desc()).limit(min(limit, 200)).all()
+    return [{
+        "id": r.id, "job": r.job_name, "period": r.period_key, "status": r.status,
+        "detail": r.detail or "", "started_at": r.started_at,
+        "finished_at": r.finished_at or "",
+    } for r in rows]
+
+
+# ============================================================================
+# RECURRING INVOICES and OVERDUE REMINDERS - the work that happens on its own
+# ============================================================================
+
+RECURRING_FREQUENCIES = ("weekly", "monthly", "quarterly", "yearly")
+
+# Days past due at which a chase goes out. Each rung is sent at most once.
+REMINDER_LADDER = (1, 7, 14, 30)
+
+
+def advance_date(from_date, frequency):
+    """The next occurrence after `from_date`.
+
+    Month arithmetic clamps to the end of a short month, so a template set to
+    the 31st still runs in February instead of skipping it.
+    """
+    if frequency == "weekly":
+        return from_date + timedelta(days=7)
+    months = {"monthly": 1, "quarterly": 3, "yearly": 12}.get(frequency, 1)
+    month_index = from_date.month - 1 + months
+    year = from_date.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(from_date.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def recurring_to_dict(t, db=None):
+    return {
+        "id": t.id,
+        "name": t.name or "",
+        "to": t.to_contact or "",
+        "email": t.email or "",
+        "phone_number": t.phone_number or "",
+        "reference": t.reference or "",
+        "frequency": t.frequency,
+        "payment_terms_days": t.payment_terms_days or 14,
+        "next_run": t.next_run or "",
+        "end_date": t.end_date or "",
+        "is_active": bool(t.is_active),
+        "auto_send": bool(t.auto_send),
+        "last_run": t.last_run or "",
+        "last_invoice_number": t.last_invoice_number or "",
+        "invoices_created": t.invoices_created or 0,
+        "tax_type": t.tax_type,
+        "currency": t.currency or "",
+        "total": compute_invoice_totals(t.line_items, t.tax_type)[2],
+        "line_items": [{
+            "name": li.name or "", "description": li.description, "qty": li.qty,
+            "price": li.price, "disc": li.disc, "account": li.account,
+            "tax_rate": li.tax_rate,
+        } for li in t.line_items],
+    }
+
+
+class RecurringIn(BaseModel):
+    name: Optional[str] = ""
+    contact: str
+    email: Optional[str] = ""
+    phone_number: Optional[str] = ""
+    reference: Optional[str] = ""
+    line_items: List[LineItem]
+    tax_type: Optional[str] = "exclusive"
+    currency: Optional[str] = ""
+    bank_details: Optional[str] = ""
+    frequency: Optional[str] = "monthly"
+    payment_terms_days: Optional[int] = 14
+    next_run: str
+    end_date: Optional[str] = ""
+    is_active: Optional[bool] = True
+    auto_send: Optional[bool] = False
+
+
+def validate_recurring(body):
+    if body.frequency not in RECURRING_FREQUENCIES:
+        raise HTTPException(
+            status_code=400,
+            detail="Frequency must be one of: " + ", ".join(RECURRING_FREQUENCIES))
+    if not _parse_date(body.next_run):
+        raise HTTPException(status_code=400, detail="First issue date must be in YYYY-MM-DD format")
+    if body.end_date and not _parse_date(body.end_date):
+        raise HTTPException(status_code=400, detail="End date must be in YYYY-MM-DD format")
+    if body.end_date and _parse_date(body.end_date) < _parse_date(body.next_run):
+        raise HTTPException(status_code=400, detail="End date cannot be before the first issue date")
+    try:
+        terms = int(body.payment_terms_days if body.payment_terms_days is not None else 14)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Payment terms must be a whole number of days")
+    if terms < 0 or terms > 365:
+        raise HTTPException(status_code=400, detail="Payment terms must be between 0 and 365 days")
+    return terms
+
+
+@app.get("/api/recurring-invoices")
+def list_recurring(request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    rows = db.query(models.DBRecurringInvoice).filter(
+        models.DBRecurringInvoice.client_id == client.id
+    ).order_by(models.DBRecurringInvoice.id.desc()).all()
+    return [recurring_to_dict(t) for t in rows]
+
+
+@app.post("/api/recurring-invoices")
+def create_recurring(body: RecurringIn, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    validate_line_items(body.line_items)
+    terms = validate_recurring(body)
+
+    t = models.DBRecurringInvoice(
+        client_id=client.id, name=body.name or "", to_contact=body.contact,
+        email=body.email or "", phone_number=body.phone_number or "",
+        reference=body.reference or "", tax_type=body.tax_type,
+        currency=(body.currency or "").upper() or (client.currency or ""),
+        bank_details=body.bank_details or "", frequency=body.frequency,
+        payment_terms_days=terms, next_run=body.next_run, end_date=body.end_date or "",
+        is_active=bool(body.is_active), auto_send=bool(body.auto_send),
+    )
+    db.add(t)
+    db.flush()
+    for item in body.line_items:
+        db.add(models.DBRecurringLineItem(
+            recurring_id=t.id, name=item.name or "", description=item.description,
+            qty=item.qty, price=item.price, disc=item.disc or 0.0,
+            account=item.account, tax_rate=item.tax_rate,
+        ))
+    log_audit(db, client.id, "recurring_created", "recurring", t.id, t.name or t.to_contact,
+              t.frequency, request)
+    db.commit()
+    db.refresh(t)
+    return recurring_to_dict(t)
+
+
+@app.put("/api/recurring-invoices/{rec_id}")
+def update_recurring(rec_id: int, body: RecurringIn, request: Request,
+                     db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    t = db.query(models.DBRecurringInvoice).filter(
+        models.DBRecurringInvoice.id == rec_id,
+        models.DBRecurringInvoice.client_id == client.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Recurring invoice not found")
+    validate_line_items(body.line_items)
+    terms = validate_recurring(body)
+
+    t.name = body.name or ""
+    t.to_contact = body.contact
+    t.email = body.email or ""
+    t.phone_number = body.phone_number or ""
+    t.reference = body.reference or ""
+    t.tax_type = body.tax_type
+    t.currency = (body.currency or "").upper() or t.currency
+    t.bank_details = body.bank_details or ""
+    t.frequency = body.frequency
+    t.payment_terms_days = terms
+    t.next_run = body.next_run
+    t.end_date = body.end_date or ""
+    t.is_active = bool(body.is_active)
+    t.auto_send = bool(body.auto_send)
+
+    db.query(models.DBRecurringLineItem).filter(
+        models.DBRecurringLineItem.recurring_id == t.id).delete()
+    for item in body.line_items:
+        db.add(models.DBRecurringLineItem(
+            recurring_id=t.id, name=item.name or "", description=item.description,
+            qty=item.qty, price=item.price, disc=item.disc or 0.0,
+            account=item.account, tax_rate=item.tax_rate,
+        ))
+    log_audit(db, client.id, "recurring_updated", "recurring", t.id,
+              t.name or t.to_contact, t.frequency, request)
+    db.commit()
+    db.refresh(t)
+    return recurring_to_dict(t)
+
+
+@app.delete("/api/recurring-invoices/{rec_id}")
+def delete_recurring(rec_id: int, request: Request, db: Session = Depends(get_db)):
+    """Stops future invoices. The ones already issued are real documents and
+    are left exactly where they are."""
+    client = get_client_user(request, db)
+    t = db.query(models.DBRecurringInvoice).filter(
+        models.DBRecurringInvoice.id == rec_id,
+        models.DBRecurringInvoice.client_id == client.id,
+    ).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Recurring invoice not found")
+    db.query(models.DBRecurringLineItem).filter(
+        models.DBRecurringLineItem.recurring_id == t.id).delete()
+    log_audit(db, client.id, "recurring_deleted", "recurring", t.id,
+              t.name or t.to_contact, "", request)
+    db.delete(t)
+    db.commit()
+    return {"message": "Recurring invoice stopped"}
+
+
+def issue_recurring_invoice(db, t, on_date):
+    """Raise one invoice from a template and move the schedule on."""
+    subtotal, tax, total = compute_invoice_totals(t.line_items, t.tax_type)
+    number = next_sequence_number(db, models.DBInvoice, t.client_id, "INV-")
+    due = on_date + timedelta(days=t.payment_terms_days or 14)
+
+    inv = models.DBInvoice(
+        client_id=t.client_id, number=number, ref=t.reference or "",
+        to_contact=t.to_contact, email=t.email or "", phone_number=t.phone_number or "",
+        issue_date=on_date.strftime("%Y-%m-%d"), due_date=due.strftime("%Y-%m-%d"),
+        paid=0.00, due=round(total, 2), status="Draft", sent="",
+        tax_type=t.tax_type, currency=t.currency or "", bank_details=t.bank_details or "",
+    )
+    db.add(inv)
+    db.flush()
+    for li in t.line_items:
+        db.add(models.DBLineItem(
+            invoice_id=inv.id, name=li.name or "", description=li.description,
+            qty=li.qty, price=li.price, disc=li.disc or 0.0,
+            account=li.account, tax_rate=li.tax_rate,
+        ))
+
+    t.last_run = on_date.strftime("%Y-%m-%d")
+    t.last_invoice_number = number
+    t.invoices_created = (t.invoices_created or 0) + 1
+    nxt = advance_date(on_date, t.frequency)
+    t.next_run = nxt.strftime("%Y-%m-%d")
+    # A template that has reached its end date stops rather than lingering.
+    end = _parse_date(t.end_date)
+    if end and nxt > end:
+        t.is_active = False
+    return inv
+
+
+@scheduled_job("recurring_invoices")
+def job_recurring_invoices(db, now):
+    """Raise whatever is due today.
+
+    Catches up if the app was down: a template whose date has passed is issued
+    for each period it missed, rather than silently losing months.
+    """
+    today = now.date()
+    issued = 0
+    templates = db.query(models.DBRecurringInvoice).filter(
+        models.DBRecurringInvoice.is_active == True,          # noqa: E712
+        models.DBRecurringInvoice.next_run != "",
+        models.DBRecurringInvoice.next_run <= today.strftime("%Y-%m-%d"),
+    ).all()
+    for t in templates:
+        guard = 0
+        while t.is_active and guard < 60:
+            due_on = _parse_date(t.next_run)
+            if not due_on or due_on > today:
+                break
+            end = _parse_date(t.end_date)
+            if end and due_on > end:
+                t.is_active = False
+                break
+            if not t.line_items:
+                break
+            issue_recurring_invoice(db, t, due_on)
+            issued += 1
+            guard += 1
+    db.commit()
+    return f"{issued} invoice(s) raised"
+
+
+def reminder_stage_for(days_overdue):
+    """The highest rung reached, so a gap in ticks does not skip a chase."""
+    reached = [d for d in REMINDER_LADDER if days_overdue >= d]
+    return max(reached) if reached else None
+
+
+@scheduled_job("overdue_reminders")
+def job_overdue_reminders(db, now):
+    """Chase invoices that have gone past their due date.
+
+    A paid, part-paid or void invoice is never chased, and each rung of the
+    ladder goes out at most once per invoice.
+    """
+    today = now.date()
+    sent = 0
+    candidates = db.query(models.DBInvoice).filter(
+        models.DBInvoice.status.notin_(["Paid", "Void", "Draft"]),
+        models.DBInvoice.due > 0,
+        models.DBInvoice.due_date != "",
+    ).all()
+
+    for inv in candidates:
+        due_date = _parse_date(inv.due_date)
+        if not due_date or due_date >= today:
+            continue
+        stage = reminder_stage_for((today - due_date).days)
+        if stage is None or not inv.email or not validate_email_address(inv.email):
+            continue
+
+        already = db.query(models.DBInvoiceReminder).filter(
+            models.DBInvoiceReminder.invoice_id == inv.id,
+            models.DBInvoiceReminder.stage_days == stage,
+        ).first()
+        if already:
+            continue
+
+        settings_rows = db.query(models.DBSettings).filter(
+            models.DBSettings.client_id == inv.client_id).all()
+        settings_map = {s.key: s.value for s in settings_rows}
+        inv_client = db.query(models.DBClient).filter(
+            models.DBClient.id == inv.client_id).first()
+        company = (settings_map.get("company_name", "")
+                   or (inv_client.company_name if inv_client else "") or "Accounts")
+        cur = currency_symbol((inv.currency or "GBP").upper())
+        days = (today - due_date).days
+
+        subject = f"Reminder: invoice {inv.number} is {days} day(s) overdue"
+        text_body = (
+            f"Hello {inv.to_contact},\n\n"
+            f"Invoice {inv.number} for {cur}{inv.due:.2f} was due on {inv.due_date} "
+            f"and is now {days} day(s) overdue.\n\n"
+            "If you have already paid, please ignore this note.\n\n"
+            f"Kind regards,\n{company}\n"
+        )
+        html_body = f"""
+        <!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;margin:0;padding:0;">
+          <div style="max-width:520px;margin:0 auto;padding:40px 20px;">
+            <div style="background:#fff;border-radius:12px;overflow:hidden;">
+              <div style="background:#0f172a;padding:28px;text-align:center;">
+                <div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">Payment reminder</div>
+                <div style="font-size:24px;font-weight:800;color:#fff;margin-top:6px;">{esc(inv.number)}</div>
+              </div>
+              <div style="padding:26px;">
+                <p style="margin:0 0 16px;font-size:15px;">Hello {esc(inv.to_contact)},</p>
+                <p style="margin:0 0 18px;font-size:15px;color:#475569;">
+                  Invoice <strong>{esc(inv.number)}</strong> for
+                  <strong>{cur}{inv.due:.2f}</strong> was due on
+                  <strong>{esc(inv.due_date)}</strong>, which is {days} day(s) ago.
+                </p>
+                <p style="margin:0;font-size:13px;color:#64748b;">
+                  If you have already paid, please ignore this note.
+                </p>
+              </div>
+              <div style="background:#f8fafc;padding:18px;text-align:center;border-top:1px solid #e2e8f0;">
+                <div style="font-size:13px;font-weight:700;color:#0f172a;">{esc(company)}</div>
+              </div>
+            </div>
+          </div>
+        </body></html>
+        """
+
+        from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+        # Recorded before sending, and the unique index means a second worker
+        # racing this cannot send the same rung twice.
+        db.add(models.DBInvoiceReminder(
+            client_id=inv.client_id, invoice_id=inv.id,
+            stage_days=stage, sent_to=inv.email,
+        ))
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+
+        send_email_background(
+            inv.email, subject, text_body, f"{company} <{from_email}>",
+            html_body, None, "", "", client_id=inv.client_id,
+        )
+        sent += 1
+
+    return f"{sent} reminder(s) sent"
+
+
+@app.get("/api/invoices/{number}/reminders")
+def invoice_reminders(number: str, request: Request, db: Session = Depends(get_db)):
+    client = get_client_user(request, db)
+    inv = db.query(models.DBInvoice).filter(
+        models.DBInvoice.number == number, models.DBInvoice.client_id == client.id
+    ).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    rows = db.query(models.DBInvoiceReminder).filter(
+        models.DBInvoiceReminder.invoice_id == inv.id
+    ).order_by(models.DBInvoiceReminder.stage_days.asc()).all()
+    return [{"stage_days": r.stage_days, "sent_to": r.sent_to, "sent_at": r.sent_at}
+            for r in rows]
+
 
 # ============================================================================
 # PASSWORD RESET - the way back in for a locked-out account owner
@@ -9977,7 +10470,6 @@ def summarize_attendance(request: Request, body: dict = None, db: Session = Depe
 # ============================================================
 # VIDEO MEETINGS - WebRTC Signaling Server
 # ============================================================
-import asyncio
 from collections import defaultdict
 
 meeting_rooms = defaultdict(lambda: {

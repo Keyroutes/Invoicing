@@ -114,6 +114,96 @@ class DBLineItem(Base):
     invoice = relationship("DBInvoice", back_populates="line_items")
 
 
+class DBRecurringInvoice(Base):
+    """A standing instruction to raise the same invoice on a schedule.
+
+    Holds the lines itself rather than pointing at an invoice, so editing the
+    template never rewrites invoices already issued from it.
+    """
+    __tablename__ = "recurring_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index=True)
+    name = Column(String, default="")
+    to_contact = Column(String, default="")
+    email = Column(String, default="")
+    phone_number = Column(String, default="")
+    reference = Column(String, default="")
+    tax_type = Column(String, default="exclusive")
+    currency = Column(String, default="")
+    bank_details = Column(String, default="")
+    # weekly | monthly | quarterly | yearly
+    frequency = Column(String, default="monthly")
+    # Days after issue that the generated invoice falls due.
+    payment_terms_days = Column(Integer, default=14)
+    next_run = Column(String, default="", index=True)
+    end_date = Column(String, default="")
+    is_active = Column(Boolean, default=True, index=True)
+    # Whether to email each one as it is raised, or leave it as a draft.
+    auto_send = Column(Boolean, default=False)
+    last_run = Column(String, default="")
+    last_invoice_number = Column(String, default="")
+    invoices_created = Column(Integer, default=0)
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    line_items = relationship("DBRecurringLineItem", back_populates="template")
+
+
+class DBRecurringLineItem(Base):
+    __tablename__ = "recurring_line_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    recurring_id = Column(Integer, ForeignKey("recurring_invoices.id"), index=True)
+    name = Column(String, default="")
+    description = Column(String)
+    qty = Column(Float)
+    price = Column(Float)
+    disc = Column(Float, default=0.0)
+    account = Column(String, default="200 - Sales")
+    tax_rate = Column(String, default="20% (VAT on Income)")
+
+    template = relationship("DBRecurringInvoice", back_populates="line_items")
+
+
+class DBInvoiceReminder(Base):
+    """One chase actually sent, so the same one is never sent twice."""
+    __tablename__ = "invoice_reminders"
+    __table_args__ = (
+        UniqueConstraint('invoice_id', 'stage_days', name='uq_invoice_reminder_stage'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False, index=True)
+    # Which rung of the ladder this was: days past due.
+    stage_days = Column(Integer, default=0)
+    sent_to = Column(String, default="")
+    sent_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+class DBJobRun(Base):
+    """A claim on one run of one scheduled job.
+
+    Railway can run more than one worker, and each would otherwise fire the
+    same job. The unique constraint is the lock: whoever inserts the row for a
+    period gets to do the work, everyone else finds it taken.
+    """
+    __tablename__ = "job_runs"
+    __table_args__ = (
+        UniqueConstraint('job_name', 'period_key', name='uq_job_period'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_name = Column(String, nullable=False, index=True)
+    # What "this run" means for the job - usually a date, so a daily job runs
+    # once a day however often the loop wakes up.
+    period_key = Column(String, nullable=False, index=True)
+    status = Column(String, default="running")
+    detail = Column(String, default="")
+    started_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    finished_at = Column(String, default="")
+
+
 class DBPasswordReset(Base):
     """One password reset link.
 

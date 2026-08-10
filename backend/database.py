@@ -1000,5 +1000,81 @@ def ensure_columns():
             except Exception:
                 MIGRATION_ERRORS.append(f"migration step 36: {sys.exc_info()[1]}")
 
+            # Scheduled job claims
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS job_runs (
+                        id SERIAL PRIMARY KEY,
+                        job_name VARCHAR NOT NULL,
+                        period_key VARCHAR NOT NULL,
+                        status VARCHAR DEFAULT 'running',
+                        detail VARCHAR DEFAULT '',
+                        started_at VARCHAR DEFAULT (NOW()::TEXT),
+                        finished_at VARCHAR DEFAULT '',
+                        CONSTRAINT uq_job_period UNIQUE (job_name, period_key)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_job_runs_job_name ON job_runs (job_name)"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 37: {sys.exc_info()[1]}")
+
+            # Recurring invoices and the reminder ladder
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS recurring_invoices (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id) NOT NULL,
+                        name VARCHAR DEFAULT '',
+                        to_contact VARCHAR DEFAULT '',
+                        email VARCHAR DEFAULT '',
+                        phone_number VARCHAR DEFAULT '',
+                        reference VARCHAR DEFAULT '',
+                        tax_type VARCHAR DEFAULT 'exclusive',
+                        currency VARCHAR DEFAULT '',
+                        bank_details VARCHAR DEFAULT '',
+                        frequency VARCHAR DEFAULT 'monthly',
+                        payment_terms_days INTEGER DEFAULT 14,
+                        next_run VARCHAR DEFAULT '',
+                        end_date VARCHAR DEFAULT '',
+                        is_active BOOLEAN DEFAULT TRUE,
+                        auto_send BOOLEAN DEFAULT FALSE,
+                        last_run VARCHAR DEFAULT '',
+                        last_invoice_number VARCHAR DEFAULT '',
+                        invoices_created INTEGER DEFAULT 0,
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS recurring_line_items (
+                        id SERIAL PRIMARY KEY,
+                        recurring_id INTEGER REFERENCES recurring_invoices(id),
+                        name VARCHAR DEFAULT '',
+                        description VARCHAR,
+                        qty FLOAT,
+                        price FLOAT,
+                        disc FLOAT DEFAULT 0.0,
+                        account VARCHAR DEFAULT '200 - Sales',
+                        tax_rate VARCHAR DEFAULT '20% (VAT on Income)'
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS invoice_reminders (
+                        id SERIAL PRIMARY KEY,
+                        client_id INTEGER REFERENCES clients(id),
+                        invoice_id INTEGER REFERENCES invoices(id) NOT NULL,
+                        stage_days INTEGER DEFAULT 0,
+                        sent_to VARCHAR DEFAULT '',
+                        sent_at VARCHAR DEFAULT (NOW()::TEXT),
+                        CONSTRAINT uq_invoice_reminder_stage UNIQUE (invoice_id, stage_days)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recurring_client_id ON recurring_invoices (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_recurring_next_run ON recurring_invoices (next_run)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_invoice_reminders_invoice ON invoice_reminders (invoice_id)"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 38: {sys.exc_info()[1]}")
+
     except Exception as e:
         print(f"Column check skipped: {e}")

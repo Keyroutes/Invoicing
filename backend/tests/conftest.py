@@ -20,6 +20,9 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-production")
 os.environ.setdefault("COOKIE_SECURE", "false")
 os.environ.setdefault("SUPERADMIN_PASSWORD", "TestSuper123")
+# Tests drive run_due_jobs() directly; a loop ticking in the background would
+# race them and claim periods out from under the assertions.
+os.environ.setdefault("SCHEDULER_ENABLED", "0")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
