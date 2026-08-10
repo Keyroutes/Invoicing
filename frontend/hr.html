@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=28">
-    <link rel="stylesheet" href="mobile.css?v=28">
+    <link rel="stylesheet" href="styles.css?v=29">
+    <link rel="stylesheet" href="mobile.css?v=29">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -1495,6 +1495,17 @@
                         </div>
                     </div>
                     <div id="onboarding-hub-stats" class="grid-4 mb-24"></div>
+                    <div class="glass-widget" style="margin-bottom:24px;">
+                        <div class="widget-header">
+                            <h3>Onboarding Pipeline</h3>
+                            <span id="onb-pipeline-summary" style="font-size:0.85rem;color:var(--text-secondary);"></span>
+                        </div>
+                        <div class="widget-content">
+                            <div id="onb-pipeline-board" class="onb-board"></div>
+                        </div>
+                    </div>
+
+
 
                     <!-- Documents that have lapsed or are about to -->
                     <div class="glass-widget mb-24" id="expiring-docs-widget">
@@ -2354,7 +2365,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=29"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">

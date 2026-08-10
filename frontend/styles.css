@@ -1062,3 +1062,61 @@ body::after {
     from { transform: scale(0.8); opacity: 0; }
     to { transform: scale(1); opacity: 1; }
 }
+
+/* ---- Onboarding pipeline board ------------------------------------------
+   Columns scroll sideways inside the board rather than stretching the page,
+   so a narrow screen shows one column at a time instead of a squashed four. */
+.onb-board {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    align-items: flex-start;
+}
+.onb-col {
+    flex: 1 0 240px;
+    min-width: 240px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+}
+.onb-col-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.onb-col-head strong { font-size: 0.9rem; }
+.onb-col-count {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 1px 8px;
+}
+.onb-col-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+.onb-card {
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+}
+.onb-card.is-blocked { border-left: 3px solid var(--danger-color); }
+.onb-card-name { font-weight: 600; font-size: 0.9rem; }
+.onb-card-sub { font-size: 0.76rem; color: var(--text-secondary); margin-top: 2px; }
+.onb-card-meta { font-size: 0.74rem; color: var(--text-secondary); margin-top: 8px; }
+.onb-card-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.onb-bar { height: 4px; background: rgba(255,255,255,0.08); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.onb-bar > span { display: block; height: 100%; background: var(--primary-color); }
+.onb-empty { font-size: 0.8rem; color: var(--text-secondary); padding: 10px 2px; }
+
+@media (max-width: 700px) {
+    .onb-col { flex: 0 0 82%; min-width: 82%; }
+}

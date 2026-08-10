@@ -4163,7 +4163,7 @@ showView = function(viewId) {
     if (viewId === 'leave-view') loadLeaveView();
     if (viewId === 'goals-view') loadGoalsView();
     if (viewId === 'departments-view') fetchDepartments();
-    if (viewId === 'onboarding-hub-view') { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); }
+    if (viewId === 'onboarding-hub-view') { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); loadOnboardingPipeline(); }
     if (viewId === 'payroll-view') { fetchPayslips(currentPsFilter); loadPayrollAnomalies(); }
     if (viewId === 'attendance-view') { loadAttendanceStats(); loadAttendanceButtons(); loadAttendance(); loadLiveAttendance(); loadAttendanceSettings(); switchAttTab('live'); }
     if (viewId === 'orgchart-view') loadOrgChart();
@@ -6839,7 +6839,7 @@ var HR_VIEW_LOADERS = {
     'employees-view':      function () { fetchEmployees(currentEmpFilter); },
     'departments-view':    function () { fetchDepartments(); },
     'orgchart-view':       function () { loadOrgChart(); },
-    'onboarding-hub-view': function () { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); },
+    'onboarding-hub-view': function () { loadOnboardingHub(); loadDocumentQueue(); loadExpiringDocuments(); loadOnboardingPipeline(); },
     'payroll-view':        function () { fetchPayslips(currentPsFilter); },
     'leave-view':          function () { loadLeaveView(); },
     'goals-view':          function () { loadGoalsView(); },
@@ -8502,3 +8502,113 @@ async function saveTaxRates() {
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.saveTaxRates = saveTaxRates;
+
+// ==================== ONBOARDING PIPELINE ====================
+// One board for the whole journey from hire to working employee. Stages are
+// worked out from the person's actual records, so nothing has to be dragged
+// to keep it honest - you move someone on by approving their documents or
+// ticking their checklist, and the card follows.
+
+async function loadOnboardingPipeline() {
+    var host = document.getElementById('onb-pipeline-board');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/onboarding/pipeline', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        var data = await res.json();
+        renderOnboardingPipeline(data);
+    } catch (e) { console.error('Onboarding pipeline load failed:', e); }
+}
+window.loadOnboardingPipeline = loadOnboardingPipeline;
+
+function renderOnboardingPipeline(data) {
+    var host = document.getElementById('onb-pipeline-board');
+    if (!host) return;
+
+    var summary = document.getElementById('onb-pipeline-summary');
+    if (summary) {
+        summary.textContent = data.total === 0
+            ? 'Nobody is onboarding right now'
+            : data.total + ' onboarding' + (data.blocked ? ' · ' + data.blocked + ' blocked' : '');
+    }
+
+    host.innerHTML = (data.stages || []).map(function (stage) {
+        var cards = (stage.cards || []).map(onboardingCardHtml).join('') ||
+            '<div class="onb-empty">Nobody here</div>';
+        return '<div class="onb-col">' +
+            '<div class="onb-col-head"><strong>' + esc(stage.label) + '</strong>' +
+                '<span class="onb-col-count">' + stage.count + '</span></div>' +
+            '<div class="onb-col-hint">' + esc(stage.hint) + '</div>' +
+            cards +
+        '</div>';
+    }).join('');
+}
+
+function onboardingCardHtml(c) {
+    var pct = c.items_total ? Math.round((c.items_done / c.items_total) * 100) : 0;
+
+    // Say what is actually holding this person up, not just that they are stuck.
+    var blockers = [];
+    if (c.docs_overdue && c.docs_overdue.length) blockers.push('overdue: ' + c.docs_overdue.join(', '));
+    if (c.items_overdue) blockers.push(c.items_overdue + ' overdue task' + (c.items_overdue === 1 ? '' : 's'));
+    var waiting = '';
+    if (c.awaiting_employee && c.awaiting_employee.length) waiting = 'Needs: ' + c.awaiting_employee.join(', ');
+    else if (c.awaiting_hr && c.awaiting_hr.length) waiting = 'To review: ' + c.awaiting_hr.join(', ');
+
+    var actions = '<button class="btn btn-outline btn-sm" onclick="openEmployee(' + c.employee_id + ')">Open</button>';
+    if (c.awaiting_employee && c.awaiting_employee.length) {
+        actions += '<button class="btn btn-outline btn-sm" onclick="nudgeStarter(' + c.employee_id + ')">Remind</button>';
+    }
+    if (c.awaiting_hr && c.awaiting_hr.length) {
+        actions += '<button class="btn btn-outline btn-sm" onclick="showView(\'onboarding-hub-view\');loadDocumentQueue()">Review</button>';
+    }
+    if (c.stage === 'ready') {
+        actions += '<button class="btn btn-primary btn-sm" onclick="finishOnboarding(' + c.employee_id + ')">Complete</button>';
+    }
+
+    return '<div class="onb-card' + (c.is_blocked ? ' is-blocked' : '') + '">' +
+        '<div class="onb-card-name">' + esc(c.name) + '</div>' +
+        '<div class="onb-card-sub">' + esc(c.job_title || '—') +
+            (c.department ? ' · ' + esc(c.department) : '') + '</div>' +
+        (c.hired_from
+            ? '<div class="onb-card-sub">Hired from application by ' + esc(c.hired_from.candidate_name) + '</div>'
+            : '') +
+        (waiting ? '<div class="onb-card-meta">' + esc(waiting) + '</div>' : '') +
+        (blockers.length
+            ? '<div class="onb-card-meta" style="color:var(--danger-color);">' + esc(blockers.join(' · ')) + '</div>'
+            : '') +
+        '<div class="onb-bar"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="onb-card-meta">' + c.items_done + '/' + c.items_total + ' tasks · ' +
+            c.docs_approved + '/' + c.docs_total + ' documents' +
+            (c.days_since_start !== null && c.days_since_start !== undefined
+                ? ' · day ' + c.days_since_start : '') + '</div>' +
+        '<div class="onb-card-actions">' + actions + '</div>' +
+    '</div>';
+}
+
+async function nudgeStarter(empId) {
+    try {
+        var res = await fetch('/api/employees/' + empId + '/nudge', {
+            method: 'POST', credentials: 'same-origin',
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not send the reminder'); return; }
+        showToast('Reminder sent: ' + (data.items || []).join(', '), 'success');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.nudgeStarter = nudgeStarter;
+
+async function finishOnboarding(empId) {
+    if (!confirm('Mark onboarding complete? They become an active employee.')) return;
+    try {
+        var res = await fetch('/api/employees/' + empId + '/complete-onboarding', {
+            method: 'POST', credentials: 'same-origin',
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not complete onboarding'); return; }
+        showToast('Onboarding complete', 'success');
+        hrDataChanged('onboarding', { employeeId: empId });
+        loadOnboardingPipeline();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.finishOnboarding = finishOnboarding;

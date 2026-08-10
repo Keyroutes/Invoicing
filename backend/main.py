@@ -2427,6 +2427,234 @@ def my_login_history(request: Request, limit: int = 50, db: Session = Depends(ge
     } for l in logs]
 
 # ============================================================================
+# ONBOARDING PIPELINE - hiring through to a working employee
+# ============================================================================
+
+DEFAULT_ONBOARDING_ITEMS = [
+    ("Sign employment contract", "Legal", "HR"),
+    ("Provide government-issued ID", "Legal", "HR"),
+    ("Submit bank details for payroll", "Finance", "Finance"),
+    ("Provide emergency contact information", "General", "HR"),
+    ("Company policy acknowledgment", "Compliance", "HR"),
+    ("IT equipment setup", "Technical", "IT"),
+    ("Email and system access setup", "Technical", "IT"),
+    ("Introduction to team members", "Social", "Manager"),
+    ("Complete tax withholding forms (W-4)", "Finance", "Finance"),
+    ("Review employee handbook", "Compliance", "HR"),
+]
+
+
+def start_onboarding(db, client_id, emp):
+    """Give a new starter their checklist and their document requests.
+
+    Both ways in have to do this. Hiring from recruitment used to create the
+    employee and stop, so anyone who came through the pipeline arrived with an
+    empty checklist and nothing asked of them, while the same person added by
+    hand got both.
+    """
+    existing = db.query(models.DBOnboardingItem).filter(
+        models.DBOnboardingItem.employee_id == emp.id).count()
+    if not existing:
+        for title, category, assignee in DEFAULT_ONBOARDING_ITEMS:
+            db.add(models.DBOnboardingItem(
+                client_id=client_id, employee_id=emp.id,
+                title=title, category=category, assigned_to=assignee,
+            ))
+    seed_default_requirements(db, client_id)
+    assign_document_requests(db, client_id, emp)
+
+
+def onboarding_snapshot(db, emp, today=None):
+    """Where one person has got to, worked out from their actual records
+    rather than a status column that has to be kept in step."""
+    today = today or datetime.now().date()
+    today_str = today.strftime("%Y-%m-%d")
+
+    items = db.query(models.DBOnboardingItem).filter(
+        models.DBOnboardingItem.employee_id == emp.id).all()
+    done_items = sum(1 for i in items if i.is_completed)
+    overdue_items = sum(
+        1 for i in items
+        if not i.is_completed and i.due_date and i.due_date < today_str)
+
+    reqs = db.query(models.DBDocumentRequest).filter(
+        models.DBDocumentRequest.employee_id == emp.id).all()
+    mandatory = [r for r in reqs if r.is_mandatory]
+    awaiting_employee = [r for r in mandatory if r.status in ("pending", "rejected")]
+    awaiting_hr = [r for r in reqs if r.status == "submitted"]
+    approved = [r for r in mandatory if r.status == "approved"]
+    overdue_docs = [
+        r for r in awaiting_employee if r.due_date and r.due_date < today_str]
+
+    checklist_done = bool(items) and done_items == len(items)
+    documents_done = not awaiting_employee and not awaiting_hr
+
+    # Ordered by who is being waited on: the new starter, then HR, then the
+    # internal setup nobody outside the company can see.
+    if awaiting_employee:
+        stage = "paperwork"
+    elif awaiting_hr:
+        stage = "review"
+    elif not checklist_done:
+        stage = "setup"
+    else:
+        stage = "ready"
+
+    started = _parse_date(emp.start_date)
+    return {
+        "stage": stage,
+        "items_total": len(items),
+        "items_done": done_items,
+        "items_overdue": overdue_items,
+        "docs_total": len(mandatory),
+        "docs_approved": len(approved),
+        "awaiting_employee": [r.name for r in awaiting_employee],
+        "awaiting_hr": [r.name for r in awaiting_hr],
+        "docs_overdue": [r.name for r in overdue_docs],
+        "checklist_done": checklist_done,
+        "documents_done": documents_done,
+        "days_since_start": (today - started).days if started else None,
+        "is_blocked": bool(overdue_items or overdue_docs),
+    }
+
+
+def maybe_complete_onboarding(db, emp):
+    """Turn a starter into a working employee once nothing is outstanding.
+
+    Completion used to depend on the checklist alone, so somebody could be made
+    active with a mandatory document still missing. Both halves now have to be
+    finished, and this runs after a checklist change and after a document is
+    reviewed, so whichever finishes last is the one that completes it.
+    """
+    if not emp or emp.status != "onboarding":
+        return False
+    snap = onboarding_snapshot(db, emp)
+    if not (snap["checklist_done"] and snap["documents_done"]):
+        return False
+    emp.onboarding_complete = True
+    emp.status = "active"
+    return True
+
+
+ONBOARDING_STAGES = [
+    ("paperwork", "Documents requested", "Waiting on the new starter"),
+    ("review", "In review", "Waiting on HR"),
+    ("setup", "Setup", "Checklist still running"),
+    ("ready", "Ready to start", "Nothing outstanding"),
+]
+
+
+@app.get("/api/onboarding/pipeline")
+def onboarding_pipeline(request: Request, db: Session = Depends(get_db)):
+    """Everyone still onboarding, grouped by what they are waiting on."""
+    client = get_client_user(request, db)
+    employees = db.query(models.DBEmployee).filter(
+        models.DBEmployee.client_id == client.id,
+        models.DBEmployee.status == "onboarding",
+    ).all()
+
+    hired_from = {
+        s.hired_employee_id: s for s in db.query(models.DBFormSubmission).filter(
+            models.DBFormSubmission.client_id == client.id,
+            models.DBFormSubmission.hired_employee_id.isnot(None),
+        ).all()
+    }
+
+    buckets = {key: [] for key, _, _ in ONBOARDING_STAGES}
+    for emp in employees:
+        snap = onboarding_snapshot(db, emp)
+        sub = hired_from.get(emp.id)
+        card = {
+            "employee_id": emp.id,
+            "name": f"{emp.first_name} {emp.last_name}".strip(),
+            "employee_number": emp.employee_id or "",
+            "job_title": emp.job_title or "",
+            "department": emp.department.name if emp.department else "",
+            "start_date": emp.start_date or "",
+            "email": emp.email or "",
+        }
+        card.update(snap)
+        # Where they came from, so the hire and the onboarding are one story.
+        card["hired_from"] = ({
+            "submission_id": sub.id,
+            "candidate_name": sub.candidate_name or "",
+            "hired_at": sub.hired_at or "",
+        } if sub else None)
+        buckets[snap["stage"]].append(card)
+
+    for rows in buckets.values():
+        # Anything blocked first, then whoever has been waiting longest.
+        rows.sort(key=lambda c: (not c["is_blocked"], -(c["days_since_start"] or 0)))
+
+    return {
+        "stages": [
+            {"key": key, "label": label, "hint": hint,
+             "count": len(buckets[key]), "cards": buckets[key]}
+            for key, label, hint in ONBOARDING_STAGES
+        ],
+        "total": len(employees),
+        "blocked": sum(1 for rows in buckets.values() for c in rows if c["is_blocked"]),
+    }
+
+
+@app.post("/api/employees/{emp_id}/complete-onboarding")
+def complete_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    """Mark a starter as a working employee.
+
+    Refuses while something is still outstanding, and says what, rather than
+    quietly activating someone whose paperwork is not in.
+    """
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if emp.status != "onboarding":
+        raise HTTPException(status_code=400, detail="This employee is not onboarding")
+
+    snap = onboarding_snapshot(db, emp)
+    blockers = []
+    if snap["awaiting_employee"]:
+        blockers.append("waiting on " + ", ".join(snap["awaiting_employee"]))
+    if snap["awaiting_hr"]:
+        blockers.append("still to review " + ", ".join(snap["awaiting_hr"]))
+    if not snap["checklist_done"]:
+        blockers.append(
+            f"{snap['items_total'] - snap['items_done']} checklist item(s) left")
+    if blockers:
+        raise HTTPException(status_code=400, detail="Not finished: " + "; ".join(blockers))
+
+    emp.onboarding_complete = True
+    emp.status = "active"
+    log_audit(db, client.id, "onboarding_completed", "employee", emp.id,
+              f"{emp.first_name} {emp.last_name}".strip(), "", request)
+    db.commit()
+    return {"message": "Onboarding complete", "status": emp.status}
+
+
+@app.post("/api/employees/{emp_id}/nudge")
+def nudge_onboarding(emp_id: int, request: Request, db: Session = Depends(get_db)):
+    """Remind a starter what is still outstanding, in their own portal."""
+    client = get_client_user(request, db)
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == emp_id, models.DBEmployee.client_id == client.id
+    ).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    snap = onboarding_snapshot(db, emp)
+    if not snap["awaiting_employee"]:
+        raise HTTPException(status_code=400, detail="Nothing is waiting on this person")
+    db.add(models.DBNotification(
+        client_id=client.id, employee_id=emp.id, type="warning",
+        title="Documents still needed",
+        message="Please upload: " + ", ".join(snap["awaiting_employee"]),
+    ))
+    db.commit()
+    return {"message": "Reminder sent", "items": snap["awaiting_employee"]}
+
+
+# ============================================================================
 # TAX RATES - the list a tenant picks from when writing a line
 # ============================================================================
 
@@ -3587,27 +3815,7 @@ def create_employee(request: Request, body: EmployeeCreate, db: Session = Depend
     db.flush()
 
     # Create default onboarding checklist
-    default_items = [
-        ("Sign employment contract", "Legal", "HR"),
-        ("Provide government-issued ID", "Legal", "HR"),
-        ("Submit bank details for payroll", "Finance", "Finance"),
-        ("Provide emergency contact information", "General", "HR"),
-        ("Company policy acknowledgment", "Compliance", "HR"),
-        ("IT equipment setup", "Technical", "IT"),
-        ("Email and system access setup", "Technical", "IT"),
-        ("Introduction to team members", "Social", "Manager"),
-        ("Complete tax withholding forms (W-4)", "Finance", "Finance"),
-        ("Review employee handbook", "Compliance", "HR"),
-    ]
-    for title, category, assignee in default_items:
-        db.add(models.DBOnboardingItem(
-            client_id=client.id, employee_id=emp.id,
-            title=title, category=category, assigned_to=assignee,
-        ))
-
-    # Ask the new starter for whatever HR has decided it needs from them.
-    seed_default_requirements(db, client.id)
-    assign_document_requests(db, client.id, emp)
+    start_onboarding(db, client.id, emp)
 
     if body.department_id:
         pending_goals = db.query(models.DBDepartmentGoal).filter(
@@ -3958,12 +4166,8 @@ def update_onboarding_item(item_id: int, request: Request, body: dict = None, db
             item.due_date = body["due_date"]
     db.commit()
     emp = db.query(models.DBEmployee).filter(models.DBEmployee.id == item.employee_id).first()
-    if emp:
-        all_items = db.query(models.DBOnboardingItem).filter(models.DBOnboardingItem.employee_id == emp.id).all()
-        if all_items and all(i.is_completed for i in all_items):
-            emp.onboarding_complete = True
-            emp.status = "active"
-            db.commit()
+    if maybe_complete_onboarding(db, emp):
+        db.commit()
     return {"message": "Item updated"}
 
 @app.delete("/api/onboarding/{item_id}")
@@ -7973,6 +8177,11 @@ def review_document_request(req_id: int, request: Request, body: dict = None, db
     ))
     log_audit(db, client.id, f"document_{row.status}", "document_request", row.id,
               row.name, f"Employee {row.employee_id}", request)
+    # Approving the last outstanding document can be what finishes onboarding,
+    # so completion is checked here as well as on the checklist.
+    emp = db.query(models.DBEmployee).filter(
+        models.DBEmployee.id == row.employee_id).first()
+    maybe_complete_onboarding(db, emp)
     db.commit()
     return request_to_dict(row)
 
@@ -8618,6 +8827,11 @@ def hire_candidate(sub_id: int, request: Request, body: dict = None, db: Session
             file_name=doc.file_name, file_type=doc.file_type,
             file_data=doc.file_data, uploaded_by="Recruitment",
         ))
+
+    # Same start as anyone added by hand: a checklist and the documents HR
+    # asks new starters for. Without this a hire arrived with nothing to do
+    # and nothing asked of them.
+    start_onboarding(db, client.id, emp)
 
     sub.hired_employee_id = emp.id
     sub.status = "hired"
