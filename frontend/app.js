@@ -278,6 +278,18 @@ function toggleMobileMenu() {
 }
 window.toggleMobileMenu = toggleMobileMenu;
 
+// A YYYY-MM-DD string for a date as the user sees it.
+// toISOString() prints in UTC, so anywhere east of Greenwich a local midnight
+// becomes the previous day. Every date the app shows or submits is a calendar
+// date, not an instant, so it must be read in local terms.
+function localDate(d) {
+    d = d || new Date();
+    return d.getFullYear() + '-' +
+        String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0');
+}
+window.localDate = localDate;
+
 // --- View Switcher ---
 function showView(viewId) {
     if (viewId !== 'view-invoice-view' && viewId !== 'view-quote-view') _viewCurrency = '';
@@ -302,6 +314,8 @@ function showView(viewId) {
         'invoices-view': 'nav-invoices',
         'create-invoice-view': 'nav-invoices',
         'view-invoice-view': 'nav-invoices',
+        'sales-pipeline-view': 'nav-pipeline',
+        'recurring-view': 'nav-recurring',
         'quotes-view': 'nav-quotes',
         'create-quote-view': 'nav-quotes',
         'view-quote-view': 'nav-quotes',
@@ -325,6 +339,8 @@ function showView(viewId) {
     if (navId) { var navEl = document.getElementById(navId); if (navEl) navEl.classList.add('active'); }
     if (viewId === 'invoices-view' && typeof fetchInvoices === 'function') fetchInvoices();
     if (viewId === 'quotes-view' && typeof fetchQuotes === 'function') fetchQuotes();
+    if (viewId === 'sales-pipeline-view' && typeof loadSalesPipeline === 'function') loadSalesPipeline();
+    if (viewId === 'recurring-view' && typeof loadRecurring === 'function') loadRecurring();
     if (viewId === 'create-invoice-view' && typeof fetchNextInvoiceNumber === 'function') fetchNextInvoiceNumber();
     if (viewId === 'create-invoice-view' && typeof setupContactAutocomplete === 'function') setupContactAutocomplete();
     if (viewId === 'settings-view' && typeof loadGmailStatus === 'function') loadGmailStatus();
@@ -676,6 +692,15 @@ async function fetchNextInvoiceNumber() {
             var data = await response.json();
             var numInput = document.getElementById('inv-number');
             if (numInput && !numInput.value) numInput.value = data.next_number;
+            // The due date follows the tenant's own payment terms rather than
+            // a fixed fortnight.
+            var dueEl = document.getElementById('inv-due-date');
+            var issueEl = document.getElementById('inv-issue-date');
+            if (dueEl && issueEl && issueEl.value && data.payment_terms_days !== undefined) {
+                var base = new Date(issueEl.value + 'T00:00:00');
+                base.setDate(base.getDate() + (parseInt(data.payment_terms_days, 10) || 14));
+                dueEl.value = localDate(base);
+            }
         }
     } catch (e) { console.error(e); }
 }
@@ -2144,7 +2169,11 @@ async function saveSettings() {
         company_address: document.getElementById('settings-company-address') ? document.getElementById('settings-company-address').value : '',
         company_abn: document.getElementById('settings-company-abn') ? document.getElementById('settings-company-abn').value : '',
         company_website: document.getElementById('settings-company-website') ? document.getElementById('settings-company-website').value : '',
-        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'USD'
+        currency: document.getElementById('setting-currency') ? document.getElementById('setting-currency').value : 'USD',
+        invoice_prefix: document.getElementById('setting-invoice-prefix')
+            ? (document.getElementById('setting-invoice-prefix').value || 'INV-') : 'INV-',
+        default_payment_terms: document.getElementById('setting-payment-terms')
+            ? (document.getElementById('setting-payment-terms').value || '14') : '14'
     };
     _appCurrency = payload.currency || _appCurrency;
     try {
@@ -2178,6 +2207,10 @@ async function loadSettings() {
         if (data.company_abn !== undefined) { var el = document.getElementById('settings-company-abn'); if (el) el.value = data.company_abn; }
         if (data.company_website !== undefined) { var el = document.getElementById('settings-company-website'); if (el) el.value = data.company_website; }
         if (data.currency !== undefined) { var el = document.getElementById('setting-currency'); if (el) el.value = data.currency; if (_curPickers['settingsCurrency']) setCurrencyPickerDisplay('settingsCurrency', data.currency); }
+        var prefixEl = document.getElementById('setting-invoice-prefix');
+        if (prefixEl) prefixEl.value = data.invoice_prefix || 'INV-';
+        var termsEl = document.getElementById('setting-payment-terms');
+        if (termsEl) termsEl.value = data.default_payment_terms || 14;
         
         // Render bank details
         var bankContainer = document.getElementById('settings-bank-details-container');
@@ -2297,16 +2330,21 @@ window.handleSettingsLogoUpload = handleSettingsLogoUpload;
 
 // --- Contact Autocomplete ---
 var contactDropdownTimeout = null;
-var contactAutocompleteSetup = false;
+// Keyed by input id, because the quote form wants the same behaviour and a
+// single boolean would let whichever form ran first block the other.
+var contactAutocompleteSetup = {};
 
-function setupContactAutocomplete() {
-    if (contactAutocompleteSetup) return;
-    var wrap = document.getElementById('contact-autocomplete-wrap');
-    if (!wrap) return;
-    var input = document.getElementById('inv-contact');
-    var dropdown = document.getElementById('contact-autocomplete-dropdown');
+function setupContactAutocomplete(inputId, dropdownId, emailId, phoneId) {
+    inputId = inputId || 'inv-contact';
+    dropdownId = dropdownId || 'contact-autocomplete-dropdown';
+    emailId = emailId || (inputId === 'inv-contact' ? 'inv-email' : inputId.replace('-contact', '-email'));
+    phoneId = phoneId || (inputId === 'inv-contact' ? 'inv-phone' : inputId.replace('-contact', '-phone'));
+
+    if (contactAutocompleteSetup[inputId]) return;
+    var input = document.getElementById(inputId);
+    var dropdown = document.getElementById(dropdownId);
     if (!input || !dropdown) return;
-    contactAutocompleteSetup = true;
+    contactAutocompleteSetup[inputId] = true;
 
     input.addEventListener('input', function() {
         var val = input.value.trim();
@@ -2324,9 +2362,9 @@ function setupContactAutocomplete() {
                         div.innerHTML = '<div class="ca-icon">' + initial + '</div><div><div class="ca-name">' + esc(c.name) + '</div>' + (c.email ? '<div class="ca-email">' + esc(c.email) + '</div>' : '') + '</div>';
                         div.addEventListener('click', function() {
                             input.value = c.name;
-                            var emailEl = document.getElementById('inv-email');
+                            var emailEl = document.getElementById(emailId);
                             if (emailEl && c.email) emailEl.value = c.email;
-                            var phoneEl = document.getElementById('inv-phone');
+                            var phoneEl = document.getElementById(phoneId);
                             if (phoneEl && c.phone_number) phoneEl.value = c.phone_number;
                             dropdown.classList.remove('show');
                         });
@@ -2542,7 +2580,7 @@ window.viewEmployee = viewEmployee;
 async function showAddEmployeeModal() {
     document.getElementById('add-employee-modal').style.display = 'flex';
     document.getElementById('add-employee-form').reset();
-    var today = new Date().toISOString().split('T')[0];
+    var today = localDate(new Date());
     var startEl = document.getElementById('emp-start-date');
     if (startEl) startEl.value = today;
     // Load departments and employees for dropdowns
@@ -3133,7 +3171,7 @@ async function openOnbEmpDetail(empId) {
         for (var cat in categories) {
             list.insertAdjacentHTML('beforeend', '<div style="font-weight:600;font-size:0.82rem;color:var(--text-secondary);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.5px;">' + cat + '</div>');
             categories[cat].forEach(function(item) {
-                var isOverdue = !item.is_completed && item.due_date && item.due_date < new Date().toISOString().split('T')[0];
+                var isOverdue = !item.is_completed && item.due_date && item.due_date < localDate(new Date());
                 list.insertAdjacentHTML('beforeend',
                     '<div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:6px;background:rgba(255,255,255,0.02);">' +
                         '<input type="checkbox" ' + (item.is_completed ? 'checked' : '') + ' onchange="toggleOnbItem(' + item.id + ', this.checked)" style="accent-color:var(--primary-color);cursor:pointer;">' +
@@ -3392,7 +3430,7 @@ window.searchPayslips = searchPayslips;
 // looped one HTTP request per employee from the browser, which had no
 // atomicity, ignored worked hours, and reported failures only as a count.
 async function batchGeneratePayslips() {
-    var today = new Date().toISOString().split('T')[0];
+    var today = localDate(new Date());
     var firstOfMonth = today.slice(0, 8) + '01';
     var periodStart = prompt('Period start date (YYYY-MM-DD):', firstOfMonth);
     if (!periodStart) return;
@@ -3517,11 +3555,11 @@ async function showGeneratePayslipModal() {
         empContainer.innerHTML = '<input type="hidden" id="ps-employee-id" value="' + (currentEmployeeId || '') + '">';
     }
     var today = new Date();
-    var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    var firstDay = localDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    var lastDay = localDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
     document.getElementById('ps-period-start').value = firstDay;
     document.getElementById('ps-period-end').value = lastDay;
-    document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
+    document.getElementById('ps-pay-date').value = localDate(today);
     if (currentEmployeeId) setTimeout(function() { autoFetchPayDetails(); }, 200);
 }
 window.showGeneratePayslipModal = showGeneratePayslipModal;
@@ -3531,11 +3569,11 @@ async function showGeneratePayslipModalForNew() {
     document.getElementById('generate-payslip-form').reset();
     document.getElementById('ps-preview').style.display = 'none';
     var today = new Date();
-    var firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    var lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    var firstDay = localDate(new Date(today.getFullYear(), today.getMonth(), 1));
+    var lastDay = localDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
     document.getElementById('ps-period-start').value = firstDay;
     document.getElementById('ps-period-end').value = lastDay;
-    document.getElementById('ps-pay-date').value = today.toISOString().split('T')[0];
+    document.getElementById('ps-pay-date').value = localDate(today);
     var empContainer = document.getElementById('ps-employee-id-container');
     if (!empContainer) return;
     try {
@@ -4010,7 +4048,7 @@ async function clockInOut(empId) {
     var now = new Date();
     var timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
     var todayRecords = allAttendance.filter(function(r) { return r.employee_id === empId; });
-    var todayRecord = todayRecords.find(function(r) { return r.date === new Date().toISOString().split('T')[0]; });
+    var todayRecord = todayRecords.find(function(r) { return r.date === localDate(new Date()); });
     try {
         if (!todayRecord || !todayRecord.clock_in) {
             var res = await fetch('/api/attendance/clock-in', {
@@ -4343,7 +4381,7 @@ async function loadOvertimeTab() {
         emps.forEach(function(e) { sel.insertAdjacentHTML('beforeend', '<option value="' + e.id + '">' + esc(e.first_name) + ' ' + esc(e.last_name) + '</option>'); });
         }
         var otDate = document.getElementById('ot-date');
-        if (otDate && !otDate.value) otDate.value = new Date().toISOString().split('T')[0];
+        if (otDate && !otDate.value) otDate.value = localDate(new Date());
         loadOvertimeLogs();
     } catch (e) { console.error(e); }
 }
@@ -4471,8 +4509,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     });
     // Set default dates
-    var today = new Date().toISOString().split('T')[0];
-    var dueDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];    
+    var today = localDate(new Date());
+    var dueDate = localDate(new Date(Date.now() + 14 * 86400000));    
     var urlParams = new URLSearchParams(window.location.search);
     
     // Enforce portal separation based on the physical file
@@ -5046,7 +5084,7 @@ async function hireCandidate() {
     if (!recCurrentSubId) return;
     var jobTitle = prompt('Job title for the new employee:', '');
     if (jobTitle === null) return;
-    var startDate = prompt('Start date (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+    var startDate = prompt('Start date (YYYY-MM-DD):', localDate(new Date()));
     if (startDate === null) return;
     var salary = prompt('Salary per pay period (0 if hourly):', '0');
     if (salary === null) return;
@@ -5195,7 +5233,7 @@ function renderLeaveView() {
     var approved = 0;
     var rejected = 0;
     var awayToday = 0;
-    var todayStr = new Date().toISOString().split('T')[0];
+    var todayStr = localDate(new Date());
 
     data.forEach(function(l) {
         if (l.status === 'pending') pending++;
@@ -5817,7 +5855,7 @@ async function showAddBillModal() {
     document.getElementById('bill-vendor').value = '';
     document.getElementById('bill-vendor-email').value = '';
     document.getElementById('bill-category').value = 'general';
-    document.getElementById('bill-issue-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('bill-issue-date').value = localDate(new Date());
     document.getElementById('bill-due-date').value = '';
     document.getElementById('bill-amount').value = '0';
     document.getElementById('bill-tax').value = '0';
@@ -5838,7 +5876,44 @@ function closeAddBillModal() {
 }
 window.closeAddBillModal = closeAddBillModal;
 
+
+// Bills used to make you type the tax figure yourself, which ignored the rates
+// the tenant had defined. The amount is still what gets stored; the picker
+// just works it out.
+function applyBillTaxRate() {
+    var sel = document.getElementById('bill-tax-rate');
+    var amountEl = document.getElementById('bill-amount');
+    var taxEl = document.getElementById('bill-tax');
+    if (!sel || !amountEl || !taxEl) return;
+    var rate = parseFloat(sel.value);
+    if (isNaN(rate)) return;                 // "Enter it myself"
+    var amount = parseFloat(amountEl.value) || 0;
+    taxEl.value = (amount * rate / 100).toFixed(2);
+    calcBillTotal();
+}
+window.applyBillTaxRate = applyBillTaxRate;
+
+function renderBillTaxRates() {
+    var sel = document.getElementById('bill-tax-rate');
+    if (!sel) return;
+    var current = sel.value;
+    var opts = '<option value="">Enter it myself</option>';
+    (_taxRates || []).forEach(function (t) {
+        opts += '<option value="' + esc(t.percent) + '">' + esc(t.label) + '</option>';
+    });
+    sel.innerHTML = opts;
+    sel.value = current;
+}
+window.renderBillTaxRates = renderBillTaxRates;
+
 function calcBillTotal() {
+    // Keep the tax figure in step when the amount changes under a chosen rate.
+    var rateSel = document.getElementById('bill-tax-rate');
+    if (rateSel && rateSel.value !== '' && !calcBillTotal._reentrant) {
+        calcBillTotal._reentrant = true;
+        applyBillTaxRate();
+        calcBillTotal._reentrant = false;
+    }
     var amount = parseFloat(document.getElementById('bill-amount').value) || 0;
     var tax = parseFloat(document.getElementById('bill-tax').value) || 0;
     document.getElementById('bill-total').value = (amount + tax).toFixed(2);
@@ -8082,8 +8157,8 @@ async function prepareNewQuote() {
     var body = document.getElementById('quote-line-items-body');
     if (body) { body.innerHTML = ''; addLineItemRow('quote'); }
 
-    var today = new Date().toISOString().split('T')[0];
-    var expiry = new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    var today = localDate(new Date());
+    var expiry = localDate(new Date(Date.now() + 30 * 86400000));
     var issueEl = document.getElementById('quote-issue-date');
     var expiryEl = document.getElementById('quote-expiry-date');
     if (issueEl) issueEl.value = today;
@@ -8100,6 +8175,18 @@ async function prepareNewQuote() {
 
     calculateTotals('quote');
     showView('create-quote-view');
+    // Same pickers as the invoice form, rather than a bare text box.
+    if (typeof setupCurrencyPicker === 'function' &&
+        document.getElementById('quote-currency-display') && !_curPickers['quoteCurrency']) {
+        setupCurrencyPicker('quoteCurrency', 'quote-currency-display', 'quote-currency',
+                            'quote-currency-list', 'quote-currency-search', 'quote-currency-items');
+    }
+    if (typeof setCurrencyPickerDisplay === 'function' && _curPickers['quoteCurrency']) {
+        setCurrencyPickerDisplay('quoteCurrency', _appCurrency);
+    }
+    if (typeof setupContactAutocomplete === 'function') {
+        setupContactAutocomplete('quote-contact', 'quote-contact-dropdown');
+    }
 }
 window.prepareNewQuote = prepareNewQuote;
 
@@ -8411,6 +8498,7 @@ function refreshTaxRateSelects() {
         sel.innerHTML = taxOptionsHtml(current);
         if (current) sel.value = current;
     });
+    renderBillTaxRates();
     if (typeof calculateTotals === 'function') {
         Object.keys(DOC_FORM_SCOPES).forEach(function (scope) { calculateTotals(scope); });
     }
@@ -8612,3 +8700,199 @@ async function finishOnboarding(empId) {
     } catch (e) { showToast('Failed: ' + e.message, 'error'); }
 }
 window.finishOnboarding = finishOnboarding;
+
+// ==================== SALES PIPELINE ====================
+// The money flow in one place. Like the onboarding board, stages come from the
+// documents themselves, so nothing is dragged: send a quote, accept it,
+// convert it, take the payment, and the card moves because the document did.
+
+async function loadSalesPipeline() {
+    var host = document.getElementById('sales-pipeline-board');
+    if (!host) return;
+    try {
+        var res = await fetch('/api/sales/pipeline', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        renderSalesPipeline(await res.json());
+    } catch (e) { console.error('Sales pipeline load failed:', e); }
+}
+window.loadSalesPipeline = loadSalesPipeline;
+
+function renderSalesPipeline(data) {
+    var host = document.getElementById('sales-pipeline-board');
+    if (!host) return;
+
+    var summary = document.getElementById('sales-pipeline-summary');
+    if (summary) {
+        var pipelineValue = (data.stages || [])
+            .filter(function (s) { return ['drafted', 'sent', 'accepted'].indexOf(s.key) !== -1; })
+            .reduce(function (t, s) { return t + (s.value || 0); }, 0);
+        summary.innerHTML =
+            statTile('In the pipeline', formatCurrency(pipelineValue), 'quotes not yet invoiced') +
+            statTile('Outstanding', formatCurrency(data.outstanding || 0), 'invoiced, not paid') +
+            statTile('Overdue', String(data.overdue_count || 0),
+                     (data.overdue_count === 1 ? 'invoice' : 'invoices') + ' past due') +
+            statTile('Lost', formatCurrency((data.lost && data.lost.value) || 0),
+                     'declined or expired');
+    }
+
+    host.innerHTML = (data.stages || []).map(function (stage) {
+        var cards = (stage.cards || []).map(salesCardHtml).join('') ||
+            '<div class="onb-empty">Nothing here</div>';
+        return '<div class="onb-col">' +
+            '<div class="onb-col-head"><strong>' + esc(stage.label) + '</strong>' +
+                '<span class="onb-col-count">' + stage.count + '</span></div>' +
+            '<div class="onb-col-hint">' + formatCurrency(stage.value || 0) + '</div>' +
+            cards +
+        '</div>';
+    }).join('');
+}
+
+function statTile(label, value, hint) {
+    return '<div class="stat-card is-centered" style="cursor:default;">' +
+        '<div style="font-size:0.8rem;color:var(--text-secondary);">' + esc(label) + '</div>' +
+        '<div style="font-size:1.4rem;font-weight:700;margin-top:4px;">' + esc(value) + '</div>' +
+        '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">' + esc(hint) + '</div>' +
+    '</div>';
+}
+
+function salesCardHtml(c) {
+    var open = c.kind === 'quote'
+        ? 'viewQuote(\'' + encodeURIComponent(c.number) + '\')'
+        : 'viewInvoice(\'' + encodeURIComponent(c.number) + '\')';
+    var line = c.kind === 'invoice' && c.is_overdue
+        ? '<div class="onb-card-meta" style="color:var(--danger-color);">' +
+          c.days_overdue + ' day(s) overdue</div>'
+        : '<div class="onb-card-meta">' + esc(c.due_or_expiry || '') + '</div>';
+
+    return '<div class="onb-card' + (c.is_overdue ? ' is-blocked' : '') + '" ' +
+        'style="cursor:pointer;" onclick="' + open + '">' +
+        '<div class="onb-card-name">' + esc(c.to || '-') + '</div>' +
+        '<div class="onb-card-sub">' + esc(c.number) +
+            (c.title ? ' · ' + esc(c.title) : '') + '</div>' +
+        '<div style="font-weight:700;margin-top:6px;">' +
+            formatCurrency(c.total, c.currency) + '</div>' +
+        line +
+    '</div>';
+}
+
+// ==================== RECURRING INVOICES ====================
+
+var allRecurring = [];
+
+async function loadRecurring() {
+    var tbody = document.getElementById('recurring-table-body');
+    if (!tbody) return;
+    try {
+        var res = await fetch('/api/recurring-invoices', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        allRecurring = await res.json();
+        renderRecurring();
+    } catch (e) { console.error('Recurring load failed:', e); }
+}
+window.loadRecurring = loadRecurring;
+
+function renderRecurring() {
+    var tbody = document.getElementById('recurring-table-body');
+    if (!tbody) return;
+    var count = document.getElementById('recurring-count');
+    if (count) count.textContent = allRecurring.length +
+        (allRecurring.length === 1 ? ' item' : ' items');
+
+    if (!allRecurring.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-secondary);">' +
+            'No recurring invoices yet. Set one up and it raises itself.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = allRecurring.map(function (r) {
+        return '<tr>' +
+            '<td><strong>' + esc(r.name || '-') + '</strong></td>' +
+            '<td>' + esc(r.to || '-') + '</td>' +
+            '<td>' + esc(r.frequency) + '</td>' +
+            '<td>' + esc(r.next_run || '-') + '</td>' +
+            '<td class="text-right"><strong>' + formatCurrency(r.total, r.currency) + '</strong></td>' +
+            '<td class="text-right">' + (r.invoices_created || 0) + '</td>' +
+            '<td><span class="status-pill ' + (r.is_active ? 'status-active' : 'status-terminated') + '">' +
+                (r.is_active ? 'Active' : 'Stopped') + '</span></td>' +
+            '<td class="text-right">' +
+                '<button class="btn btn-outline btn-sm" onclick="stopRecurring(' + r.id + ')">Stop</button>' +
+            '</td></tr>';
+    }).join('');
+}
+
+// Reuses the invoice editor: fill it in, then say how often instead of saving once.
+async function prepareNewRecurring() {
+    showView('create-invoice-view');
+    await new Promise(function (r) { setTimeout(r, 200); });
+    showToast('Fill in the invoice, then use "Make recurring"', 'info');
+}
+window.prepareNewRecurring = prepareNewRecurring;
+
+async function makeInvoiceRecurring() {
+    var contact = (document.getElementById('inv-contact') || {}).value || '';
+    if (!contact.trim()) { showToast('Customer name is required', 'error'); return; }
+
+    var line_items = [];
+    scopedLineRows('invoice').forEach(function (row) {
+        var name = row.querySelector('.item-name') ? row.querySelector('.item-name').value : '';
+        var desc = row.querySelector('.item-desc') ? row.querySelector('.item-desc').value : '';
+        var qty = parseFloat(row.querySelector('.item-qty') ? row.querySelector('.item-qty').value : 0) || 0;
+        var price = parseFloat(row.querySelector('.item-price') ? row.querySelector('.item-price').value : 0) || 0;
+        var disc = parseFloat(row.querySelector('.item-disc') ? row.querySelector('.item-disc').value : 0) || 0;
+        var account = row.querySelector('.item-account') ? row.querySelector('.item-account').value : '200 - Sales';
+        var tax_rate = row.querySelector('.item-tax-rate') ? row.querySelector('.item-tax-rate').value : 'No Tax';
+        if (name || desc || qty > 0 || price > 0) {
+            line_items.push({ name: name, description: desc, qty: qty, price: price,
+                              disc: disc, account: account, tax_rate: tax_rate });
+        }
+    });
+    if (!line_items.length) { showToast('Add at least one line item', 'error'); return; }
+
+    var frequency = prompt('How often? weekly, monthly, quarterly or yearly', 'monthly');
+    if (!frequency) return;
+    var firstIssue = prompt('First issue date (YYYY-MM-DD)',
+        (document.getElementById('inv-issue-date') || {}).value ||
+        localDate(new Date()));
+    if (!firstIssue) return;
+
+    function val(id) { var el = document.getElementById(id); return el ? el.value : ''; }
+    try {
+        var res = await fetch('/api/recurring-invoices', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                name: contact + ' · ' + frequency,
+                contact: contact,
+                email: val('inv-email'),
+                phone_number: val('inv-phone'),
+                reference: val('inv-ref'),
+                line_items: line_items,
+                tax_type: val('tax-type') || 'exclusive',
+                currency: val('inv-currency') || (_appCurrency || 'GBP'),
+                bank_details: val('inv-bank-account'),
+                frequency: (frequency || 'monthly').trim().toLowerCase(),
+                next_run: firstIssue.trim(),
+                payment_terms_days: 14,
+            }),
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not set that up'); return; }
+        showToast('Recurring invoice set up. Next issue ' + data.next_run, 'success');
+        await loadRecurring();
+        showView('recurring-view');
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.makeInvoiceRecurring = makeInvoiceRecurring;
+
+async function stopRecurring(id) {
+    if (!confirm('Stop this recurring invoice? Invoices already raised are kept.')) return;
+    try {
+        var res = await fetch('/api/recurring-invoices/' + id, {
+            method: 'DELETE', credentials: 'same-origin',
+        });
+        var data = await res.json().catch(function () { return {}; });
+        if (!res.ok) { reportApiError(res, data, 'Could not stop it'); return; }
+        showToast('Stopped', 'success');
+        await loadRecurring();
+    } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+}
+window.stopRecurring = stopRecurring;

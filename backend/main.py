@@ -1333,7 +1333,9 @@ def get_invoice(number: str, request: Request, db: Session = Depends(get_db)):
 @app.get("/api/next-invoice-number")
 def get_next_invoice_number(request: Request, db: Session = Depends(get_db)):
     client = get_client_user(request, db)
-    return {"next_number": next_sequence_number(db, models.DBInvoice, client.id, "INV-")}
+    return {"next_number": next_sequence_number(
+        db, models.DBInvoice, client.id, invoice_prefix_for(db, client.id)),
+        "payment_terms_days": payment_terms_for(db, client.id)}
 
 def validate_line_items(line_items):
     """Reject payloads that would silently produce a nonsense invoice."""
@@ -1360,6 +1362,34 @@ def validate_invoice_dates(issue_date, due_date):
         raise HTTPException(status_code=400, detail="Due date must be in YYYY-MM-DD format")
     if issue and due and due < issue:
         raise HTTPException(status_code=400, detail="Due date cannot be before the issue date")
+
+
+def tenant_setting(db, client_id, key, default=""):
+    row = db.query(models.DBSettings).filter(
+        models.DBSettings.client_id == client_id, models.DBSettings.key == key
+    ).first()
+    return (row.value if row and row.value not in (None, "") else default)
+
+
+def invoice_prefix_for(db, client_id):
+    """The tenant's own numbering prefix.
+
+    Stored as a setting for a long time and read by nothing, so every tenant
+    was stuck on INV- whatever they put in the box.
+    """
+    raw = str(tenant_setting(db, client_id, "invoice_prefix", "INV-")).strip()
+    # A prefix has to be something numbers can follow, and the sequence reader
+    # splits on "-", so keep it simple rather than accept anything at all.
+    cleaned = "".join(c for c in raw if c.isalnum() or c in "-_/")[:12]
+    return cleaned or "INV-"
+
+
+def payment_terms_for(db, client_id):
+    try:
+        days = int(float(tenant_setting(db, client_id, "default_payment_terms", 14)))
+    except (TypeError, ValueError):
+        return 14
+    return days if 0 <= days <= 365 else 14
 
 
 def next_sequence_number(db, model, client_id, prefix, field="number"):
@@ -1406,7 +1436,7 @@ def create_invoice(invoice: InvoiceCreate, request: Request, db: Session = Depen
     if invoice.invoice_number and invoice.invoice_number.strip() != "":
         number = invoice.invoice_number.strip()
     else:
-        number = next_sequence_number(db, models.DBInvoice, client.id, "INV-")
+        number = next_sequence_number(db, models.DBInvoice, client.id, invoice_prefix_for(db, client.id))
 
     clash = db.query(models.DBInvoice).filter(
         models.DBInvoice.client_id == client.id, models.DBInvoice.number == number
@@ -2734,7 +2764,7 @@ def delete_recurring(rec_id: int, request: Request, db: Session = Depends(get_db
 def issue_recurring_invoice(db, t, on_date):
     """Raise one invoice from a template and move the schedule on."""
     subtotal, tax, total = compute_invoice_totals(t.line_items, t.tax_type)
-    number = next_sequence_number(db, models.DBInvoice, t.client_id, "INV-")
+    number = next_sequence_number(db, models.DBInvoice, t.client_id, invoice_prefix_for(db, t.client_id))
     due = on_date + timedelta(days=t.payment_terms_days or 14)
 
     inv = models.DBInvoice(
@@ -3160,6 +3190,109 @@ def employee_forgot_password(body: ForgotPasswordIn, background_tasks: Backgroun
         client_id=emp.client_id,
     )
     return generic
+
+
+# ============================================================================
+# SALES PIPELINE - quotes and invoices as one flow instead of two lists
+# ============================================================================
+
+SALES_STAGES = [
+    ("drafted",  "Drafted",   "Not sent to anyone yet"),
+    ("sent",     "Sent",      "Waiting on the customer"),
+    ("accepted", "Accepted",  "Agreed, not yet invoiced"),
+    ("invoiced", "Invoiced",  "Owed but not paid"),
+    ("paid",     "Paid",      "Money in"),
+]
+
+
+def sales_stage_for_quote(q):
+    """Where a quote sits. A quote that has become an invoice leaves the quote
+    stages entirely - its invoice carries it from there."""
+    status = quote_display_status(q)
+    if status == "Invoiced":
+        return None
+    if status == "Accepted":
+        return "accepted"
+    if status in ("Declined", "Expired"):
+        return None          # off the board; still counted as lost
+    if status == "Sent":
+        return "sent"
+    return "drafted"
+
+
+def sales_stage_for_invoice(inv):
+    if (inv.status or "") == "Void":
+        return None
+    if (inv.due or 0) <= 0 and (inv.paid or 0) > 0:
+        return "paid"
+    if (inv.status or "") == "Draft":
+        return "drafted"
+    return "invoiced"
+
+
+@app.get("/api/sales/pipeline")
+def sales_pipeline(request: Request, db: Session = Depends(get_db)):
+    """The money flow in one place, worked out from the documents themselves.
+
+    Nothing is dragged between columns: send a quote, accept it, convert it,
+    take the payment, and the card moves because the document moved.
+    """
+    client = get_client_user(request, db)
+    today = datetime.now().date()
+
+    buckets = {key: [] for key, _, _ in SALES_STAGES}
+    lost = []
+
+    for q in db.query(models.DBQuote).filter(
+            models.DBQuote.client_id == client.id).all():
+        stage = sales_stage_for_quote(q)
+        _, _, total = compute_invoice_totals(q.line_items, q.tax_type)
+        card = {
+            "kind": "quote", "number": q.number, "to": q.to_contact or "",
+            "title": q.title or "", "total": total,
+            "currency": q.currency or (client.currency or ""),
+            "date": q.issue_date or "", "due_or_expiry": q.expiry_date or "",
+            "status": quote_display_status(q),
+            "invoice_number": q.invoice_number or "",
+        }
+        if stage:
+            buckets[stage].append(card)
+        elif card["status"] in ("Declined", "Expired"):
+            lost.append(card)
+
+    for inv in db.query(models.DBInvoice).filter(
+            models.DBInvoice.client_id == client.id).all():
+        stage = sales_stage_for_invoice(inv)
+        if not stage:
+            continue
+        overdue_days = invoice_overdue_days(inv, today)
+        buckets[stage].append({
+            "kind": "invoice", "number": inv.number, "to": inv.to_contact or "",
+            "title": inv.ref or "", "total": money((inv.paid or 0) + (inv.due or 0)),
+            "outstanding": inv.due or 0,
+            "currency": inv.currency or (client.currency or ""),
+            "date": inv.issue_date or "", "due_or_expiry": inv.due_date or "",
+            "status": inv.status or "", "is_overdue": overdue_days > 0,
+            "days_overdue": overdue_days,
+        })
+
+    for rows in buckets.values():
+        # Overdue first, then biggest, because that is the order you act in.
+        rows.sort(key=lambda c: (not c.get("is_overdue"), -(c.get("total") or 0)))
+
+    return {
+        "stages": [{
+            "key": key, "label": label, "hint": hint,
+            "count": len(buckets[key]),
+            "value": money(sum(c.get("total") or 0 for c in buckets[key])),
+            "cards": buckets[key][:40],
+        } for key, label, hint in SALES_STAGES],
+        "lost": {"count": len(lost),
+                 "value": money(sum(c.get("total") or 0 for c in lost))},
+        "outstanding": money(sum(
+            c.get("outstanding") or 0 for c in buckets["invoiced"])),
+        "overdue_count": sum(1 for c in buckets["invoiced"] if c.get("is_overdue")),
+    }
 
 
 # ============================================================================
@@ -3868,7 +4001,7 @@ def convert_quote_to_invoice(number: str, request: Request,
     validate_invoice_dates(issue_date, due_date)
 
     subtotal, tax, total = compute_invoice_totals(q.line_items, q.tax_type)
-    inv_number = next_sequence_number(db, models.DBInvoice, client.id, "INV-")
+    inv_number = next_sequence_number(db, models.DBInvoice, client.id, invoice_prefix_for(db, client.id))
 
     invoice = models.DBInvoice(
         client_id=client.id,

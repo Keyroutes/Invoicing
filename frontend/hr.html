@@ -10,8 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>A</text></svg>">
-    <link rel="stylesheet" href="styles.css?v=30">
-    <link rel="stylesheet" href="mobile.css?v=30">
+    <link rel="stylesheet" href="styles.css?v=31">
+    <link rel="stylesheet" href="mobile.css?v=31">
 </head>
 <body>
     <a class="skip-link" href="#main-content-region">Skip to main content</a>
@@ -44,6 +44,8 @@
                     <a href="#" class="nav-item" id="nav-invoices" onclick="event.preventDefault();showView('invoices-view')" data-portal="invoicing" style="display: none;">Invoices</a>
                     <a href="#" class="nav-item" id="nav-bills" onclick="event.preventDefault();showView('bills-view')" data-portal="invoicing" style="display: none;">Bills</a>
                     <a href="#" class="nav-item" id="nav-quotes" onclick="event.preventDefault();showView('quotes-view')" data-portal="invoicing" style="display: none;">Quotes</a>
+                    <a href="#" class="nav-item" id="nav-pipeline" onclick="event.preventDefault();showView('sales-pipeline-view')" data-portal="invoicing" style="display: none;">Pipeline</a>
+                    <a href="#" class="nav-item" id="nav-recurring" onclick="event.preventDefault();showView('recurring-view')" data-portal="invoicing" style="display: none;">Recurring</a>
                     <a href="#" class="nav-item" id="nav-reports" onclick="event.preventDefault();showView('reports-view')" data-portal="invoicing" style="display: none;">Reports</a>
                     <a href="#" class="nav-item" id="nav-contacts" onclick="event.preventDefault();showView('contacts-view')" data-portal="invoicing" style="display: none;">Contacts</a>
                     <a href="#" class="nav-item active" id="nav-people" onclick="event.preventDefault();showView('employees-view')" data-portal="hr">Employees</a>
@@ -229,6 +231,55 @@
                     </div>
                 </div>
 
+                <!-- ========== SALES PIPELINE ========== -->
+                <div id="sales-pipeline-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Sales Pipeline</h1></div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-outline" onclick="prepareNewQuote()">New Quote</button>
+                            <button class="btn btn-primary" onclick="showView('create-invoice-view')">New Invoice</button>
+                        </div>
+                    </div>
+                    <div id="sales-pipeline-summary" class="grid-4 mb-24"></div>
+                    <div class="glass-widget">
+                        <div class="widget-content">
+                            <div id="sales-pipeline-board" class="onb-board"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ========== RECURRING INVOICES ========== -->
+                <div id="recurring-view" class="view-section dashboard" style="display:none;">
+                    <div class="invoices-header-area">
+                        <div><h1>Recurring Invoices</h1></div>
+                        <div class="invoices-actions">
+                            <button class="btn btn-primary" onclick="prepareNewRecurring()">New Recurring Invoice</button>
+                        </div>
+                    </div>
+                    <div class="widget">
+                        <div class="table-actions">
+                            <span id="recurring-count" style="font-size:0.85rem;color:var(--text-secondary);">0 items</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Customer</th>
+                                        <th>Every</th>
+                                        <th>Next issue</th>
+                                        <th class="text-right">Amount</th>
+                                        <th class="text-right">Raised</th>
+                                        <th>Status</th>
+                                        <th class="text-right"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recurring-table-body"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ========== QUOTES ========== -->
                 <div id="quotes-view" class="view-section dashboard" style="display:none;">
                     <div class="invoices-header-area">
@@ -295,7 +346,10 @@
                                 <div class="invoice-top-grid grid-3" style="margin-bottom:32px;">
                                     <div class="form-group">
                                         <label>Customer Name *</label>
-                                        <input type="text" id="quote-contact" class="form-control" required placeholder="Who is this quote for?" autocomplete="off">
+                                        <div id="quote-contact-wrap" class="contact-autocomplete-wrap">
+                                            <input type="text" id="quote-contact" class="form-control" required placeholder="Start typing a name..." autocomplete="off">
+                                            <div id="quote-contact-dropdown" class="contact-autocomplete-dropdown"></div>
+                                        </div>
                                     </div>
                                     <div class="form-group">
                                         <label>Email</label>
@@ -335,7 +389,14 @@
                                     </div>
                                     <div class="form-group">
                                         <label>Currency</label>
-                                        <input type="text" id="quote-currency" class="form-control" placeholder="GBP">
+                                        <div class="currency-picker">
+                                            <input type="text" id="quote-currency-display" class="form-control" placeholder="Select currency" readonly onclick="toggleCurrencyPicker('quoteCurrency', event)">
+                                            <input type="hidden" id="quote-currency" value="">
+                                            <div class="currency-picker-list" id="quote-currency-list" style="display:none;">
+                                                <input type="text" class="currency-search" id="quote-currency-search" placeholder="Search currency or country..." oninput="renderCurrencyItems('quoteCurrency', this.value)">
+                                                <div class="currency-items" id="quote-currency-items"></div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="form-group" style="margin-bottom:24px;">
@@ -470,6 +531,7 @@
                         </div>
                         <div class="invoices-actions">
                             <button class="btn btn-outline" onclick="previewInvoice()">Preview</button>
+                            <button class="btn btn-outline" onclick="makeInvoiceRecurring()">Make recurring</button>
                             <button class="btn btn-outline" onclick="submitComplexInvoice('Draft')">Save as draft</button>
                             <button class="btn btn-primary" onclick="submitComplexInvoice('Awaiting Payment')">Approve & Send</button>
                         </div>
@@ -731,6 +793,9 @@
                                 <div class="form-group"><label>Issue Date *</label><input type="date" id="bill-issue-date" class="form-control"></div>
                                 <div class="form-group"><label>Due Date *</label><input type="date" id="bill-due-date" class="form-control"></div>
                                 <div class="form-group"><label>Amount</label><input type="number" id="bill-amount" class="form-control" step="0.01" value="0" oninput="calcBillTotal()"></div>
+                                <div class="form-group"><label>Tax rate</label>
+                                    <select id="bill-tax-rate" class="form-control" onchange="applyBillTaxRate()"></select>
+                                </div>
                                 <div class="form-group"><label>Tax</label><input type="number" id="bill-tax" class="form-control" step="0.01" value="0" oninput="calcBillTotal()"></div>
                                 <div class="form-group"><label>Total</label><input type="number" id="bill-total" class="form-control" step="0.01" value="0" readonly style="background:rgba(255,255,255,0.05);"></div>
                                 <div class="form-group"><label>Reference</label><input type="text" id="bill-reference" class="form-control" placeholder="PO number, invoice ref..."></div>
@@ -904,6 +969,14 @@
                                 <div class="form-group"><label>Company Address</label><input type="text" id="settings-company-address" class="form-control" placeholder="123 Business St, City"></div>
                                 <div class="form-group"><label>ABN / Tax ID</label><input type="text" id="settings-company-abn" class="form-control" placeholder="12 345 678 901"></div>
                                 <div class="form-group"><label>Website</label><input type="text" id="settings-company-website" class="form-control" placeholder="www.company.com"></div>
+                                <div class="form-group"><label>Invoice number prefix</label>
+                                    <input type="text" id="setting-invoice-prefix" class="form-control" placeholder="INV-" maxlength="12">
+                                    <p style="color:var(--text-secondary);font-size:0.8rem;margin-top:4px;">Numbering restarts at 0001 for a new prefix. Invoices already issued keep their numbers.</p>
+                                </div>
+                                <div class="form-group"><label>Default payment terms (days)</label>
+                                    <input type="number" id="setting-payment-terms" class="form-control" min="0" max="365" placeholder="14">
+                                    <p style="color:var(--text-secondary);font-size:0.8rem;margin-top:4px;">How far ahead the due date lands on a new invoice.</p>
+                                </div>
                                 <div class="form-group"><label>Currency</label>
                                     <div class="currency-picker">
                                         <input type="text" id="setting-currency-display" class="form-control" placeholder="Select currency" readonly onclick="toggleCurrencyPicker('settingsCurrency', event)">
@@ -2365,7 +2438,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="app.js?v=30"></script>
+    <script src="app.js?v=31"></script>
 
     <!-- AI Core Orb -->
     <div class="ai-core" onclick="toggleAIChat()" role="button" tabindex="0" aria-label="Open the assistant" title="Ask the assistant" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleAIChat();}">
