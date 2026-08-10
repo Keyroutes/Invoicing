@@ -978,5 +978,27 @@ def ensure_columns():
             except Exception:
                 MIGRATION_ERRORS.append(f"migration step 35: {sys.exc_info()[1]}")
 
+            # Password reset links
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS password_resets (
+                        id SERIAL PRIMARY KEY,
+                        user_type VARCHAR DEFAULT 'client',
+                        client_id INTEGER REFERENCES clients(id),
+                        employee_id INTEGER REFERENCES employees(id),
+                        token_hash VARCHAR NOT NULL,
+                        expires_at VARCHAR NOT NULL,
+                        used_at VARCHAR DEFAULT '',
+                        requested_ip VARCHAR DEFAULT '',
+                        created_at VARCHAR DEFAULT (NOW()::TEXT)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_password_resets_token ON password_resets (token_hash)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_password_resets_client_id ON password_resets (client_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_password_resets_employee_id ON password_resets (employee_id)"))
+                conn.commit()
+            except Exception:
+                MIGRATION_ERRORS.append(f"migration step 36: {sys.exc_info()[1]}")
+
     except Exception as e:
         print(f"Column check skipped: {e}")

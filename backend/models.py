@@ -114,6 +114,27 @@ class DBLineItem(Base):
     invoice = relationship("DBInvoice", back_populates="line_items")
 
 
+class DBPasswordReset(Base):
+    """One password reset link.
+
+    Only a hash of the token is kept, the same way passwords are, so a copy of
+    this table is not a set of working reset links.
+    """
+    __tablename__ = "password_resets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Owners and staff both need a way back in, and the mechanism is identical,
+    # so one table serves both rather than two that can drift apart.
+    user_type = Column(String, default="client", index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True, index=True)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
+    token_hash = Column(String, nullable=False, index=True)
+    expires_at = Column(String, nullable=False)
+    used_at = Column(String, default="")
+    requested_ip = Column(String, default="")
+    created_at = Column(String, default=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
 class DBTaxRate(Base):
     """A tax rate the tenant can pick when writing a line.
 

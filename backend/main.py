@@ -516,10 +516,7 @@ def client_register(body: ClientRegister, request: Request, db: Session = Depend
     ip = request.client.host if request.client else "unknown"
     if rate_limiter.is_rate_limited(f"register:{ip}", max_requests=5, window=300):
         raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.")
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    if not any(c.isupper() for c in body.password) or not any(c.isdigit() for c in body.password):
-        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter and one number")
+    validate_password_strength(body.password)
     existing = db.query(models.DBClient).filter(models.DBClient.email == body.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -2425,6 +2422,252 @@ def my_login_history(request: Request, limit: int = 50, db: Session = Depends(ge
         "ip_address": l.ip_address, "device_info": l.device_info,
         "status": l.status, "created_at": l.created_at,
     } for l in logs]
+
+# ============================================================================
+# PASSWORD RESET - the way back in for a locked-out account owner
+# ============================================================================
+
+RESET_TOKEN_TTL_MINUTES = 60
+
+
+def validate_password_strength(password: str):
+    """One rule, shared by registering and resetting, so the two cannot drift."""
+    if len(password or "") < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least one uppercase letter and one number",
+        )
+
+
+def hash_reset_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode()).hexdigest()
+
+
+def find_valid_reset(db, token: str):
+    """The reset a token refers to, or None if it is unknown, spent or expired."""
+    if not token:
+        return None
+    row = db.query(models.DBPasswordReset).filter(
+        models.DBPasswordReset.token_hash == hash_reset_token(token)
+    ).first()
+    if not row or row.used_at:
+        return None
+    try:
+        expires = datetime.strptime(row.expires_at, "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+    if expires < datetime.now():
+        return None
+    return row
+
+
+def issue_reset_token(db, user_type, subject_id, ip=""):
+    """Start a new link and spend any earlier one, so a forwarded old email
+    stops working the moment a fresh link is asked for."""
+    q = db.query(models.DBPasswordReset).filter(
+        models.DBPasswordReset.user_type == user_type,
+        models.DBPasswordReset.used_at == "",
+    )
+    q = (q.filter(models.DBPasswordReset.client_id == subject_id) if user_type == "client"
+         else q.filter(models.DBPasswordReset.employee_id == subject_id))
+    q.update({"used_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+             synchronize_session=False)
+
+    token = secrets.token_urlsafe(32)
+    row = models.DBPasswordReset(
+        user_type=user_type,
+        token_hash=hash_reset_token(token),
+        expires_at=(datetime.now() + timedelta(minutes=RESET_TOKEN_TTL_MINUTES)
+                    ).strftime("%Y-%m-%d %H:%M:%S"),
+        requested_ip=ip,
+    )
+    if user_type == "client":
+        row.client_id = subject_id
+    else:
+        row.employee_id = subject_id
+    db.add(row)
+    return token
+
+
+def reset_email_bodies(link, who, minutes):
+    """The same wording for both, so there is one thing to keep right."""
+    text_body = (
+        f"Hello,\n\nSomeone asked to reset the password for {who} on aniprotech.\n\n"
+        f"Open this link to choose a new one:\n{link}\n\n"
+        f"The link works once and expires in {minutes} minutes.\n"
+        "If this was not you, ignore this email - your password has not changed.\n"
+    )
+    html_body = f"""
+    <!DOCTYPE html>
+    <html><body style="font-family:Arial,Helvetica,sans-serif;background:#f1f5f9;margin:0;padding:0;">
+      <div style="max-width:520px;margin:0 auto;padding:40px 20px;">
+        <div style="background:#fff;border-radius:12px;overflow:hidden;">
+          <div style="background:#0f172a;padding:32px;text-align:center;">
+            <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;">aniprotech</div>
+            <div style="font-size:22px;font-weight:800;color:#fff;margin-top:6px;">Reset your password</div>
+          </div>
+          <div style="padding:28px;">
+            <p style="font-size:15px;margin:0 0 18px;">
+              Someone asked to reset the password for <strong>{esc(who)}</strong>.
+            </p>
+            <p style="margin:0 0 24px;">
+              <a href="{esc(link)}" style="display:inline-block;background:#0f172a;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;">Choose a new password</a>
+            </p>
+            <p style="font-size:13px;color:#64748b;margin:0 0 8px;">
+              The link works once and expires in {minutes} minutes.
+            </p>
+            <p style="font-size:13px;color:#64748b;margin:0;">
+              If this was not you, ignore this email. Your password has not changed.
+            </p>
+          </div>
+        </div>
+      </div>
+    </body></html>
+    """
+    return text_body, html_body
+
+
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+class ResetPasswordIn(BaseModel):
+    token: str
+    password: str
+
+
+@app.post("/api/client/forgot-password")
+def forgot_password(body: ForgotPasswordIn, background_tasks: BackgroundTasks,
+                    request: Request, db: Session = Depends(get_db)):
+    """Send a reset link.
+
+    The reply is the same whether or not the address has an account. Saying
+    "no such account" would turn this into a way to find out who banks here.
+    """
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"forgot:{ip}", max_requests=5, window=300):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+    generic = {"message": "If that email has an account, a reset link is on its way."}
+    email = (body.email or "").strip().lower()
+    if not email:
+        return generic
+
+    client = db.query(models.DBClient).filter(
+        sqlfunc.lower(models.DBClient.email) == email).first()
+    if not client or not client.is_active:
+        return generic
+
+    token = issue_reset_token(db, "client", client.id, ip)
+    log_login(db, client.id, client.email, "client", "password_reset_requested",
+              request, "requested")
+    db.commit()
+
+    base = (os.getenv("APP_BASE_URL") or str(request.base_url)).rstrip("/")
+    link = f"{base}/reset-password.html?token={token}"
+    company = client.company_name or "your account"
+    from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+
+    text_body, html_body = reset_email_bodies(link, company, RESET_TOKEN_TTL_MINUTES)
+
+    background_tasks.add_task(
+        send_email_background, client.email, "Reset your aniprotech password",
+        text_body, f"aniprotech <{from_email}>", html_body, None, "", "",
+        client_id=client.id,
+    )
+    return generic
+
+
+@app.get("/api/client/reset-password")
+def check_reset_token(token: str = "", db: Session = Depends(get_db)):
+    """So the page can say the link is dead before someone types a new password."""
+    return {"valid": find_valid_reset(db, token) is not None}
+
+
+@app.post("/api/client/reset-password")
+def reset_password(body: ResetPasswordIn, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"reset:{ip}", max_requests=10, window=300):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+    row = find_valid_reset(db, body.token)
+    if not row:
+        raise HTTPException(status_code=400, detail="That reset link is invalid or has expired")
+    validate_password_strength(body.password)
+
+    if row.user_type == "employee":
+        subject = db.query(models.DBEmployee).filter(
+            models.DBEmployee.id == row.employee_id).first()
+        if not subject or subject.status == "terminated":
+            raise HTTPException(status_code=400,
+                                detail="That reset link is invalid or has expired")
+        subject.password_hash = models.hash_password(body.password)
+        client_id, who = subject.client_id, subject.email
+    else:
+        subject = db.query(models.DBClient).filter(
+            models.DBClient.id == row.client_id).first()
+        if not subject:
+            raise HTTPException(status_code=400,
+                                detail="That reset link is invalid or has expired")
+        subject.password_hash = hash_password(body.password)
+        client_id, who = subject.id, subject.email
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    row.used_at = now
+    # Spend every other outstanding link for the same account as well.
+    spent = db.query(models.DBPasswordReset).filter(
+        models.DBPasswordReset.user_type == row.user_type,
+        models.DBPasswordReset.used_at == "",
+    )
+    spent = (spent.filter(models.DBPasswordReset.client_id == row.client_id)
+             if row.user_type == "client"
+             else spent.filter(models.DBPasswordReset.employee_id == row.employee_id))
+    spent.update({"used_at": now}, synchronize_session=False)
+
+    log_login(db, client_id, who, row.user_type, "password_reset", request, "success")
+    log_audit(db, client_id, "password_reset", row.user_type,
+              row.employee_id or row.client_id, who, "", request)
+    db.commit()
+    return {"message": "Password updated. You can sign in now."}
+
+
+@app.post("/api/employee/forgot-password")
+def employee_forgot_password(body: ForgotPasswordIn, background_tasks: BackgroundTasks,
+                             request: Request, db: Session = Depends(get_db)):
+    """Staff sign in with a password, so they are the ones who get locked out.
+    Until now the only way back was to ask HR to set a new one by hand."""
+    ip = request.client.host if request.client else "unknown"
+    if rate_limiter.is_rate_limited(f"emp_forgot:{ip}", max_requests=5, window=300):
+        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+
+    generic = {"message": "If that email has an account, a reset link is on its way."}
+    email = (body.email or "").strip().lower()
+    if not email:
+        return generic
+
+    emp = db.query(models.DBEmployee).filter(models.DBEmployee.email.ilike(email)).first()
+    # Someone with no password set has never signed in; there is nothing to reset.
+    if not emp or not emp.password_hash or emp.status == "terminated":
+        return generic
+
+    token = issue_reset_token(db, "employee", emp.id, ip)
+    db.commit()
+
+    base = (os.getenv("APP_BASE_URL") or str(request.base_url)).rstrip("/")
+    link = f"{base}/reset-password.html?token={token}&portal=employee"
+    who = f"{emp.first_name} {emp.last_name}".strip() or emp.email
+    text_body, html_body = reset_email_bodies(link, who, RESET_TOKEN_TTL_MINUTES)
+    from_email = os.getenv("FROM_EMAIL", "hello@keyroutes.co")
+
+    background_tasks.add_task(
+        send_email_background, emp.email, "Reset your aniprotech password",
+        text_body, f"aniprotech <{from_email}>", html_body, None, "", "",
+        client_id=emp.client_id,
+    )
+    return generic
+
 
 # ============================================================================
 # ONBOARDING PIPELINE - hiring through to a working employee

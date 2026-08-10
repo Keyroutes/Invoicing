@@ -30,7 +30,7 @@
     .shimmer { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent); animation: shimmer 2s infinite; }
     @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=29">
+    <link rel="stylesheet" href="mobile.css?v=30">
 </head>
 <body class="gradient-bg min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
   <div class="float-particle w-72 h-72 -top-20 -left-20" style="animation-delay:0s;"></div>
@@ -83,6 +83,25 @@
           <span id="btnSpinner" class="hidden"><svg class="animate-spin h-5 w-5 mx-auto text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>
         </button>
       </form>
+
+      <!-- Staff sign in with a password here, so this is where lockouts happen. -->
+      <div class="text-center mt-5">
+        <button type="button" id="forgotLink" class="text-sm text-white/40 hover:text-white/70 transition-colors">
+          Forgot your password?
+        </button>
+      </div>
+
+      <div id="forgotBox" class="hidden mt-4 pt-4 border-t border-white/10">
+        <label class="block text-sm text-white/70 mb-2">Your work email</label>
+        <input type="email" id="forgotEmail" autocomplete="email"
+               class="input-glow w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 outline-none transition-all"
+               placeholder="you@company.com">
+        <button type="button" id="forgotSend"
+                class="w-full mt-3 py-2.5 px-4 bg-white/10 hover:bg-white/15 text-white text-sm font-semibold rounded-xl transition-colors">
+          Email me a reset link
+        </button>
+        <p id="forgotMsg" class="hidden mt-3 text-sm text-center text-white/60"></p>
+      </div>
     </div>
 
     <div class="text-center mt-6">
@@ -148,6 +167,41 @@
         btn.disabled = false; txt.classList.remove('hidden'); spinner.classList.add('hidden');
       }
     }
+
+    // --- forgotten password -------------------------------------------------
+    document.getElementById('forgotLink').addEventListener('click', function () {
+      var box = document.getElementById('forgotBox');
+      box.classList.toggle('hidden');
+      if (!box.classList.contains('hidden')) {
+        var email = document.getElementById('email');
+        document.getElementById('forgotEmail').value = email ? email.value : '';
+        document.getElementById('forgotEmail').focus();
+      }
+    });
+
+    document.getElementById('forgotSend').addEventListener('click', async function () {
+      var btn = this;
+      var msg = document.getElementById('forgotMsg');
+      var address = document.getElementById('forgotEmail').value.trim();
+      if (!address) { msg.textContent = 'Enter your work email first.'; msg.classList.remove('hidden'); return; }
+      btn.disabled = true;
+      try {
+        var res = await fetch('/api/employee/forgot-password', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: address })
+        });
+        var data = await res.json().catch(function () { return {}; });
+        // The server answers the same either way, so this never reveals
+        // whether the address has an account.
+        msg.textContent = res.ok
+          ? (data.message || 'If that email has an account, a reset link is on its way.')
+          : (data.detail || 'Try again in a moment.');
+      } catch (e) {
+        msg.textContent = 'Something went wrong. Try again.';
+      }
+      msg.classList.remove('hidden');
+      btn.disabled = false;
+    });
   </script>
 </body>
 </html>
