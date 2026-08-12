@@ -1188,11 +1188,18 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
         d = now - timedelta(days=30 * i)
         months.append(d.strftime("%b %Y"))
 
+    # Charting several currencies on one axis says nothing, so the chart is
+    # the base currency and the label says so.
+    base_currency = (client.currency or "GBP").upper()
+
+    def in_base(inv):
+        return (inv.currency or base_currency).upper() == base_currency
+
     money_in = [0.0] * 6
     money_out = [0.0] * 6
 
     for inv in all_invoices:
-        if not inv.issue_date:
+        if not inv.issue_date or not in_base(inv):
             continue
         try:
             inv_date = datetime.strptime(inv.issue_date, "%Y-%m-%d")
@@ -1210,6 +1217,14 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
 
     short_months = [datetime.strptime(m, "%b %Y").strftime("%b") for m in months]
 
+    def split(rows, amount):
+        return totals_by_currency(
+            [{"currency": i.currency, "total": amount(i)} for i in rows],
+            fallback=base_currency)
+
+    open_invoices = [i for i in all_invoices if i.status in OPEN_INVOICE_STATUSES]
+    issued = [i for i in all_invoices if i.status != "Draft"]
+
     return {
         "summary": {
             "total_invoiced": round(total_invoiced, 2),
@@ -1220,12 +1235,24 @@ def get_dashboard_summary(request: Request, db: Session = Depends(get_db)):
             "draft_count": draft_count,
             "overdue_count": len(overdue),
             "overdue_amount": round(overdue_amount, 2),
-            "total_count": len(all_invoices)
+            "total_count": len(all_invoices),
+            # The figures the cards actually show. A single total across
+            # currencies would be a number nobody can act on.
+            "by_currency": {
+                "total_invoiced": split(issued, lambda i: (i.paid or 0) + (i.due or 0)),
+                "total_revenue": split(issued, lambda i: i.paid or 0),
+                "invoices_owed": split(open_invoices, lambda i: i.due or 0),
+                "overdue_amount": split(overdue, lambda i: i.due or 0),
+            },
         },
+        "base_currency": base_currency,
+        "currencies_used": sorted({(i.currency or base_currency).upper()
+                                   for i in all_invoices}),
         "cash_flow": {
             "money_in": [round(x, 2) for x in money_in],
             "money_out": [round(x, 2) for x in money_out],
-            "months": short_months
+            "months": short_months,
+            "currency": base_currency,
         }
     }
 
@@ -3196,6 +3223,21 @@ def employee_forgot_password(body: ForgotPasswordIn, background_tasks: Backgroun
 # SALES PIPELINE - quotes and invoices as one flow instead of two lists
 # ============================================================================
 
+def totals_by_currency(cards, field="total", fallback="GBP"):
+    """Sum per currency and return the biggest first.
+
+    Deliberately not one number: adding GBP to INR needs an exchange rate, and
+    guessing one would put a made-up figure in front of somebody making
+    decisions with it.
+    """
+    buckets = {}
+    for c in cards:
+        code = (c.get("currency") or fallback or "").upper() or fallback
+        buckets[code] = buckets.get(code, 0) + (c.get(field) or 0)
+    return [{"currency": code, "value": money(v)}
+            for code, v in sorted(buckets.items(), key=lambda kv: -abs(kv[1]))]
+
+
 SALES_STAGES = [
     ("drafted",  "Drafted",   "Not sent to anyone yet"),
     ("sent",     "Sent",      "Waiting on the customer"),
@@ -3280,18 +3322,27 @@ def sales_pipeline(request: Request, db: Session = Depends(get_db)):
         # Overdue first, then biggest, because that is the order you act in.
         rows.sort(key=lambda c: (not c.get("is_overdue"), -(c.get("total") or 0)))
 
+    base = client.currency or "GBP"
+    open_stages = ("drafted", "sent", "accepted")
+    open_cards = [c for k in open_stages for c in buckets[k]]
+
     return {
         "stages": [{
             "key": key, "label": label, "hint": hint,
             "count": len(buckets[key]),
-            "value": money(sum(c.get("total") or 0 for c in buckets[key])),
+            "totals": totals_by_currency(buckets[key], fallback=base),
+            # The board can be long; the columns say how many are not shown.
             "cards": buckets[key][:40],
+            "shown": min(len(buckets[key]), 40),
         } for key, label, hint in SALES_STAGES],
         "lost": {"count": len(lost),
-                 "value": money(sum(c.get("total") or 0 for c in lost))},
-        "outstanding": money(sum(
-            c.get("outstanding") or 0 for c in buckets["invoiced"])),
+                 "totals": totals_by_currency(lost, fallback=base)},
+        "pipeline": {"count": len(open_cards),
+                     "totals": totals_by_currency(open_cards, fallback=base)},
+        "outstanding": totals_by_currency(
+            buckets["invoiced"], field="outstanding", fallback=base),
         "overdue_count": sum(1 for c in buckets["invoiced"] if c.get("is_overdue")),
+        "base_currency": base,
     }
 
 
@@ -10372,7 +10423,22 @@ def upload_document(emp_id: int, request: Request, body: dict = None, db: Sessio
 # AI ENDPOINTS (Groq / Llama 3.3)
 # ============================================================================
 
-from llm import llm_chat, llm_json
+from llm import llm_chat, llm_json, llm_configured, llm_error_message
+
+
+@app.get("/api/ai/status")
+def ai_status(request: Request, db: Session = Depends(get_db)):
+    """Whether the AI is usable at all.
+
+    The UI asks once and hides its AI buttons if not, rather than offering
+    something that fails the moment anyone presses it.
+    """
+    get_client_user(request, db)
+    configured = llm_configured()
+    return {
+        "configured": configured,
+        "message": "" if configured else llm_error_message(),
+    }
 
 
 @app.post("/api/ai/screen-resume")
@@ -10890,6 +10956,17 @@ def build_business_context(db, client):
     payslips = db.query(models.DBPayslip).filter(models.DBPayslip.client_id == client.id).all()
     unpaid_payslips = [p for p in payslips if p.status != "Paid"]
 
+    # Added when quotes and recurring billing were built. Without these the
+    # assistant answered questions about them by denying they existed.
+    quotes = db.query(models.DBQuote).filter(models.DBQuote.client_id == client.id).all()
+    open_quotes = [q for q in quotes if quote_display_status(q) in ("Draft", "Sent")]
+    accepted_quotes = [q for q in quotes if quote_display_status(q) == "Accepted"]
+    quote_value = sum(compute_invoice_totals(q.line_items, q.tax_type)[2] for q in open_quotes)
+    recurring = db.query(models.DBRecurringInvoice).filter(
+        models.DBRecurringInvoice.client_id == client.id,
+        models.DBRecurringInvoice.is_active == True,      # noqa: E712
+    ).all()
+
     open_jobs = db.query(models.DBJobRequisition).filter(
         models.DBJobRequisition.client_id == client.id,
         models.DBJobRequisition.status == "open",
@@ -10925,6 +11002,11 @@ def build_business_context(db, client):
                      f"{invoice_overdue_days(i, today)} days overdue, due {i.due_date}")
 
     lines += [
+        "",
+        "QUOTES AND RECURRING BILLING",
+        f"- Quotes: {len(quotes)} total, {len(open_quotes)} still open "
+        f"({sym}{quote_value:.2f}), {len(accepted_quotes)} accepted but not yet invoiced",
+        f"- Recurring invoices running: {len(recurring)}",
         "",
         "PEOPLE",
         f"- Employees: {len(employees)} ({len(active)} active, {len(onboarding)} onboarding)",

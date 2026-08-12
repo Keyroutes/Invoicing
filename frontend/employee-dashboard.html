@@ -45,7 +45,7 @@
     .notification-badge { animation: notifPulse 2s infinite; }
     @keyframes notifPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
-    <link rel="stylesheet" href="mobile.css?v=31">
+    <link rel="stylesheet" href="mobile.css?v=32">
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -540,7 +540,7 @@
           var due = r.due_date
             ? '<span class="' + (r.is_overdue ? 'text-red-500 font-medium' : 'text-gray-400') + '">Due ' + esc(r.due_date) + '</span>'
             : '';
-          return '<div class="p-4 flex items-start gap-3 flex-wrap">' +
+          return '<div class="p-4 flex items-start gap-3 flex-wrap" id="req-row-' + r.id + '">' +
             '<div class="flex-1 min-w-[180px]">' +
               '<div class="text-sm font-semibold text-gray-900">' + esc(r.name) +
                 (r.is_mandatory ? '<span class="text-red-500 ml-1">*</span>' : '') + '</div>' +
@@ -554,10 +554,11 @@
                   : '') + '</div>' +
               (r.status === 'rejected' && r.review_note
                 ? '<div class="text-xs text-red-500 mt-1">HR: ' + esc(r.review_note) + '</div>' : '') +
+              '<div class="text-xs mt-1 hidden" id="req-status-' + r.id + '"></div>' +
             '</div>' +
             '<span class="text-xs font-medium px-2.5 py-1 rounded-full ' + st[0] + '">' + st[1] + '</span>' +
             (canUpload
-              ? '<button onclick="pickDocumentFor(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg min-h-[36px]">' +
+              ? '<button id="req-btn-' + r.id + '" onclick="pickDocumentFor(' + r.id + ')" class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 hover:bg-brand-600 disabled:opacity-50 rounded-lg min-h-[36px]">' +
                 (r.status === 'pending' ? 'Upload' : 'Replace') + '</button>'
               : '') +
           '</div>';
@@ -584,6 +585,7 @@
     function pickDocumentFor(requestId) {
       _pendingReqId = requestId;
       _pendingExpiry = '';
+      setRequestStatus(requestId, '');
       var input = document.getElementById('reqFileInput');
       input.value = '';        // so re-picking the same file still fires change
       input.click();
@@ -629,12 +631,15 @@
       if (!file || !_pendingReqId) return;
       var maxBytes = (_reqLimits.max_mb || 5) * 1024 * 1024;
       if (file.size > maxBytes) {
-        alert('"' + file.name + '" is larger than ' + (_reqLimits.max_mb || 5) + 'MB.');
+        setRequestStatus(_pendingReqId,
+          '"' + file.name + '" is ' + (file.size / 1048576).toFixed(1) + 'MB. The limit is ' +
+          (_reqLimits.max_mb || 5) + 'MB.', 'error');
         return;
       }
       var ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
       if ((_reqLimits.allowed || []).length && (_reqLimits.allowed || []).indexOf(ext) < 0) {
-        alert('"' + file.name + '" is not an accepted file type.');
+        setRequestStatus(_pendingReqId,
+          ext + ' files are not accepted. Allowed: ' + (_reqLimits.allowed || []).join(', '), 'error');
         return;
       }
 
@@ -653,6 +658,27 @@
       uploadPendingFile();
     }
 
+    // Messages belong on the row the file went to, not in a modal dialog that
+    // does not say which document it is talking about.
+    function setRequestStatus(reqId, message, tone) {
+      var el = document.getElementById('req-status-' + reqId);
+      if (!el) return;
+      if (!message) { el.classList.add('hidden'); el.textContent = ''; return; }
+      el.textContent = message;
+      el.className = 'text-xs mt-1 ' + ({
+        error: 'text-red-500',
+        ok: 'text-emerald-600',
+        busy: 'text-brand-600'
+      }[tone] || 'text-gray-400');
+    }
+
+    function setRequestBusy(reqId, busy) {
+      var btn = document.getElementById('req-btn-' + reqId);
+      if (!btn) return;
+      btn.disabled = busy;
+      btn.textContent = busy ? 'Uploading...' : btn.dataset.label || btn.textContent;
+    }
+
     function uploadPendingFile() {
       var file = _pendingFile;
       var reqId = _pendingReqId;
@@ -662,7 +688,20 @@
       _pendingReqId = null;
       _pendingExpiry = '';
 
+      var btn = document.getElementById('req-btn-' + reqId);
+      if (btn && !btn.dataset.label) btn.dataset.label = btn.textContent;
+      setRequestBusy(reqId, true);
+      setRequestStatus(reqId, 'Uploading ' + file.name + '...', 'busy');
+
       var reader = new FileReader();
+
+      // A file the browser cannot read used to do nothing at all - no error,
+      // no spinner stopping, nothing.
+      reader.onerror = function () {
+        setRequestBusy(reqId, false);
+        setRequestStatus(reqId, 'Could not read that file. Try another copy of it.', 'error');
+      };
+
       reader.onload = async function (e) {
         try {
           var res = await fetch('/api/employee/document-requests/' + reqId + '/upload', {
@@ -674,14 +713,19 @@
               expires_on: expiresOn
             })
           });
-          var data = await res.json();
+          var data = await res.json().catch(function () { return {}; });
           if (!res.ok) throw new Error(data.detail || 'Upload failed');
+
+          setRequestStatus(reqId, 'Uploaded. HR will review it.', 'ok');
           // Refresh both lists so the new file shows in each straight away.
-          loadDocumentRequests();
+          await loadDocumentRequests();
           loadDocuments();
           loadNotifications();
         } catch (err) {
-          alert(err.message);
+          setRequestBusy(reqId, false);
+          // The server says exactly what was wrong - too big, wrong type, an
+          // expiry date already past - so show that rather than a generic line.
+          setRequestStatus(reqId, err.message, 'error');
         }
       };
       reader.readAsDataURL(file);

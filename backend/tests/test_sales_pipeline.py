@@ -48,6 +48,16 @@ def make_invoice(tenant, status="Awaiting Payment", price=400.0, due_in=14):
     return res.json()
 
 
+
+def amount(totals, currency="GBP"):
+    """Money is reported per currency now, because adding GBP to INR without a
+    rate produces a number nobody can act on."""
+    for t in totals or []:
+        if t["currency"] == currency:
+            return t["value"]
+    return 0
+
+
 def board(tenant):
     return tenant.get("/api/sales/pipeline").json()
 
@@ -69,8 +79,8 @@ def test_the_board_has_the_money_stages_in_order(tenant):
 
 def test_an_empty_board_is_all_zeros(tenant):
     b = board(tenant)
-    assert b["outstanding"] == 0
-    assert all(s["count"] == 0 and s["value"] == 0 for s in b["stages"])
+    assert b["outstanding"] == []
+    assert all(s["count"] == 0 and s["totals"] == [] for s in b["stages"])
 
 
 # --- a quote moving through ---------------------------------------------------
@@ -114,7 +124,7 @@ def test_a_declined_quote_leaves_the_board_and_counts_as_lost(tenant):
     b = board(tenant)
     assert where(b, q["number"])[0] is None
     assert b["lost"]["count"] == 1
-    assert b["lost"]["value"] == 1000.0
+    assert amount(b["lost"]["totals"]) == 1000.0
 
 
 def test_an_expired_quote_counts_as_lost(tenant):
@@ -145,7 +155,7 @@ def test_outstanding_counts_only_what_is_still_owed(tenant):
     tenant.post(f"/api/invoices/{paid['number']}/mark-paid")
 
     b = board(tenant)
-    assert b["outstanding"] == 400.0
+    assert amount(b["outstanding"]) == 400.0
 
 
 def test_an_overdue_invoice_is_flagged(tenant):
@@ -174,8 +184,8 @@ def test_stage_values_add_up(tenant):
 
     b = board(tenant)
     by_key = {s["key"]: s for s in b["stages"]}
-    assert by_key["drafted"]["value"] == 1000.0
-    assert by_key["invoiced"]["value"] == 400.0
+    assert amount(by_key["drafted"]["totals"]) == 1000.0
+    assert amount(by_key["invoiced"]["totals"]) == 400.0
 
 
 # --- isolation ----------------------------------------------------------------
@@ -191,8 +201,48 @@ def test_the_board_is_per_tenant(client, tenant):
 
     b = client.get("/api/sales/pipeline").json()
     assert all(s["count"] == 0 for s in b["stages"])
-    assert b["outstanding"] == 0
+    assert b["outstanding"] == []
 
 
 def test_the_board_needs_a_session(client):
     assert client.get("/api/sales/pipeline").status_code == 401
+
+
+def test_currencies_are_totalled_separately(tenant):
+    """The bug this replaced: pounds and rupees added into one figure, printed
+    with a single symbol. In production that read as forty-four trillion."""
+    tenant.post("/api/invoices", json={
+        "contact": "UK", "email": "uk@example.com",
+        "issue_date": "2026-01-01", "due_date": "2026-01-31",
+        "status": "Awaiting Payment", "tax_type": "none", "currency": "GBP",
+        "line_items": [{"description": "w", "qty": 1, "price": 100.0, "tax_rate": "No Tax"}],
+    })
+    tenant.post("/api/invoices", json={
+        "contact": "IN", "email": "in@example.com",
+        "issue_date": "2026-01-01", "due_date": "2026-01-31",
+        "status": "Awaiting Payment", "tax_type": "none", "currency": "INR",
+        "line_items": [{"description": "w", "qty": 1, "price": 5000.0, "tax_rate": "No Tax"}],
+    })
+
+    b = board(tenant)
+    invoiced = next(s for s in b["stages"] if s["key"] == "invoiced")
+    by = {t["currency"]: t["value"] for t in invoiced["totals"]}
+    assert by == {"GBP": 100.0, "INR": 5000.0}
+    # Never one merged number.
+    assert len(invoiced["totals"]) == 2
+    assert {t["currency"]: t["value"] for t in b["outstanding"]} == {"GBP": 100.0, "INR": 5000.0}
+
+
+def test_a_long_column_is_capped_with_a_count(tenant):
+    """A column of hundreds used to stretch the page past a screen of nothing."""
+    for i in range(45):
+        tenant.post("/api/invoices", json={
+            "contact": f"C{i}", "email": "c@example.com",
+            "issue_date": "2026-01-01", "due_date": "2026-01-31",
+            "status": "Awaiting Payment", "tax_type": "none",
+            "line_items": [{"description": "w", "qty": 1, "price": 10.0, "tax_rate": "No Tax"}],
+        })
+    invoiced = next(s for s in board(tenant)["stages"] if s["key"] == "invoiced")
+    assert invoiced["count"] == 45
+    assert invoiced["shown"] == 40
+    assert len(invoiced["cards"]) == 40

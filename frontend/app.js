@@ -333,6 +333,7 @@ function showView(viewId) {
         'payroll-view': 'nav-payroll',
         'payslip-detail-view': 'nav-payroll',
         'orgchart-view': 'nav-org',
+        'wallet-view': 'nav-wallet',
         'settings-view': 'nav-settings'
     };
     var navId = navMap[viewId];
@@ -488,12 +489,29 @@ function setText(id, value) {
     if (el) el.textContent = value;
 }
 
+// A headline figure, split by currency when the tenant bills in more than one.
+// Adding pounds to rupees produces a number nobody can act on.
+function setMoney(id, totals, fallbackAmount, baseCurrency) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (!totals || !totals.length) {
+        el.textContent = formatCurrency(fallbackAmount || 0, baseCurrency);
+        return;
+    }
+    el.innerHTML = totals.map(function (t) {
+        return '<div>' + esc(formatCurrency(t.value, t.currency)) + '</div>';
+    }).join('');
+    el.classList.add('stat-money');
+}
+
 function renderDashboard(data) {
     var s = data.summary || {};
-    setText('dash-total-invoiced', formatCurrency(s.total_invoiced));
-    setText('dash-total-revenue', formatCurrency(s.total_revenue));
-    setText('dash-invoices-owed', formatCurrency(s.invoices_owed));
-    setText('dash-overdue-amount', formatCurrency(s.overdue_amount || 0));
+    var by = s.by_currency || {};
+    var base = data.base_currency;
+    setMoney('dash-total-invoiced', by.total_invoiced, s.total_invoiced, base);
+    setMoney('dash-total-revenue', by.total_revenue, s.total_revenue, base);
+    setMoney('dash-invoices-owed', by.invoices_owed, s.invoices_owed, base);
+    setMoney('dash-overdue-amount', by.overdue_amount, s.overdue_amount, base);
     setText('dash-overdue-count', s.overdue_count || 0);
     setText('dash-total-count', s.total_count || 0);
     if (typeof renderInvoiceChart === 'function') {
@@ -4488,6 +4506,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // The first row is built before this resolves, so loadTaxRates() refreshes
     // the pickers once the tenant's own list arrives.
     if (typeof loadTaxRates === 'function') loadTaxRates();
+    if (typeof loadAiStatus === 'function') loadAiStatus();
 
     Object.keys(DOC_FORM_SCOPES).forEach(function(scope) {
         var body = document.getElementById(DOC_FORM_SCOPES[scope].body);
@@ -5620,7 +5639,7 @@ async function aiGenerateOnboarding() {
         } else {
             showToast('AI could not generate checklist', 'error');
         }
-    } catch(e) { showToast('AI unavailable', 'error'); }
+    } catch(e) { showToast(aiUnavailableText(), 'error'); }
     if (btn) { btn.textContent = 'AI Generate Checklist'; btn.disabled = false; }
 }
 window.aiGenerateOnboarding = aiGenerateOnboarding;
@@ -5649,7 +5668,7 @@ async function aiPersonalizeEmail(invoiceNumber, clientName, total, dueDate) {
             el.style.display = 'block';
         }
     } catch(e) {
-        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">AI unavailable.</div>';
+        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">' + esc(aiUnavailableText()) + '</div>';
     }
 }
 window.aiPersonalizeEmail = aiPersonalizeEmail;
@@ -5689,7 +5708,7 @@ async function aiGenerateFollowup(invoiceNumber, clientName, total, daysOverdue)
             el.style.display = 'block';
         }
     } catch(e) {
-        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">AI unavailable.</div>';
+        if (el) el.innerHTML = '<div style="padding:12px;color:var(--danger-color);">' + esc(aiUnavailableText()) + '</div>';
     }
 }
 window.aiGenerateFollowup = aiGenerateFollowup;
@@ -8706,6 +8725,36 @@ window.finishOnboarding = finishOnboarding;
 // documents themselves, so nothing is dragged: send a quote, accept it,
 // convert it, take the payment, and the card moves because the document did.
 
+// Whether the AI is set up at all, asked once. Buttons that cannot possibly
+// work should say so rather than failing when pressed.
+var _aiStatus = null;
+
+async function loadAiStatus() {
+    try {
+        var res = await fetch('/api/ai/status', { credentials: 'same-origin' });
+        if (res.ok) _aiStatus = await res.json();
+    } catch (e) { /* leave unknown; features still try and report properly */ }
+    applyAiStatus();
+    return _aiStatus;
+}
+window.loadAiStatus = loadAiStatus;
+
+function applyAiStatus() {
+    if (!_aiStatus || _aiStatus.configured) return;
+    document.querySelectorAll('[data-ai]').forEach(function (el) {
+        el.disabled = true;
+        el.title = _aiStatus.message || 'AI is not set up yet.';
+    });
+}
+
+// One message for every AI failure, so "not configured" does not read the same
+// as "the service is busy".
+function aiUnavailableText() {
+    if (_aiStatus && !_aiStatus.configured) return _aiStatus.message || 'AI is not set up yet.';
+    return 'The AI is unavailable right now. Try again in a moment.';
+}
+window.aiUnavailableText = aiUnavailableText;
+
 async function loadSalesPipeline() {
     var host = document.getElementById('sales-pipeline-board');
     if (!host) return;
@@ -8717,40 +8766,56 @@ async function loadSalesPipeline() {
 }
 window.loadSalesPipeline = loadSalesPipeline;
 
+// Money in more than one currency cannot be added up without a rate, and this
+// app has no rates. So each currency is shown on its own line rather than
+// summed into a number that means nothing.
+function moneyLines(totals, emptyText) {
+    if (!totals || !totals.length) return esc(emptyText || '0');
+    return totals.map(function (t) {
+        return '<div>' + esc(formatCurrency(t.value, t.currency)) + '</div>';
+    }).join('');
+}
+
 function renderSalesPipeline(data) {
     var host = document.getElementById('sales-pipeline-board');
     if (!host) return;
 
     var summary = document.getElementById('sales-pipeline-summary');
     if (summary) {
-        var pipelineValue = (data.stages || [])
-            .filter(function (s) { return ['drafted', 'sent', 'accepted'].indexOf(s.key) !== -1; })
-            .reduce(function (t, s) { return t + (s.value || 0); }, 0);
+        var zero = formatCurrency(0, data.base_currency);
         summary.innerHTML =
-            statTile('In the pipeline', formatCurrency(pipelineValue), 'quotes not yet invoiced') +
-            statTile('Outstanding', formatCurrency(data.outstanding || 0), 'invoiced, not paid') +
+            statTile('In the pipeline', moneyLines(data.pipeline && data.pipeline.totals, zero),
+                     'quotes not yet invoiced') +
+            statTile('Outstanding', moneyLines(data.outstanding, zero), 'invoiced, not paid') +
             statTile('Overdue', String(data.overdue_count || 0),
                      (data.overdue_count === 1 ? 'invoice' : 'invoices') + ' past due') +
-            statTile('Lost', formatCurrency((data.lost && data.lost.value) || 0),
+            statTile('Lost', moneyLines(data.lost && data.lost.totals, zero),
                      'declined or expired');
     }
 
     host.innerHTML = (data.stages || []).map(function (stage) {
         var cards = (stage.cards || []).map(salesCardHtml).join('') ||
             '<div class="onb-empty">Nothing here</div>';
+        var hidden = (stage.count || 0) - (stage.shown || 0);
         return '<div class="onb-col">' +
             '<div class="onb-col-head"><strong>' + esc(stage.label) + '</strong>' +
                 '<span class="onb-col-count">' + stage.count + '</span></div>' +
-            '<div class="onb-col-hint">' + formatCurrency(stage.value || 0) + '</div>' +
-            cards +
+            '<div class="onb-col-hint">' + moneyLines(stage.totals, formatCurrency(0, data.base_currency)) + '</div>' +
+            '<div class="onb-col-body">' + cards +
+                (hidden > 0
+                    ? '<div class="onb-empty">and ' + hidden + ' more</div>'
+                    : '') +
+            '</div>' +
         '</div>';
     }).join('');
 }
 
-function statTile(label, value, hint) {
+// `value` is already-escaped markup, because a tile may show one line per
+// currency. Everything that goes into it is escaped at the point it is built.
+function statTile(label, valueHtml, hint) {
     return '<div class="stat-card is-centered" style="cursor:default;">' +
         '<div style="font-size:0.8rem;color:var(--text-secondary);">' + esc(label) + '</div>' +
-        '<div style="font-size:1.4rem;font-weight:700;margin-top:4px;">' + esc(value) + '</div>' +
+        '<div class="stat-money">' + valueHtml + '</div>' +
         '<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">' + esc(hint) + '</div>' +
     '</div>';
 }
